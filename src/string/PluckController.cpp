@@ -3,7 +3,7 @@
 PluckController::PluckController() {
   config = nullptr;
   pcaManager = nullptr;
-  currentDirection = false;  // Commence par direction A (négative)
+  currentDirection = false;  // Start with direction A (negative)
 }
 
 void PluckController::init(StringConfig* cfg, PCA9685Manager* pca) {
@@ -19,7 +19,7 @@ void PluckController::init(StringConfig* cfg, PCA9685Manager* pca) {
   Serial.println("°");
   #endif
 
-  // Initialiser à la position centrale
+  // Initialize to center position
   returnToCenter();
 }
 
@@ -31,22 +31,22 @@ bool PluckController::pluck() {
     return false;
   }
 
-  // Calculer l'angle selon la direction
+  // Calculate angle based on direction
   uint16_t angle;
   if (currentDirection) {
     // Direction B (positive)
     angle = config->pluckAngleCenter + config->pluckAmplitude;
   } else {
-    // Direction A (négative)
+    // Direction A (negative)
     angle = config->pluckAngleCenter - config->pluckAmplitude;
   }
 
-  // Limiter l'angle à 0-180°
+  // Limit angle to 0-180°
   if (angle > 180) {
     angle = 180;
   }
 
-  // Envoyer la commande
+  // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
   ServoMapping& servo = config->pluckServo;
 
@@ -65,7 +65,7 @@ bool PluckController::pluck() {
   Serial.println(servo.pin);
   #endif
 
-  // Alterner pour le prochain grattage
+  // Alternate for next pluck
   currentDirection = !currentDirection;
 
   return true;
@@ -77,11 +77,11 @@ bool PluckController::pluck(uint8_t velocity) {
     return false;
   }
 
-  // Calculer une amplitude dynamique basée sur la vélocité
+  // Calculate dynamic amplitude based on velocity
   // velocity: 0-127 → amplitude: 5-25°
   uint16_t dynamicAmplitude = map(velocity, 0, 127, 5, 25);
 
-  // Calculer l'angle
+  // Calculate angle
   uint16_t angle;
   if (currentDirection) {
     angle = config->pluckAngleCenter + dynamicAmplitude;
@@ -89,11 +89,11 @@ bool PluckController::pluck(uint8_t velocity) {
     angle = config->pluckAngleCenter - dynamicAmplitude;
   }
 
-  // Limiter
+  // Limit
   if (angle > 180) angle = 180;
   if (angle < 0) angle = 0;
 
-  // Envoyer
+  // Send
   uint16_t pwm = pcaManager->angleToPWM(angle);
   ServoMapping& servo = config->pluckServo;
 
@@ -113,7 +113,7 @@ bool PluckController::pluck(uint8_t velocity) {
   currentDirection = !currentDirection;
   return true;
   #else
-  // Si velocity sensitive désactivé, utiliser pluck() normal
+  // If velocity sensitive disabled, use normal pluck()
   return pluck();
   #endif
 }

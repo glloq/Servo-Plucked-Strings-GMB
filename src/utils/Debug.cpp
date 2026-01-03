@@ -4,7 +4,7 @@ void Debug::init() {
   #ifdef DEBUG
   Serial.begin(SERIAL_BAUD);
 
-  // Attendre que le port série soit prêt
+  // Wait for serial port to be ready
   while (!Serial && millis() < 3000) {
     delay(10);
   }
@@ -58,7 +58,7 @@ void Debug::printSystemInfo() {
 
 void Debug::printMemoryInfo() {
   #ifdef DEBUG
-  // Informations mémoire (spécifique à la plateforme)
+  // Memory information (platform-specific)
   #if defined(__AVR__)
   extern int __heap_start, *__brkval;
   int v;
@@ -67,7 +67,7 @@ void Debug::printMemoryInfo() {
   Serial.print(freeRam);
   Serial.println(" bytes");
   #elif defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_SAM)
-  // Pour ARM (Teensy, etc.)
+  // For ARM (Teensy, etc.)
   extern "C" char* sbrk(int incr);
   int freeRam = (int)sbrk(0);
   Serial.print("Heap pointer: ");

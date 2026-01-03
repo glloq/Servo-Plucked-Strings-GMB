@@ -1,13 +1,13 @@
 /**
  * Orchestrion Plucked Strings with Servomotors
  *
- * Contrôle MIDI d'un instrument à cordes pincées utilisant:
- * - Servomoteurs pour les frettes (changement de notes)
- * - Servomoteurs pour le grattage des cordes
- * - Contrôleurs PCA9685 pour piloter les servos via I2C
+ * MIDI control of a plucked string instrument using:
+ * - Servomotors for frets (note changes)
+ * - Servomotors for string plucking
+ * - PCA9685 controllers to drive servos via I2C
  *
- * Architecture modulaire orientée objet
- * Configuration flexible par fichiers de configuration
+ * Modular object-oriented architecture
+ * Flexible configuration via configuration files
  */
 
 #include "config/settings.h"
@@ -16,28 +16,28 @@
 #include "core/InstrumentManager.h"
 #include "midi/MIDIHandler.h"
 
-// Instances globales
+// Global instances
 InstrumentManager instrument;
 MIDIHandler midiHandler;
 
 void setup() {
-  // Initialiser le debug/serial
+  // Initialize debug/serial
   Debug::init();
 
   Debug::log("=== SETUP START ===");
 
-  // Initialiser l'instrument
+  // Initialize the instrument
   if (!instrument.init()) {
     Debug::log("ERROR: Instrument init failed!");
     while (1) {
-      delay(1000);  // Bloquer en cas d'erreur critique
+      delay(1000);  // Block on critical error
     }
   }
 
-  // Initialiser le handler MIDI
+  // Initialize the MIDI handler
   midiHandler.init(&instrument);
 
-  // Test optionnel au démarrage
+  // Optional startup test
   #ifdef STARTUP_TEST
   performStartupTest();
   #endif
@@ -48,13 +48,13 @@ void setup() {
 }
 
 void loop() {
-  // Traiter les messages MIDI
+  // Process MIDI messages
   midiHandler.process();
 
-  // Mise à jour de l'instrument (timeouts, etc.)
+  // Update instrument (timeouts, etc.)
   instrument.update();
 
-  // Commandes série optionnelles (debug)
+  // Optional serial commands (debug)
   #ifdef DEBUG_SERIAL_COMMANDS
   processSerialCommands();
   #endif
@@ -62,8 +62,8 @@ void loop() {
 
 #ifdef STARTUP_TEST
 /**
- * Test de démarrage optionnel
- * Joue une séquence de test sur chaque corde
+ * Optional startup test
+ * Plays a test sequence on each string
  */
 void performStartupTest() {
   Debug::log("=== STARTUP TEST ===");
@@ -71,18 +71,18 @@ void performStartupTest() {
   instrument.enableServoPower();
   delay(100);
 
-  // Tester chaque corde
+  // Test each string
   for (int s = 0; s < NUM_STRINGS; s++) {
     Debug::log("Testing string", s);
 
-    // Jouer la corde à vide
+    // Play the open string
     uint8_t baseNote = stringConfigs[s].baseMidiNote;
     instrument.playNote(baseNote, 80);
     delay(500);
     instrument.stopNote(baseNote);
     delay(300);
 
-    // Jouer la 5ème frette
+    // Play the 5th fret
     if (stringConfigs[s].numFrets >= 5) {
       instrument.playNote(baseNote + 5, 80);
       delay(500);
@@ -98,10 +98,10 @@ void performStartupTest() {
 
 #ifdef DEBUG_SERIAL_COMMANDS
 /**
- * Interface série pour tester sans MIDI
- * Commandes:
- *   p<note>,<vel>  : Play note (ex: p60,80)
- *   s<note>        : Stop note (ex: s60)
+ * Serial interface for testing without MIDI
+ * Commands:
+ *   p<note>,<vel>  : Play note (e.g. p60,80)
+ *   s<note>        : Stop note (e.g. s60)
  *   a              : Stop all notes
  *   i              : Print instrument status
  *   h              : Help

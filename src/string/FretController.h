@@ -6,28 +6,28 @@
 #include "../config/string_configs.h"
 
 /**
- * Contrôle les servomoteurs de frettes pour une corde
- * Gère les positions ouverte (repos) et fermée (activée)
+ * Controls fret servomotors for a string
+ * Manages open (rest) and closed (activated) positions
  */
 class FretController {
 private:
   StringConfig* config;
   PCA9685Manager* pcaManager;
-  int8_t activeFret;            // Frette actuellement activée (-1 = aucune)
-  bool fretStates[MAX_FRETS];   // État de chaque frette
+  int8_t activeFret;            // Currently activated fret (-1 = none)
+  bool fretStates[MAX_FRETS];   // State of each fret
 
 public:
   FretController();
 
-  // Initialisation
+  // Initialization
   void init(StringConfig* cfg, PCA9685Manager* pca);
 
-  // Contrôle
+  // Control
   bool pressFret(uint8_t fretNum);
   bool releaseFret(uint8_t fretNum);
   bool releaseAll();
 
-  // État
+  // State
   int8_t getActiveFret() const { return activeFret; }
   bool isFretPressed(uint8_t fretNum) const;
 };

@@ -21,7 +21,7 @@ void FretController::init(StringConfig* cfg, PCA9685Manager* pca) {
   Serial.println(" frets");
   #endif
 
-  // Mettre toutes les frettes en position ouverte (repos)
+  // Set all frets to open position (rest)
   releaseAll();
 }
 
@@ -44,24 +44,24 @@ bool FretController::pressFret(uint8_t fretNum) {
     return false;
   }
 
-  // Obtenir l'angle de fermeture
+  // Get the closing angle
   uint16_t angle = config->fretCalibration[fretNum].angleClosed;
 
-  // Appliquer l'inversion si nécessaire
+  // Apply inversion if necessary
   if (config->fretReversed[fretNum]) {
     angle = 180 - angle;
   }
 
-  // Obtenir le mapping servo
+  // Get the servo mapping
   ServoMapping& servo = config->fretServos[fretNum];
 
-  // Envoyer la commande
+  // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
   if (!pcaManager->setPWM(servo.pcaIndex, servo.pin, pwm)) {
     return false;
   }
 
-  // Mettre à jour l'état
+  // Update the state
   fretStates[fretNum] = true;
   activeFret = fretNum;
 
@@ -89,24 +89,24 @@ bool FretController::releaseFret(uint8_t fretNum) {
     return false;
   }
 
-  // Obtenir l'angle d'ouverture (repos)
+  // Get the opening angle (rest)
   uint16_t angle = config->fretCalibration[fretNum].angleOpen;
 
-  // Appliquer l'inversion si nécessaire
+  // Apply inversion if necessary
   if (config->fretReversed[fretNum]) {
     angle = 180 - angle;
   }
 
-  // Obtenir le mapping servo
+  // Get the servo mapping
   ServoMapping& servo = config->fretServos[fretNum];
 
-  // Envoyer la commande
+  // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
   if (!pcaManager->setPWM(servo.pcaIndex, servo.pin, pwm)) {
     return false;
   }
 
-  // Mettre à jour l'état
+  // Update the state
   fretStates[fretNum] = false;
   if (activeFret == fretNum) {
     activeFret = -1;
@@ -138,7 +138,7 @@ bool FretController::releaseAll() {
       if (!releaseFret(f)) {
         allOk = false;
       }
-      delay(5);  // Petit délai entre chaque frette
+      delay(5);  // Small delay between each fret
     }
   }
 

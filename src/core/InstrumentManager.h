@@ -8,8 +8,8 @@
 #include "../config/string_configs.h"
 
 /**
- * Gère l'ensemble de l'instrument
- * Coordonne les cordes, la gestion de l'alimentation et les timeouts
+ * Manages the entire instrument
+ * Coordinates strings, power management, and timeouts
  */
 class InstrumentManager {
 private:
@@ -21,22 +21,22 @@ private:
 public:
   InstrumentManager();
 
-  // Initialisation
+  // Initialization
   bool init();
 
-  // Contrôle des notes
+  // Note control
   bool playNote(uint8_t midiNote, uint8_t velocity);
   bool stopNote(uint8_t midiNote);
   bool stopAllNotes();
 
-  // Gestion de l'alimentation
+  // Power management
   void enableServoPower();
   void disableServoPower();
 
-  // Mise à jour périodique (à appeler dans loop())
+  // Periodic update (call in loop())
   void update();
 
-  // Accès
+  // Access
   StringInstrument* getString(uint8_t index);
   PCA9685Manager* getPCAManager() { return &pcaManager; }
 
@@ -44,7 +44,7 @@ public:
   void printStatus();
 
 private:
-  // Utilitaires internes
+  // Internal utilities
   void moveAllServosToRestPosition();
   void checkTimeouts();
   int8_t findStringPlayingNote(uint8_t midiNote);
