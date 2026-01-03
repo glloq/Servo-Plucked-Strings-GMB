@@ -348,11 +348,12 @@ void pressFret(uint8_t stringIdx, uint8_t fretNum) {
   uint16_t finalAngle = applyReversed(angle, reversed);
   uint16_t pwm = angleToPWM(finalAngle);
 
-  // Envoyer au PCA9685
-  uint8_t pcaAddr = cfg.pcaAddress;
-  uint8_t pin = cfg.firstFretPin + fretNum;
+  // Utiliser le mapping pour trouver PCA et pin
+  ServoMapping& servo = cfg.fretServos[fretNum];
+  uint8_t pcaIndex = servo.pcaIndex;
+  uint8_t pin = servo.pin;
 
-  pcaManager.setPWM(pcaAddr, pin, 0, pwm);
+  pcaManager.setPWM(pcaIndex, pin, 0, pwm);
 }
 ```
 
@@ -377,7 +378,10 @@ public:
                      cfg.pluckAngleA;
 
     uint16_t pwm = angleToPWM(angle);
-    pcaManager.setPWM(cfg.pcaAddress, cfg.pluckPin, 0, pwm);
+
+    // Utiliser le mapping du servo pluck
+    ServoMapping& pluckServo = cfg.pluckServo;
+    pcaManager.setPWM(pluckServo.pcaIndex, pluckServo.pin, 0, pwm);
 
     // Alterner pour la prochaine fois
     currentAngleState = !currentAngleState;
@@ -394,7 +398,10 @@ public:
   void mute(uint8_t stringIdx) {
     StringConfig& cfg = stringConfigs[stringIdx];
     uint16_t pwm = angleToPWM(cfg.pluckMuteAngle);
-    pcaManager.setPWM(cfg.pcaAddress, cfg.pluckPin, 0, pwm);
+
+    // Utiliser le mapping du servo pluck
+    ServoMapping& pluckServo = cfg.pluckServo;
+    pcaManager.setPWM(pluckServo.pcaIndex, pluckServo.pin, 0, pwm);
   }
 };
 ```
@@ -575,15 +582,16 @@ void moveServosToRestPosition() {
 
     // Frettes en position relâchée (90° neutre généralement)
     for (int f = 0; f < cfg.numFrets; f++) {
-      uint8_t pin = cfg.firstFretPin + f;
+      ServoMapping& servo = cfg.fretServos[f];
       uint16_t pwm = angleToPWM(90);  // Position neutre
-      pcaControllers[s].setPWM(pin, 0, pwm);
+      pcaControllers[servo.pcaIndex].setPWM(servo.pin, 0, pwm);
       delay(5);
     }
 
     // Pluck en position repos (angleA)
     uint16_t pwm = angleToPWM(cfg.pluckAngleA);
-    pcaControllers[s].setPWM(cfg.pluckPin, 0, pwm);
+    ServoMapping& pluckServo = cfg.pluckServo;
+    pcaControllers[pluckServo.pcaIndex].setPWM(pluckServo.pin, 0, pwm);
   }
 
   delay(500);  // Laisser les servos se positionner

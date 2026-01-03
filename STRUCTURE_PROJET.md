@@ -158,13 +158,30 @@ void loop() {
 
 #include <Arduino.h>
 
+// ========== STRUCTURE DE MAPPING SERVO ==========
+/**
+ * Permet de mapper individuellement chaque servo à un PCA et un pin
+ * AVANTAGES:
+ * - Câblage flexible: les frettes n'ont pas besoin d'être branchées dans l'ordre
+ * - Réparation facile: si un pin PCA est défectueux, on peut utiliser un autre
+ * - Optimisation du câble: on peut minimiser la longueur des câbles
+ * - Multi-PCA: une corde peut utiliser plusieurs PCA si nécessaire
+ */
+struct ServoMapping {
+  uint8_t pcaIndex;             // Index du PCA9685 (0 à PCA_COUNT-1)
+  uint8_t pin;                  // Pin sur le PCA9685 (0-15)
+};
+
 // ========== STRUCTURE DE CONFIGURATION ==========
 struct StringConfig {
   uint8_t baseMidiNote;         // Note MIDI à vide
   uint8_t numFrets;             // Nombre de frettes
-  uint8_t pcaIndex;             // Index du PCA9685 (0-3)
-  uint8_t firstFretPin;         // Pin de la 1ère frette
-  uint8_t pluckPin;             // Pin du servo pluck
+
+  // Mapping des servos de frettes (1 par frette)
+  ServoMapping fretServos[24];  // Mapping PCA+pin pour chaque frette (max 24)
+
+  // Mapping du servo de grattage
+  ServoMapping pluckServo;      // Mapping PCA+pin pour le pluck
 
   // Calibration des frettes
   uint16_t fretAngles[24];      // Angle d'activation (max 24 frettes)
@@ -180,13 +197,20 @@ struct StringConfig {
 // Accordage standard: E-A-D-G
 
 const StringConfig stringConfigs[NUM_STRINGS] = {
-  // Corde 0: E2 (MIDI 40)
+  // ===== Corde 0: E2 (MIDI 40) =====
   {
     .baseMidiNote = 40,           // E2
     .numFrets = 12,
-    .pcaIndex = 0,
-    .firstFretPin = 0,            // Pins 0-11 pour frettes
-    .pluckPin = 12,               // Pin 12 pour pluck
+
+    // Mapping des servos de frettes
+    // Chaque frette peut être branchée sur n'importe quel PCA et pin
+    .fretServos = {
+      // frette 1    2     3     4     5     6     7     8     9    10    11    12
+      {0,0},  {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11}
+    },
+
+    // Servo de grattage
+    .pluckServo = {0, 12},        // PCA 0, pin 12
 
     // Angles frettes (à calibrer)
     .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
@@ -199,13 +223,18 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .pluckMuteAngle = 90
   },
 
-  // Corde 1: A2 (MIDI 45)
+  // ===== Corde 1: A2 (MIDI 45) =====
   {
     .baseMidiNote = 45,
     .numFrets = 12,
-    .pcaIndex = 1,
-    .firstFretPin = 0,
-    .pluckPin = 12,
+
+    // Exemple: câblage non séquentiel
+    .fretServos = {
+      // frette 1    2     3     4     5     6     7     8     9    10    11    12
+      {1,2},  {1,0}, {1,5}, {1,3}, {1,7}, {1,4}, {1,1}, {1,6}, {1,8}, {1,10}, {1,9}, {1,11}
+    },
+
+    .pluckServo = {1, 15},        // PCA 1, pin 15
 
     .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
     .fretReversed = {false, false, false, false, false, false,
@@ -216,13 +245,16 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .pluckMuteAngle = 90
   },
 
-  // Corde 2: D3 (MIDI 50)
+  // ===== Corde 2: D3 (MIDI 50) =====
   {
     .baseMidiNote = 50,
     .numFrets = 12,
-    .pcaIndex = 2,
-    .firstFretPin = 0,
-    .pluckPin = 12,
+
+    .fretServos = {
+      {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6}, {2,7}, {2,8}, {2,9}, {2,10}, {2,11}
+    },
+
+    .pluckServo = {2, 12},
 
     .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
     .fretReversed = {false, false, false, false, false, false,
@@ -233,13 +265,18 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .pluckMuteAngle = 90
   },
 
-  // Corde 3: G3 (MIDI 55)
+  // ===== Corde 3: G3 (MIDI 55) =====
   {
     .baseMidiNote = 55,
     .numFrets = 12,
-    .pcaIndex = 3,
-    .firstFretPin = 0,
-    .pluckPin = 12,
+
+    // Exemple: frettes réparties sur plusieurs PCA
+    .fretServos = {
+      // Frettes 1-6 sur PCA3, frettes 7-12 sur PCA0 (exemple câblage complexe)
+      {3,0}, {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {0,13}, {0,14}, {0,15}, {1,12}, {1,13}, {1,14}
+    },
+
+    .pluckServo = {3, 6},
 
     .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
     .fretReversed = {false, false, false, false, false, false,
@@ -252,6 +289,57 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
 };
 
 #endif
+```
+
+#### Exemples de Cas d'Usage du Mapping Flexible
+
+**Cas 1: Câblage Séquentiel Simple**
+```cpp
+// Toutes les frettes sur le même PCA, pins consécutifs
+.fretServos = {
+  {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5},
+  {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11}
+}
+```
+
+**Cas 2: Pin Défectueux - Contournement**
+```cpp
+// Le pin 5 du PCA0 est défectueux, on utilise le pin 13 à la place
+.fretServos = {
+  {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,13},  // pin 13 au lieu de 5
+  {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11}
+}
+```
+
+**Cas 3: Optimisation Câblage (distance minimale)**
+```cpp
+// Frettes branchées selon leur position physique, pas leur numéro logique
+// Si physiquement la frette 1 est proche du pin 8, on peut brancher là
+.fretServos = {
+  {0,8}, {0,7}, {0,9}, {0,6}, {0,10}, {0,5},
+  {0,11}, {0,4}, {0,12}, {0,3}, {0,13}, {0,2}
+}
+```
+
+**Cas 4: Répartition Multi-PCA**
+```cpp
+// Cordes graves sur PCA0, cordes aiguës sur PCA1
+// Permet de répartir la charge électrique
+.fretServos = {
+  // Frettes 1-6 sur PCA0, frettes 7-12 sur PCA1
+  {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5},
+  {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}
+}
+```
+
+**Cas 5: Expansion Future**
+```cpp
+// Laisser des pins libres pour ajout ultérieur de fonctionnalités
+// (ex: vibrato, bend, harmoniques)
+.fretServos = {
+  {0,0}, {0,2}, {0,4}, {0,6}, {0,8}, {0,10},  // Pins pairs seulement
+  {0,1}, {0,3}, {0,5}, {0,7}, {0,9}, {0,11}   // Pins impairs disponibles
+}
 ```
 
 ### 2.3 Module Core
