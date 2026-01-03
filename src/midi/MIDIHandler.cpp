@@ -1,62 +1,83 @@
 #include "MIDIHandler.h"
 
-// Instance MIDI
-MIDI_CREATE_DEFAULT_INSTANCE();
-
-// Instance statique pour callbacks
-MIDIHandler* MIDIHandler::instance = nullptr;
-
 MIDIHandler::MIDIHandler() {
   instrument = nullptr;
-  instance = this;  // Enregistrer l'instance pour les callbacks
 }
 
 void MIDIHandler::init(InstrumentManager* inst) {
   instrument = inst;
 
   #ifdef DEBUG
-  Serial.println("Initializing MIDI...");
-  #endif
-
-  // Initialiser la bibliothèque MIDI
-  MIDI.begin(MIDI_CHANNEL_OMNI);  // Écouter tous les canaux
-
-  // Enregistrer les callbacks
-  MIDI.setHandleNoteOn(handleNoteOnStatic);
-  MIDI.setHandleNoteOff(handleNoteOffStatic);
-  MIDI.setHandleControlChange(handleControlChangeStatic);
-
-  #ifdef DEBUG
-  Serial.println("MIDI initialized - listening on all channels");
+  Serial.println("Initializing MIDIUSB...");
+  Serial.println("MIDIUSB ready - listening on all channels");
   #endif
 }
 
 void MIDIHandler::process() {
-  // Lire les messages MIDI
-  MIDI.read();
+  // Lire les messages MIDI USB
+  midiEventPacket_t event;
+
+  do {
+    event = MidiUSB.read();
+    if (event.header != 0) {
+      processMidiMessage(event);
+    }
+  } while (event.header != 0);
 }
 
-// ===== Callbacks statiques =====
+void MIDIHandler::processMidiMessage(midiEventPacket_t event) {
+  // Extraire les informations du message
+  byte header = event.header;
+  byte byte1 = event.byte1;
+  byte byte2 = event.byte2;
+  byte byte3 = event.byte3;
 
-void MIDIHandler::handleNoteOnStatic(byte channel, byte note, byte velocity) {
-  if (instance != nullptr) {
-    instance->handleNoteOn(channel, note, velocity);
+  // Extraire le type de message et le canal
+  byte messageType = byte1 & 0xF0;  // 4 bits hauts
+  byte channel = (byte1 & 0x0F) + 1; // 4 bits bas (canal 1-16)
+
+  switch (messageType) {
+    case 0x90:  // Note On
+      if (byte3 > 0) {
+        handleNoteOn(channel, byte2, byte3);
+      } else {
+        // Velocity 0 = Note Off
+        handleNoteOff(channel, byte2, 0);
+      }
+      break;
+
+    case 0x80:  // Note Off
+      handleNoteOff(channel, byte2, byte3);
+      break;
+
+    case 0xB0:  // Control Change
+      handleControlChange(channel, byte2, byte3);
+      break;
+
+    #ifdef DEBUG_VERBOSE
+    case 0xC0:  // Program Change
+      Serial.print("[MIDI] Program Change - Ch:");
+      Serial.print(channel);
+      Serial.print(" Program:");
+      Serial.println(byte2);
+      break;
+
+    case 0xE0:  // Pitch Bend
+      Serial.print("[MIDI] Pitch Bend - Ch:");
+      Serial.print(channel);
+      Serial.print(" Value:");
+      Serial.println((byte3 << 7) | byte2);
+      break;
+    #endif
+
+    default:
+      #ifdef DEBUG_VERBOSE
+      Serial.print("[MIDI] Unknown message type: 0x");
+      Serial.println(messageType, HEX);
+      #endif
+      break;
   }
 }
-
-void MIDIHandler::handleNoteOffStatic(byte channel, byte note, byte velocity) {
-  if (instance != nullptr) {
-    instance->handleNoteOff(channel, note, velocity);
-  }
-}
-
-void MIDIHandler::handleControlChangeStatic(byte channel, byte number, byte value) {
-  if (instance != nullptr) {
-    instance->handleControlChange(channel, number, value);
-  }
-}
-
-// ===== Handlers internes =====
 
 void MIDIHandler::handleNoteOn(byte channel, byte note, byte velocity) {
   #ifdef DEBUG
@@ -71,12 +92,6 @@ void MIDIHandler::handleNoteOn(byte channel, byte note, byte velocity) {
   #endif
 
   if (instrument == nullptr) {
-    return;
-  }
-
-  // Si velocity = 0, c'est un NOTE_OFF
-  if (velocity == 0) {
-    handleNoteOff(channel, note, 0);
     return;
   }
 
@@ -119,6 +134,17 @@ void MIDIHandler::handleControlChange(byte channel, byte number, byte value) {
 
   // CC #123 = All Notes Off
   if (number == 123) {
+    #ifdef DEBUG
+    Serial.println("[MIDI] All Notes Off");
+    #endif
+    instrument->stopAllNotes();
+  }
+
+  // CC #120 = All Sound Off
+  if (number == 120) {
+    #ifdef DEBUG
+    Serial.println("[MIDI] All Sound Off");
+    #endif
     instrument->stopAllNotes();
   }
 

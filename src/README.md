@@ -37,17 +37,19 @@ Installez via le gestionnaire de bibliothèques Arduino:
    - Auteur: Adafruit
    - Pour le contrôle des PCA9685
 
-2. **MIDI Library** (>= 5.0.2)
-   - Auteur: FortySevenEffects
-   - Pour la réception MIDI
+2. **MIDIUSB** (intégrée)
+   - Pour la réception MIDI via USB natif
+   - Intégrée dans Arduino IDE (pas d'installation nécessaire)
+   - Compatible: Teensy, Arduino Leonardo, Micro, Due, Zero, etc.
 
 ### Installation via Arduino IDE
 
 ```
 Outils → Gérer les bibliothèques → Rechercher:
   - "Adafruit PWM Servo Driver"
-  - "MIDI Library"
 ```
+
+MIDIUSB est déjà incluse dans Arduino IDE pour les cartes compatibles.
 
 ### Installation via PlatformIO
 
@@ -55,8 +57,9 @@ Ajoutez dans `platformio.ini`:
 ```ini
 lib_deps =
     adafruit/Adafruit PWM Servo Driver Library @ ^2.4.0
-    fortyseveneffects/MIDI Library @ ^5.0.2
 ```
+
+MIDIUSB est automatiquement disponible pour les plateformes compatibles.
 
 ## 🎛️ Configuration
 

@@ -19,8 +19,8 @@
 #define SERVO_FREQ 50              // Fréquence PWM (Hz)
 
 // ========== MIDI ==========
-#define MIDI_CHANNEL_OMNI 0        // Écoute tous les canaux
-#define MIDI_BAUD 31250            // Vitesse MIDI standard
+// MIDIUSB est utilisé (USB natif, pas de configuration série nécessaire)
+// Tous les canaux MIDI sont écoutés automatiquement
 
 // ========== MODES DE JEU ==========
 #define LEGATO_MODE false          // true = pas de re-pluck sur même corde
