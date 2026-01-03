@@ -3,10 +3,20 @@
 ## [Non versionnée] - 2026-01-03
 
 ### Ajouté
+- **Documentation détaillée de la logique des servos** (`LOGIQUE_SERVOS_DETAILLEE.md`)
+  - Explication complète du servo de grattage (oscillation autour d'un centre)
+  - Explication complète des servos de frettes (position ouverte/fermée)
+  - Schémas visuels et timelines
+  - Exemples de code complets
+
 - **Système de mapping flexible pour les servomoteurs**
   - Introduction de la structure `ServoMapping` pour mapper individuellement chaque servo
   - Permet un câblage non-séquentiel des servos sur les PCA9685
   - Support pour répartir les servos d'une corde sur plusieurs PCA
+
+- **Structure `FretCalibration`**
+  - Nouvelle structure avec `angleOpen` (position repos) et `angleClosed` (position activée)
+  - Permet une calibration indépendante pour chaque frette
 
 ### Modifié
 - **Structure `StringConfig`**
@@ -14,6 +24,15 @@
   - APRÈS: `fretServos[24]` (tableau de `ServoMapping` pour chaque frette)
   - AVANT: `pluckPin` (simple numéro de pin)
   - APRÈS: `pluckServo` (structure `ServoMapping` avec PCA et pin)
+
+- **Calibration des frettes**
+  - AVANT: `fretAngles[24]` (un seul angle par frette)
+  - APRÈS: `fretCalibration[24]` (structure avec `angleOpen` + `angleClosed`)
+
+- **Calibration du pluck**
+  - AVANT: `pluckAngleA` et `pluckAngleB` (angles absolus)
+  - APRÈS: `pluckAngleCenter` + `pluckAmplitude` (oscillation autour d'un centre)
+  - Exemple: centre=90°, amplitude=15° → oscillation entre 75° et 105°
 
 - **Logique de contrôle des servos**
   - Fonction `pressFret()`: utilise maintenant `fretServos[fretNum]` pour obtenir PCA et pin

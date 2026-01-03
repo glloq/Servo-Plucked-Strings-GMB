@@ -172,6 +172,12 @@ struct ServoMapping {
   uint8_t pin;                  // Pin sur le PCA9685 (0-15)
 };
 
+// ========== STRUCTURE DE CALIBRATION FRETTE ==========
+struct FretCalibration {
+  uint16_t angleOpen;           // Angle position repos (corde libre)
+  uint16_t angleClosed;         // Angle position activée (corde appuyée)
+};
+
 // ========== STRUCTURE DE CONFIGURATION ==========
 struct StringConfig {
   uint8_t baseMidiNote;         // Note MIDI à vide
@@ -184,13 +190,13 @@ struct StringConfig {
   ServoMapping pluckServo;      // Mapping PCA+pin pour le pluck
 
   // Calibration des frettes
-  uint16_t fretAngles[24];      // Angle d'activation (max 24 frettes)
-  bool fretReversed[24];        // Sens inversé?
+  FretCalibration fretCalibration[24];  // Open + Closed pour chaque frette
+  bool fretReversed[24];                // Sens inversé?
 
-  // Calibration du pluck
-  uint16_t pluckAngleA;         // 1er angle
-  uint16_t pluckAngleB;         // 2ème angle (alternance)
-  uint16_t pluckMuteAngle;      // Angle mute
+  // Calibration du pluck (oscillation autour d'un centre)
+  uint16_t pluckAngleCenter;    // Position centrale repos (ex: 90°)
+  uint16_t pluckAmplitude;      // Amplitude oscillation (ex: 15° → ±15°)
+  uint16_t pluckMuteAngle;      // Angle pour étouffer (ex: 90°)
 };
 
 // ========== CONFIGURATION BASSE 4 CORDES ==========
@@ -212,15 +218,31 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     // Servo de grattage
     .pluckServo = {0, 12},        // PCA 0, pin 12
 
-    // Angles frettes (à calibrer)
-    .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
+    // Calibration frettes: {angleOpen, angleClosed}
+    .fretCalibration = {
+      //  Open Closed   (Position repos / Position appuyée)
+      {   45,  120  },  // Frette 1
+      {   45,  120  },  // Frette 2
+      {   45,  120  },  // Frette 3
+      {   45,  120  },  // Frette 4
+      {   45,  120  },  // Frette 5
+      {   45,  120  },  // Frette 6
+      {   45,  120  },  // Frette 7
+      {   45,  120  },  // Frette 8
+      {   45,  120  },  // Frette 9
+      {   45,  120  },  // Frette 10
+      {   45,  120  },  // Frette 11
+      {   45,  120  }   // Frette 12
+    },
+
+    // Sens de rotation (false = normal, true = inversé)
     .fretReversed = {false, false, false, false, false, false,
                      false, false, false, false, false, false},
 
-    // Angles pluck
-    .pluckAngleA = 45,
-    .pluckAngleB = 135,
-    .pluckMuteAngle = 90
+    // Calibration pluck (oscillation autour du centre)
+    .pluckAngleCenter = 90,       // Position centrale (repos)
+    .pluckAmplitude = 15,         // Oscillation ±15° (75° ↔ 105°)
+    .pluckMuteAngle = 90          // Mute = position centrale
   },
 
   // ===== Corde 1: A2 (MIDI 45) =====
@@ -236,12 +258,16 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
 
     .pluckServo = {1, 15},        // PCA 1, pin 15
 
-    .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
+    .fretCalibration = {
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
+    },
+
     .fretReversed = {false, false, false, false, false, false,
                      false, false, false, false, false, false},
 
-    .pluckAngleA = 45,
-    .pluckAngleB = 135,
+    .pluckAngleCenter = 90,
+    .pluckAmplitude = 15,
     .pluckMuteAngle = 90
   },
 
@@ -256,12 +282,16 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
 
     .pluckServo = {2, 12},
 
-    .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
+    .fretCalibration = {
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
+    },
+
     .fretReversed = {false, false, false, false, false, false,
                      false, false, false, false, false, false},
 
-    .pluckAngleA = 45,
-    .pluckAngleB = 135,
+    .pluckAngleCenter = 90,
+    .pluckAmplitude = 15,
     .pluckMuteAngle = 90
   },
 
@@ -278,12 +308,19 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
 
     .pluckServo = {3, 6},
 
-    .fretAngles = {90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90},
-    .fretReversed = {false, false, false, false, false, false,
-                     false, false, false, false, false, false},
+    // Exemple: servos montés à l'envers, angles différents
+    .fretCalibration = {
+      {135, 60}, {135, 60}, {135, 60}, {135, 60}, {135, 60}, {135, 60},  // Servos inversés
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}   // Servos normaux
+    },
 
-    .pluckAngleA = 45,
-    .pluckAngleB = 135,
+    .fretReversed = {
+      true, true, true, true, true, true,        // Frettes 1-6 inversées
+      false, false, false, false, false, false   // Frettes 7-12 normales
+    },
+
+    .pluckAngleCenter = 90,
+    .pluckAmplitude = 20,         // Amplitude plus grande pour cette corde
     .pluckMuteAngle = 90
   }
 };
