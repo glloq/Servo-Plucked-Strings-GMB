@@ -12,6 +12,10 @@
  * - Easy repair: if a PCA pin is defective, another can be used
  * - Cable optimization: cable length can be minimized
  * - Multi-PCA: a string can use multiple PCAs if necessary
+ * - Shared PCA: multiple strings can share the same PCA (different pins)
+ *
+ * EXAMPLE: String 0 can use PCA 0, String 1 can also use PCA 0 on different pins,
+ *          or String 1 can use PCA 1, etc. Total flexibility!
  */
 struct ServoMapping {
   uint8_t pcaIndex;             // PCA9685 index (0 to PCA_COUNT-1)
@@ -54,30 +58,27 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .baseMidiNote = 40,           // E2
     .numFrets = 12,
 
-    // Fret servo mapping
+    // Fret servo mapping (only define the servos actually used)
     .fretServos = {
-      {0,0},  {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11},
-      // Frets 13-24 unused
-      {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}
+      {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11}
+      // Remaining frets unused - no need to define them
     },
 
     // Plucking servo
     .pluckServo = {0, 12},
 
-    // Fret calibration: {angleOpen, angleClosed}
+    // Fret calibration: {angleOpen, angleClosed} (only for used frets)
     .fretCalibration = {
       //  Open Closed
       {   45,  120  }, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {   45,  120  }, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      // Frets 13-24 unused
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}
+      {   45,  120  }, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
+      // Remaining frets unused - no need to define them
     },
 
-    // Rotation direction
+    // Rotation direction (only for used frets)
     .fretReversed = {
-      false, false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false, false, false
+      // Remaining frets unused - no need to define them
     },
 
     // Pluck calibration
@@ -92,21 +93,17 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .numFrets = 12,
 
     .fretServos = {
-      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, {1,6}, {1,7}, {1,8}, {1,9}, {1,10}, {1,11},
-      {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}
+      {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, {1,6}, {1,7}, {1,8}, {1,9}, {1,10}, {1,11}
     },
 
     .pluckServo = {1, 12},
 
     .fretCalibration = {
       {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
     },
 
     .fretReversed = {
-      false, false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false, false, false
     },
 
@@ -121,21 +118,17 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .numFrets = 12,
 
     .fretServos = {
-      {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6}, {2,7}, {2,8}, {2,9}, {2,10}, {2,11},
-      {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}
+      {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6}, {2,7}, {2,8}, {2,9}, {2,10}, {2,11}
     },
 
     .pluckServo = {2, 12},
 
     .fretCalibration = {
       {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
     },
 
     .fretReversed = {
-      false, false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false, false, false
     },
 
@@ -144,27 +137,23 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .pluckMuteAngle = 90
   },
 
-  // ===== Corde 3: G3 (MIDI 55) =====
+  // ===== String 3: G3 (MIDI 55) =====
   {
     .baseMidiNote = 55,
     .numFrets = 12,
 
     .fretServos = {
-      {3,0}, {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {3,6}, {3,7}, {3,8}, {3,9}, {3,10}, {3,11},
-      {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}
+      {3,0}, {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {3,6}, {3,7}, {3,8}, {3,9}, {3,10}, {3,11}
     },
 
     .pluckServo = {3, 12},
 
     .fretCalibration = {
       {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90},
-      {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}
+      {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120}
     },
 
     .fretReversed = {
-      false, false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false, false, false
     },
 
