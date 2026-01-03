@@ -3,6 +3,35 @@
 ## [Non versionnée] - 2026-01-03
 
 ### Ajouté
+- **Implémentation complète du code C++ Arduino** (20 fichiers)
+  - Structure modulaire orientée objet
+  - Configuration (settings.h, string_configs.h)
+  - Core (PCA9685Manager, InstrumentManager)
+  - String (StringInstrument, FretController, PluckController)
+  - MIDI (MIDIHandler, NoteMapper)
+  - Utils (Debug)
+  - Main (main.ino)
+  - Documentation complète (src/README.md)
+
+- **Support MIDIUSB** pour communication MIDI via USB natif
+  - Remplacement de la bibliothèque MIDI standard par MIDIUSB
+  - Support USB natif pour Teensy, Leonardo, Micro, etc.
+  - Pas de bibliothèque externe à installer
+  - Latence ultra-faible (~1-3ms)
+  - Guide complet MIDIUSB (GUIDE_MIDIUSB.md)
+
+### Modifié
+- **MIDIHandler**
+  - AVANT: Utilisation de la bibliothèque MIDI avec callbacks
+  - APRÈS: Utilisation de MIDIUSB avec polling
+  - Format des messages: `midiEventPacket_t` au lieu de callbacks
+  - Décodage manuel des messages MIDI (status byte, data bytes)
+
+- **settings.h**
+  - Suppression de `MIDI_BAUD` (non nécessaire avec USB)
+  - Suppression de `MIDI_CHANNEL_OMNI` (tous les canaux écoutés automatiquement)
+
+### Ajouté (suite)
 - **Documentation détaillée de la logique des servos** (`LOGIQUE_SERVOS_DETAILLEE.md`)
   - Explication complète du servo de grattage (oscillation autour d'un centre)
   - Explication complète des servos de frettes (position ouverte/fermée)
