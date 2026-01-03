@@ -7,8 +7,8 @@
 #include "../config/string_configs.h"
 
 /**
- * Représente une corde complète de l'instrument
- * Combine FretController et PluckController
+ * Represents a complete string of the instrument
+ * Combines FretController and PluckController
  */
 class StringInstrument {
 private:
@@ -16,30 +16,30 @@ private:
   FretController fretController;
   PluckController pluckController;
 
-  // État
-  int8_t currentFret;           // Frette active (-1 = corde à vide)
-  uint8_t currentMidiNote;      // Note MIDI jouée (0 = aucune)
-  bool isPlaying;               // Corde en train de jouer?
-  unsigned long lastActivity;   // Timestamp dernière action
+  // State
+  int8_t currentFret;           // Active fret (-1 = open string)
+  uint8_t currentMidiNote;      // MIDI note being played (0 = none)
+  bool isPlaying;               // Is string currently playing?
+  unsigned long lastActivity;   // Timestamp of last action
 
 public:
   StringInstrument();
 
-  // Initialisation
+  // Initialization
   void init(StringConfig* cfg, PCA9685Manager* pcaManager);
 
-  // Contrôle
+  // Control
   bool playNote(uint8_t midiNote, uint8_t velocity);
   bool stopNote(bool mute);
   bool canPlayNote(uint8_t midiNote);
 
-  // État
+  // State
   uint8_t getCurrentNote() const { return currentMidiNote; }
   int8_t getCurrentFret() const { return currentFret; }
   bool getIsPlaying() const { return isPlaying; }
   unsigned long getLastActivity() const { return lastActivity; }
 
-  // Accès aux contrôleurs
+  // Controller access
   FretController* getFretController() { return &fretController; }
   PluckController* getPluckController() { return &pluckController; }
   StringConfig* getConfig() { return config; }

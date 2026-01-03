@@ -7,8 +7,8 @@
 #include "../config/settings.h"
 
 /**
- * Gère la communication avec les contrôleurs PCA9685
- * Responsable de l'initialisation, contrôle PWM et conversion angle→PWM
+ * Manages communication with PCA9685 controllers
+ * Responsible for initialization, PWM control and angle→PWM conversion
  */
 class PCA9685Manager {
 private:
@@ -19,19 +19,19 @@ public:
   PCA9685Manager();
   ~PCA9685Manager();
 
-  // Initialisation
+  // Initialization
   bool init();
   bool initController(uint8_t index);
 
-  // Contrôle PWM
+  // PWM Control
   bool setPWM(uint8_t pcaIndex, uint8_t pin, uint16_t value);
   bool setAngle(uint8_t pcaIndex, uint8_t pin, uint16_t angle);
 
-  // Utilitaires
+  // Utilities
   uint16_t angleToPWM(uint16_t angle);
   bool isInitialized(uint8_t pcaIndex);
 
-  // Gestion alimentation
+  // Power management
   void enablePower();
   void disablePower();
 };

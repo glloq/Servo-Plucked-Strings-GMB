@@ -5,31 +5,31 @@
 #include "../config/string_configs.h"
 
 /**
- * Résultat du mapping MIDI → Corde/Frette
+ * Result of MIDI → String/Fret mapping
  */
 struct NoteMapping {
-  int8_t stringIndex;  // Index de la corde (-1 si impossible)
-  int8_t fretNumber;   // Numéro de frette (0 = corde à vide)
-  bool valid;          // Mapping valide?
+  int8_t stringIndex;  // String index (-1 if impossible)
+  int8_t fretNumber;   // Fret number (0 = open string)
+  bool valid;          // Valid mapping?
 };
 
 /**
- * Conversion note MIDI → corde/frette
- * Stratégie: Priorité à la corde la plus basse (grave) pouvant jouer la note
+ * MIDI note → string/fret conversion
+ * Strategy: Priority to lowest (bass) string that can play the note
  */
 class NoteMapper {
 public:
   /**
-   * Trouve la corde et la frette pour une note MIDI
-   * @param midiNote Note MIDI (0-127)
-   * @return Mapping avec stringIndex, fretNumber et valid
+   * Finds the string and fret for a MIDI note
+   * @param midiNote MIDI note (0-127)
+   * @return Mapping with stringIndex, fretNumber and valid
    */
   static NoteMapping mapNote(uint8_t midiNote);
 
   /**
-   * Convertit une note MIDI en nom (ex: 60 → "C4")
-   * @param midiNote Note MIDI (0-127)
-   * @return Nom de la note
+   * Converts a MIDI note to name (e.g. 60 → "C4")
+   * @param midiNote MIDI note (0-127)
+   * @return Note name
    */
   static const char* noteToString(uint8_t midiNote);
 

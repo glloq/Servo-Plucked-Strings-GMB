@@ -5,18 +5,18 @@
 #include "../config/settings.h"
 
 /**
- * Utilitaires de debug et logging
+ * Debug and logging utilities
  */
 class Debug {
 public:
-  // Initialisation du port série
+  // Serial port initialization
   static void init();
 
-  // Logs avec timestamp
+  // Logs with timestamp
   static void log(const char* message);
   static void log(const char* message, int value);
 
-  // Affichage d'informations système
+  // System information display
   static void printSystemInfo();
   static void printMemoryInfo();
 };

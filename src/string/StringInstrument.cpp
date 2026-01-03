@@ -16,11 +16,11 @@ void StringInstrument::init(StringConfig* cfg, PCA9685Manager* pcaManager) {
   Serial.println(cfg->baseMidiNote);
   #endif
 
-  // Initialiser les contrôleurs
+  // Initialize controllers
   fretController.init(cfg, pcaManager);
   pluckController.init(cfg, pcaManager);
 
-  // État initial
+  // Initial state
   currentFret = -1;
   currentMidiNote = 0;
   isPlaying = false;
@@ -32,7 +32,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
     return false;
   }
 
-  // Vérifier que cette corde peut jouer cette note
+  // Check that this string can play this note
   if (!canPlayNote(midiNote)) {
     #ifdef DEBUG
     Serial.print("ERROR: String cannot play MIDI note ");
@@ -41,7 +41,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
     return false;
   }
 
-  // Calculer la frette
+  // Calculate the fret
   int8_t fret = midiNote - config->baseMidiNote;
 
   #ifdef DEBUG
@@ -53,10 +53,10 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
   Serial.println(velocity);
   #endif
 
-  // Si une autre note est déjà jouée sur cette corde
+  // If another note is already playing on this string
   if (isPlaying && currentFret != fret) {
     #ifdef LEGATO_MODE
-    // Mode legato: changer de frette sans re-gratter
+    // Legato mode: change fret without re-plucking
     if (currentFret >= 0) {
       fretController.releaseFret(currentFret);
     }
@@ -64,15 +64,15 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
       fretController.pressFret(fret);
       delay(FRET_STABILIZATION_DELAY);
     }
-    // Ne pas re-gratter en mode legato
+    // Don't re-pluck in legato mode
     #else
-    // Mode normal: relâcher tout et recommencer
+    // Normal mode: release everything and restart
     stopNote(false);
     delay(10);
     #endif
   }
 
-  // Presser la frette si nécessaire (frette 0 = corde à vide)
+  // Press the fret if necessary (fret 0 = open string)
   if (fret > 0) {
     if (!fretController.pressFret(fret)) {
       return false;
@@ -80,7 +80,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
     delay(FRET_STABILIZATION_DELAY);
   }
 
-  // Gratter la corde
+  // Pluck the string
   #ifndef LEGATO_MODE
   #ifdef VELOCITY_SENSITIVE
   if (!pluckController.pluck(velocity)) {
@@ -93,7 +93,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
   #endif
   #endif
 
-  // Mettre à jour l'état
+  // Update state
   currentFret = fret;
   currentMidiNote = midiNote;
   isPlaying = true;
@@ -115,7 +115,7 @@ bool StringInstrument::stopNote(bool mute) {
   Serial.println(")");
   #endif
 
-  // Étouffer ou retourner au centre
+  // Mute or return to center
   if (mute) {
     #ifdef AUTO_MUTE
     pluckController.mute();
@@ -125,10 +125,10 @@ bool StringInstrument::stopNote(bool mute) {
     pluckController.returnToCenter();
   }
 
-  // Relâcher toutes les frettes
+  // Release all frets
   fretController.releaseAll();
 
-  // Mettre à jour l'état
+  // Update state
   currentFret = -1;
   currentMidiNote = 0;
   isPlaying = false;
@@ -142,7 +142,7 @@ bool StringInstrument::canPlayNote(uint8_t midiNote) {
     return false;
   }
 
-  // Vérifier que la note est dans la portée de cette corde
+  // Check that the note is within range of this string
   if (midiNote < config->baseMidiNote) {
     return false;
   }

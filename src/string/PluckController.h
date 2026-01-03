@@ -6,29 +6,29 @@
 #include "../config/string_configs.h"
 
 /**
- * Contrôle le servomoteur de grattage
- * Gère l'oscillation alternée autour d'une position centrale
+ * Controls the plucking servomotor
+ * Manages alternating oscillation around a center position
  */
 class PluckController {
 private:
   StringConfig* config;
   PCA9685Manager* pcaManager;
-  bool currentDirection;  // false = négatif (A), true = positif (B)
+  bool currentDirection;  // false = negative (A), true = positive (B)
 
 public:
   PluckController();
 
-  // Initialisation
+  // Initialization
   void init(StringConfig* cfg, PCA9685Manager* pca);
 
   // Actions
   bool pluck();
-  bool pluck(uint8_t velocity);  // Avec sensibilité à la vélocité
+  bool pluck(uint8_t velocity);  // With velocity sensitivity
   bool returnToCenter();
   bool mute();
   bool setPosition(uint16_t angle);
 
-  // Utilitaires
+  // Utilities
   void alternate() { currentDirection = !currentDirection; }
   bool getDirection() const { return currentDirection; }
 };

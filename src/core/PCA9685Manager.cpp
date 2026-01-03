@@ -20,15 +20,15 @@ bool PCA9685Manager::init() {
   Serial.println("Initializing PCA9685 controllers...");
   #endif
 
-  // Initialiser I2C si pas déjà fait
+  // Initialize I2C if not already done
   Wire.begin();
   Wire.setClock(I2C_FREQUENCY);
 
-  // Initialiser le pin OE (Output Enable)
+  // Initialize the OE pin (Output Enable)
   pinMode(PIN_OE, OUTPUT);
-  disablePower();  // Démarrer avec servos désactivés
+  disablePower();  // Start with servos disabled
 
-  // Initialiser chaque contrôleur
+  // Initialize each controller
   bool allOk = true;
   for (int i = 0; i < PCA_COUNT; i++) {
     if (!initController(i)) {
@@ -65,7 +65,7 @@ bool PCA9685Manager::initController(uint8_t index) {
   Serial.println(addr, HEX);
   #endif
 
-  // Créer l'objet
+  // Create the object
   controllers[index] = new Adafruit_PWMServoDriver(addr);
 
   if (controllers[index] == nullptr) {
@@ -75,11 +75,11 @@ bool PCA9685Manager::initController(uint8_t index) {
     return false;
   }
 
-  // Initialiser
+  // Initialize
   controllers[index]->begin();
   controllers[index]->setPWMFreq(SERVO_FREQ);
 
-  delay(10);  // Stabilisation
+  delay(10);  // Stabilization
 
   initialized[index] = true;
 
@@ -124,12 +124,12 @@ bool PCA9685Manager::setAngle(uint8_t pcaIndex, uint8_t pin, uint16_t angle) {
 }
 
 uint16_t PCA9685Manager::angleToPWM(uint16_t angle) {
-  // Limiter l'angle
+  // Limit the angle
   if (angle > 180) {
     angle = 180;
   }
 
-  // Conversion linéaire 0-180° → SERVO_MIN_PULSE-SERVO_MAX_PULSE
+  // Linear conversion 0-180° → SERVO_MIN_PULSE-SERVO_MAX_PULSE
   uint16_t pulse = map(angle, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
 
   return pulse;
@@ -143,7 +143,7 @@ bool PCA9685Manager::isInitialized(uint8_t pcaIndex) {
 }
 
 void PCA9685Manager::enablePower() {
-  // OE est inversé: LOW = enable, HIGH = disable
+  // OE is inverted: LOW = enable, HIGH = disable
   digitalWrite(PIN_OE, LOW);
 
   #ifdef DEBUG_VERBOSE
@@ -152,7 +152,7 @@ void PCA9685Manager::enablePower() {
 }
 
 void PCA9685Manager::disablePower() {
-  // OE est inversé: LOW = enable, HIGH = disable
+  // OE is inverted: LOW = enable, HIGH = disable
   digitalWrite(PIN_OE, HIGH);
 
   #ifdef DEBUG_VERBOSE

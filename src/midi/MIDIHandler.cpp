@@ -14,7 +14,7 @@ void MIDIHandler::init(InstrumentManager* inst) {
 }
 
 void MIDIHandler::process() {
-  // Lire les messages MIDI USB
+  // Read USB MIDI messages
   midiEventPacket_t event;
 
   do {
@@ -26,15 +26,15 @@ void MIDIHandler::process() {
 }
 
 void MIDIHandler::processMidiMessage(midiEventPacket_t event) {
-  // Extraire les informations du message
+  // Extract message information
   byte header = event.header;
   byte byte1 = event.byte1;
   byte byte2 = event.byte2;
   byte byte3 = event.byte3;
 
-  // Extraire le type de message et le canal
-  byte messageType = byte1 & 0xF0;  // 4 bits hauts
-  byte channel = (byte1 & 0x0F) + 1; // 4 bits bas (canal 1-16)
+  // Extract message type and channel
+  byte messageType = byte1 & 0xF0;  // 4 high bits
+  byte channel = (byte1 & 0x0F) + 1; // 4 low bits (channel 1-16)
 
   switch (messageType) {
     case 0x90:  // Note On
@@ -95,7 +95,7 @@ void MIDIHandler::handleNoteOn(byte channel, byte note, byte velocity) {
     return;
   }
 
-  // Jouer la note
+  // Play the note
   instrument->playNote(note, velocity);
 }
 
@@ -114,7 +114,7 @@ void MIDIHandler::handleNoteOff(byte channel, byte note, byte velocity) {
     return;
   }
 
-  // Arrêter la note
+  // Stop the note
   instrument->stopNote(note);
 }
 
@@ -148,6 +148,6 @@ void MIDIHandler::handleControlChange(byte channel, byte number, byte value) {
     instrument->stopAllNotes();
   }
 
-  // Ajouter d'autres Control Changes ici si nécessaire
+  // Add other Control Changes here if necessary
   // CC #64 = Sustain pedal, etc.
 }

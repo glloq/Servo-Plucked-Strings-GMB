@@ -10,7 +10,7 @@ bool InstrumentManager::init() {
   Serial.println("=== Instrument Manager Init ===");
   #endif
 
-  // Initialiser le gestionnaire PCA9685
+  // Initialize the PCA9685 manager
   if (!pcaManager.init()) {
     #ifdef DEBUG
     Serial.println("ERROR: PCA9685Manager init failed");
@@ -18,7 +18,7 @@ bool InstrumentManager::init() {
     return false;
   }
 
-  // Initialiser chaque corde
+  // Initialize each string
   for (int i = 0; i < NUM_STRINGS; i++) {
     #ifdef DEBUG
     Serial.print("Init string ");
@@ -28,7 +28,7 @@ bool InstrumentManager::init() {
     strings[i].init((StringConfig*)&stringConfigs[i], &pcaManager);
   }
 
-  // Mettre tous les servos en position de repos
+  // Move all servos to rest position
   moveAllServosToRestPosition();
 
   lastActivity = millis();
@@ -41,7 +41,7 @@ bool InstrumentManager::init() {
 }
 
 bool InstrumentManager::playNote(uint8_t midiNote, uint8_t velocity) {
-  // Trouver quelle corde peut jouer cette note
+  // Find which string can play this note
   NoteMapping mapping = NoteMapper::mapNote(midiNote);
 
   if (!mapping.valid) {
@@ -52,13 +52,13 @@ bool InstrumentManager::playNote(uint8_t midiNote, uint8_t velocity) {
     return false;
   }
 
-  // Activer l'alimentation des servos si nécessaire
+  // Enable servo power if necessary
   if (!servoPowerEnabled) {
     enableServoPower();
     delay(5);
   }
 
-  // Jouer la note sur la corde appropriée
+  // Play the note on the appropriate string
   bool result = strings[mapping.stringIndex].playNote(midiNote, velocity);
 
   if (result) {
@@ -69,7 +69,7 @@ bool InstrumentManager::playNote(uint8_t midiNote, uint8_t velocity) {
 }
 
 bool InstrumentManager::stopNote(uint8_t midiNote) {
-  // Trouver quelle corde joue cette note
+  // Find which string is playing this note
   int8_t stringIdx = findStringPlayingNote(midiNote);
 
   if (stringIdx < 0) {
@@ -81,7 +81,7 @@ bool InstrumentManager::stopNote(uint8_t midiNote) {
     return false;
   }
 
-  // Arrêter la note
+  // Stop the note
   bool result = strings[stringIdx].stopNote(AUTO_MUTE);
 
   lastActivity = millis();
@@ -116,7 +116,7 @@ void InstrumentManager::disableServoPower() {
 }
 
 void InstrumentManager::update() {
-  // Vérifier les timeouts pour économie d'énergie
+  // Check timeouts for power saving
   checkTimeouts();
 }
 
@@ -162,7 +162,7 @@ void InstrumentManager::moveAllServosToRestPosition() {
   for (int s = 0; s < NUM_STRINGS; s++) {
     StringConfig& cfg = (StringConfig&)stringConfigs[s];
 
-    // Frettes → Position ouverte (repos)
+    // Frets → Open position (rest)
     for (int f = 0; f < cfg.numFrets; f++) {
       uint16_t angle = cfg.fretCalibration[f].angleOpen;
 
@@ -176,13 +176,13 @@ void InstrumentManager::moveAllServosToRestPosition() {
       delay(5);
     }
 
-    // Pluck → Position centrale (repos)
+    // Pluck → Center position (rest)
     uint16_t pwm = pcaManager.angleToPWM(cfg.pluckAngleCenter);
     ServoMapping& pluckServo = cfg.pluckServo;
     pcaManager.setPWM(pluckServo.pcaIndex, pluckServo.pin, pwm);
   }
 
-  delay(500);  // Laisser les servos se positionner
+  delay(500);  // Let the servos position themselves
   disableServoPower();
 
   #ifdef DEBUG
@@ -194,7 +194,7 @@ void InstrumentManager::checkTimeouts() {
   static unsigned long lastCheck = 0;
   unsigned long now = millis();
 
-  // Vérifier toutes les 500ms
+  // Check every 500ms
   if (now - lastCheck < 500) {
     return;
   }
@@ -202,7 +202,7 @@ void InstrumentManager::checkTimeouts() {
 
   bool anyActive = false;
 
-  // Parcourir toutes les cordes
+  // Iterate through all strings
   for (int i = 0; i < NUM_STRINGS; i++) {
     if (strings[i].getIsPlaying()) {
       unsigned long inactivity = now - strings[i].getLastActivity();
@@ -214,7 +214,7 @@ void InstrumentManager::checkTimeouts() {
         Serial.println(" timeout - releasing");
         #endif
 
-        // Timeout atteint, relâcher
+        // Timeout reached, release
         strings[i].stopNote(false);
       } else {
         anyActive = true;
@@ -222,7 +222,7 @@ void InstrumentManager::checkTimeouts() {
     }
   }
 
-  // Si aucune corde active, couper l'alimentation
+  // If no active strings, cut power
   if (!anyActive && servoPowerEnabled) {
     #ifdef DEBUG_VERBOSE
     Serial.println("No active strings - disabling servo power");
