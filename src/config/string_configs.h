@@ -4,89 +4,89 @@
 #include <Arduino.h>
 #include "settings.h"
 
-// ========== STRUCTURE DE MAPPING SERVO ==========
+// ========== SERVO MAPPING STRUCTURE ==========
 /**
- * Permet de mapper individuellement chaque servo à un PCA et un pin
- * AVANTAGES:
- * - Câblage flexible: les frettes n'ont pas besoin d'être branchées dans l'ordre
- * - Réparation facile: si un pin PCA est défectueux, on peut utiliser un autre
- * - Optimisation du câble: on peut minimiser la longueur des câbles
- * - Multi-PCA: une corde peut utiliser plusieurs PCA si nécessaire
+ * Allows individual mapping of each servo to a PCA and pin
+ * ADVANTAGES:
+ * - Flexible wiring: frets don't need to be connected in order
+ * - Easy repair: if a PCA pin is defective, another can be used
+ * - Cable optimization: cable length can be minimized
+ * - Multi-PCA: a string can use multiple PCAs if necessary
  */
 struct ServoMapping {
-  uint8_t pcaIndex;             // Index du PCA9685 (0 à PCA_COUNT-1)
-  uint8_t pin;                  // Pin sur le PCA9685 (0-15)
+  uint8_t pcaIndex;             // PCA9685 index (0 to PCA_COUNT-1)
+  uint8_t pin;                  // Pin on the PCA9685 (0-15)
 };
 
-// ========== STRUCTURE DE CALIBRATION FRETTE ==========
+// ========== FRET CALIBRATION STRUCTURE ==========
 struct FretCalibration {
-  uint16_t angleOpen;           // Angle position repos (corde libre)
-  uint16_t angleClosed;         // Angle position activée (corde appuyée)
+  uint16_t angleOpen;           // Rest position angle (string free)
+  uint16_t angleClosed;         // Activated position angle (string pressed)
 };
 
-// ========== STRUCTURE DE CONFIGURATION ==========
+// ========== CONFIGURATION STRUCTURE ==========
 struct StringConfig {
-  uint8_t baseMidiNote;         // Note MIDI à vide
-  uint8_t numFrets;             // Nombre de frettes
+  uint8_t baseMidiNote;         // Open string MIDI note
+  uint8_t numFrets;             // Number of frets
 
-  // Mapping des servos de frettes (1 par frette)
-  ServoMapping fretServos[MAX_FRETS];  // Mapping PCA+pin pour chaque frette
+  // Fret servo mapping (1 per fret)
+  ServoMapping fretServos[MAX_FRETS];  // PCA+pin mapping for each fret
 
-  // Mapping du servo de grattage
-  ServoMapping pluckServo;      // Mapping PCA+pin pour le pluck
+  // Plucking servo mapping
+  ServoMapping pluckServo;      // PCA+pin mapping for pluck
 
-  // Calibration des frettes
-  FretCalibration fretCalibration[MAX_FRETS];  // Open + Closed pour chaque frette
-  bool fretReversed[MAX_FRETS];                // Sens inversé?
+  // Fret calibration
+  FretCalibration fretCalibration[MAX_FRETS];  // Open + Closed for each fret
+  bool fretReversed[MAX_FRETS];                // Reversed direction?
 
-  // Calibration du pluck (oscillation autour d'un centre)
-  uint16_t pluckAngleCenter;    // Position centrale repos (ex: 90°)
-  uint16_t pluckAmplitude;      // Amplitude oscillation (ex: 15° → ±15°)
-  uint16_t pluckMuteAngle;      // Angle pour étouffer (ex: 90°)
+  // Pluck calibration (oscillation around center)
+  uint16_t pluckAngleCenter;    // Center rest position (e.g. 90°)
+  uint16_t pluckAmplitude;      // Oscillation amplitude (e.g. 15° → ±15°)
+  uint16_t pluckMuteAngle;      // Muting angle (e.g. 90°)
 };
 
-// ========== CONFIGURATION BASSE 4 CORDES ==========
-// Accordage standard: E-A-D-G
+// ========== 4-STRING BASS CONFIGURATION ==========
+// Standard tuning: E-A-D-G
 
 const StringConfig stringConfigs[NUM_STRINGS] = {
-  // ===== Corde 0: E2 (MIDI 40) =====
+  // ===== String 0: E2 (MIDI 40) =====
   {
     .baseMidiNote = 40,           // E2
     .numFrets = 12,
 
-    // Mapping des servos de frettes
+    // Fret servo mapping
     .fretServos = {
       {0,0},  {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11},
-      // Frettes 13-24 non utilisées
+      // Frets 13-24 unused
       {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}
     },
 
-    // Servo de grattage
+    // Plucking servo
     .pluckServo = {0, 12},
 
-    // Calibration frettes: {angleOpen, angleClosed}
+    // Fret calibration: {angleOpen, angleClosed}
     .fretCalibration = {
       //  Open Closed
       {   45,  120  }, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
       {   45,  120  }, {45, 120}, {45, 120}, {45, 120}, {45, 120}, {45, 120},
-      // Frettes 13-24 non utilisées
+      // Frets 13-24 unused
       {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90},
       {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}, {90, 90}
     },
 
-    // Sens de rotation
+    // Rotation direction
     .fretReversed = {
       false, false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false, false, false
     },
 
-    // Calibration pluck
+    // Pluck calibration
     .pluckAngleCenter = 90,
     .pluckAmplitude = 15,
     .pluckMuteAngle = 90
   },
 
-  // ===== Corde 1: A2 (MIDI 45) =====
+  // ===== String 1: A2 (MIDI 45) =====
   {
     .baseMidiNote = 45,
     .numFrets = 12,
@@ -115,7 +115,7 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .pluckMuteAngle = 90
   },
 
-  // ===== Corde 2: D3 (MIDI 50) =====
+  // ===== String 2: D3 (MIDI 50) =====
   {
     .baseMidiNote = 50,
     .numFrets = 12,
