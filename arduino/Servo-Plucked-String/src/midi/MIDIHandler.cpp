@@ -8,8 +8,8 @@ void MIDIHandler::init(InstrumentManager* inst) {
   instrument = inst;
 
   #ifdef DEBUG
-  Serial.println("Initializing MIDIUSB...");
-  Serial.println("MIDIUSB ready - listening on all channels");
+  Serial.println(F("Initializing MIDIUSB..."));
+  Serial.println(F("MIDIUSB ready - listening on all channels"));
   #endif
 }
 
@@ -56,23 +56,23 @@ void MIDIHandler::processMidiMessage(midiEventPacket_t event) {
 
     #ifdef DEBUG_VERBOSE
     case 0xC0:  // Program Change
-      Serial.print("[MIDI] Program Change - Ch:");
+      Serial.print(F("[MIDI] Program Change - Ch:"));
       Serial.print(channel);
-      Serial.print(" Program:");
+      Serial.print(F(" Program:"));
       Serial.println(byte2);
       break;
 
     case 0xE0:  // Pitch Bend
-      Serial.print("[MIDI] Pitch Bend - Ch:");
+      Serial.print(F("[MIDI] Pitch Bend - Ch:"));
       Serial.print(channel);
-      Serial.print(" Value:");
+      Serial.print(F(" Value:"));
       Serial.println((byte3 << 7) | byte2);
       break;
     #endif
 
     default:
       #ifdef DEBUG_VERBOSE
-      Serial.print("[MIDI] Unknown message type: 0x");
+      Serial.print(F("[MIDI] Unknown message type: 0x"));
       Serial.println(messageType, HEX);
       #endif
       break;
@@ -81,13 +81,13 @@ void MIDIHandler::processMidiMessage(midiEventPacket_t event) {
 
 void MIDIHandler::handleNoteOn(byte channel, byte note, byte velocity) {
   #ifdef DEBUG
-  Serial.print("[MIDI] NOTE_ON - Ch:");
+  Serial.print(F("[MIDI] NOTE_ON - Ch:"));
   Serial.print(channel);
-  Serial.print(" Note:");
+  Serial.print(F(" Note:"));
   Serial.print(note);
-  Serial.print(" (");
+  Serial.print(F(" ("));
   Serial.print(NoteMapper::noteToString(note));
-  Serial.print(") Vel:");
+  Serial.print(F(") Vel:"));
   Serial.println(velocity);
   #endif
 
@@ -101,13 +101,13 @@ void MIDIHandler::handleNoteOn(byte channel, byte note, byte velocity) {
 
 void MIDIHandler::handleNoteOff(byte channel, byte note, byte velocity) {
   #ifdef DEBUG
-  Serial.print("[MIDI] NOTE_OFF - Ch:");
+  Serial.print(F("[MIDI] NOTE_OFF - Ch:"));
   Serial.print(channel);
-  Serial.print(" Note:");
+  Serial.print(F(" Note:"));
   Serial.print(note);
-  Serial.print(" (");
+  Serial.print(F(" ("));
   Serial.print(NoteMapper::noteToString(note));
-  Serial.println(")");
+  Serial.println(F(")"));
   #endif
 
   if (instrument == nullptr) {
@@ -120,11 +120,11 @@ void MIDIHandler::handleNoteOff(byte channel, byte note, byte velocity) {
 
 void MIDIHandler::handleControlChange(byte channel, byte number, byte value) {
   #ifdef DEBUG_VERBOSE
-  Serial.print("[MIDI] CC - Ch:");
+  Serial.print(F("[MIDI] CC - Ch:"));
   Serial.print(channel);
-  Serial.print(" CC#:");
+  Serial.print(F(" CC#:"));
   Serial.print(number);
-  Serial.print(" Val:");
+  Serial.print(F(" Val:"));
   Serial.println(value);
   #endif
 
@@ -135,7 +135,7 @@ void MIDIHandler::handleControlChange(byte channel, byte number, byte value) {
   // CC #123 = All Notes Off
   if (number == 123) {
     #ifdef DEBUG
-    Serial.println("[MIDI] All Notes Off");
+    Serial.println(F("[MIDI] All Notes Off"));
     #endif
     instrument->stopAllNotes();
   }
@@ -143,7 +143,7 @@ void MIDIHandler::handleControlChange(byte channel, byte number, byte value) {
   // CC #120 = All Sound Off
   if (number == 120) {
     #ifdef DEBUG
-    Serial.println("[MIDI] All Sound Off");
+    Serial.println(F("[MIDI] All Sound Off"));
     #endif
     instrument->stopAllNotes();
   }

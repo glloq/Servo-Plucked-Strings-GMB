@@ -5,12 +5,12 @@ Ce document décrit les limites **techniques** de l'implémentation Arduino
 Elles servent à dimensionner un instrument réaliste et à éviter les
 mauvaises surprises.
 
-> Résumé : le code utilise la bibliothèque **MIDIUSB**, donc une carte à
-> **USB natif ATmega32u4 / SAMD / SAM** (Leonardo, Micro, Zero, MKR, Due) —
-> une carte **SAMD (Zero/MKR)** est conseillée pour sa RAM. Chaque note
-> frettée engage un délai bloquant d'environ **100 ms**, la polyphonie est
-> limitée à **1 note par corde**, et la configuration consomme de la **SRAM**
-> proportionnellement au nombre de cordes et de frettes.
+> Résumé : le projet cible l'**Arduino Leonardo** (ATmega32u4, USB natif,
+> bibliothèque MIDIUSB). Sa **SRAM de 2,5 Ko** est la contrainte principale :
+> la configuration en consomme ~712 o, et les logs `DEBUG` sont gardés en
+> flash grâce au macro `F()` (voir §1.3). Chaque note frettée engage un délai
+> bloquant d'environ **100 ms**, et la polyphonie est limitée à **1 note par
+> corde**.
 
 ---
 
@@ -43,20 +43,26 @@ MIDIUSB), le tas et la pile.
 
 | Carte | SRAM | Config 4×12 | Verdict |
 |-------|-----:|------------:|---------|
-| Uno / Nano (ATmega328) | 2 Ko | ~712 o (35 %) | ❌ pas d'USB natif |
-| Leonardo / Micro (ATmega32u4) | 2,5 Ko | ~712 o (28 %) | ⚠️ OK pour **petites** configs |
-| Zero / MKR (SAMD21) | 32 Ko | ~712 o (2 %) | ✅ conseillé (MIDIUSB) |
-| Teensy 4.x | 1 Mo | négligeable | ✅ mais port `usbMIDI` requis |
+| **Leonardo / Micro (ATmega32u4)** | 2,5 Ko | ~712 o (28 %) | ✅ **cible du projet** |
+| Uno / Nano (ATmega328) | 2 Ko | — | ❌ pas d'USB natif |
+| Zero / MKR (SAMD21) | 32 Ko | ~712 o (2 %) | ○ compatible MIDIUSB (non ciblé) |
+| Teensy 4.x | 1 Mo | négligeable | ○ port `usbMIDI` requis |
+
+Sur le Leonardo, la config par défaut (~712 o, 28 %) laisse de la marge pour
+les tampons Wire/Serial/MIDIUSB et la pile, **d'autant que les logs `DEBUG`
+sont désormais en flash** (`F()`). Pour de grosses configurations, voir §1.3.
 
 ### 1.3 Réduire l'empreinte
 
+- ✅ **Déjà fait — logs en flash** : tous les littéraux de log passent par
+  `F()` (et un overload `Debug::log(const __FlashStringHelper*)`), donc le
+  mode `DEBUG` ne consomme quasiment plus de SRAM sur le Leonardo.
 - **Ajuster `MAX_FRETS`** à votre maximum réel : passer de 24 à 12 fait
   tomber la `StringConfig` à ≈ 94 o (~376 o pour 4 cordes, **≈ 2× moins**).
-- **Désactiver `DEBUG`** en production : sur AVR, chaque littéral
-  `Serial.print("…")` **non** enveloppé dans `F()` est copié en SRAM. Le
-  mode debug consomme donc beaucoup de RAM (et de flash) en plus.
-- Sur AVR uniquement : envelopper les littéraux dans `F(...)`, ou porter
-  `stringConfigs[]` en `PROGMEM` (voir `AUDIT.md`, recommandations).
+- **Désactiver `DEBUG`** pour la version finale : économise en plus la flash
+  et le peu de SRAM restant lié aux logs.
+- Pour de très grosses configurations : porter `stringConfigs[]` en
+  `PROGMEM` (accès via `memcpy_P`) — voir `AUDIT.md`, recommandation R1.
 
 ---
 
@@ -116,23 +122,21 @@ réalité physique ; les réduire trop fait « rater » la position aux servos.
 
 ## 4. Limites de plateforme (matériel)
 
-### 4.1 Microcontrôleur — bibliothèque MIDIUSB requise
+### 4.1 Microcontrôleur — Arduino Leonardo (cible du projet)
 
-Le firmware utilise la bibliothèque **MIDIUSB** (`#include <MIDIUSB.h>`,
-`MidiUSB.read()`), qui vise les cartes à **USB natif ATmega32u4 / SAMD / SAM** :
+Le projet est **conçu pour l'Arduino Leonardo** (ATmega32u4, USB natif). Le
+firmware utilise la bibliothèque **MIDIUSB** (`#include <MIDIUSB.h>`,
+`MidiUSB.read()`).
 
-- ✅ **Supportés tels quels** : Leonardo, Micro, (Pro)Micro (32u4) ; Zero, MKR
-  (SAMD21) ; Due (SAM3X).
-- ⭐ **Conseillé** : une carte **SAMD (Zero / MKR)** — même USB natif que le
-  32u4, mais **32 Ko de SRAM** (contre 2,5 Ko), donc large marge pour la
-  configuration et les buffers.
-- ⚠️ **Teensy 3.x / 4.x** : n'utilise **pas** la bibliothèque MIDIUSB mais sa
-  propre API `usbMIDI`. Très puissant (600 MHz, 1 Mo de RAM) mais nécessite
-  d'**adapter `src/midi/MIDIHandler.*`** (remplacer `MidiUSB.read()` par
-  `usbMIDI.read()`). Ce n'est donc pas un remplacement direct.
-- ❌ **Non supportés** : Uno, Nano, Mega (ATmega328/2560) — pas d'USB natif ;
-  `MIDIUSB.h` ne compile pas. Il faudrait un pont série-MIDI et une autre
-  bibliothèque MIDI.
+- ✅ **Cible** : **Arduino Leonardo** (ATmega32u4, 2,5 Ko SRAM, 32 Ko flash).
+  Le **Micro** (même puce) est interchangeable.
+- ○ **Autres cartes MIDIUSB** (Zero, MKR, Due) : compatibles au niveau
+  bibliothèque mais **non ciblées ni testées** ici. Une carte SAMD (Zero/MKR)
+  offrirait plus de SRAM si le projet devait grossir.
+- ⚠️ **Teensy** : n'utilise **pas** MIDIUSB mais l'API `usbMIDI` → il faudrait
+  adapter `src/midi/MIDIHandler.*`. Pas un remplacement direct.
+- ❌ **Uno / Nano / Mega** (ATmega328/2560) : pas d'USB natif ; `MIDIUSB.h` ne
+  compile pas.
 
 ### 4.2 Contrôleurs PCA9685
 
@@ -165,8 +169,8 @@ Le firmware utilise la bibliothèque **MIDIUSB** (`#include <MIDIUSB.h>`,
 | Latence note frettée | ~100 ms | `FRET_STABILIZATION_DELAY` |
 | Débit / corde | ~5–8 notes/s | délais + mécanique |
 | Maintien max d'une note | 5 s | `SERVO_TIMEOUT` |
-| SRAM config (4×12) | ~712 o | `MAX_FRETS`, `NUM_STRINGS` |
-| Plateforme | USB natif (Teensy conseillé) | matériel |
+| SRAM config (4×12) | ~712 o / 2,5 Ko | `MAX_FRETS`, `NUM_STRINGS` |
+| Plateforme | Arduino Leonardo (32u4) | matériel |
 
 Voir aussi [`AUDIT.md`](AUDIT.md) pour l'état de santé du code et les
 recommandations d'optimisation.

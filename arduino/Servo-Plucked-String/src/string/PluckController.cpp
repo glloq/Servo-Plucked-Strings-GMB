@@ -12,11 +12,11 @@ void PluckController::init(StringConfig* cfg, PCA9685Manager* pca) {
   currentDirection = false;
 
   #ifdef DEBUG
-  Serial.print("PluckController init - center: ");
+  Serial.print(F("PluckController init - center: "));
   Serial.print(cfg->pluckAngleCenter);
-  Serial.print("°, amplitude: ±");
+  Serial.print(F("°, amplitude: ±"));
   Serial.print(cfg->pluckAmplitude);
-  Serial.println("°");
+  Serial.println(F("°"));
   #endif
 
   // Initialize to center position
@@ -26,7 +26,7 @@ void PluckController::init(StringConfig* cfg, PCA9685Manager* pca) {
 bool PluckController::pluck() {
   if (config == nullptr || pcaManager == nullptr) {
     #ifdef DEBUG
-    Serial.println("ERROR: PluckController not initialized");
+    Serial.println(F("ERROR: PluckController not initialized"));
     #endif
     return false;
   }
@@ -55,13 +55,13 @@ bool PluckController::pluck() {
   }
 
   #ifdef DEBUG
-  Serial.print("Pluck - angle: ");
+  Serial.print(F("Pluck - angle: "));
   Serial.print(angle);
-  Serial.print("° (");
+  Serial.print(F("° ("));
   Serial.print(currentDirection ? "B↑" : "A↓");
-  Serial.print(") PCA");
+  Serial.print(F(") PCA"));
   Serial.print(servo.pcaIndex);
-  Serial.print(", pin ");
+  Serial.print(F(", pin "));
   Serial.println(servo.pin);
   #endif
 
@@ -103,11 +103,11 @@ bool PluckController::pluck(uint8_t velocity) {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Pluck velocity ");
+  Serial.print(F("Pluck velocity "));
   Serial.print(velocity);
-  Serial.print(" → amplitude ");
+  Serial.print(F(" → amplitude "));
   Serial.print(dynamicAmplitude);
-  Serial.print("° → angle ");
+  Serial.print(F("° → angle "));
   Serial.println(angle);
   #endif
 
@@ -130,7 +130,7 @@ bool PluckController::returnToCenter() {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Pluck return to center - angle: ");
+  Serial.print(F("Pluck return to center - angle: "));
   Serial.println(angle);
   #endif
 
@@ -151,7 +151,7 @@ bool PluckController::mute() {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Pluck mute - angle: ");
+  Serial.print(F("Pluck mute - angle: "));
   Serial.println(angle);
   #endif
 

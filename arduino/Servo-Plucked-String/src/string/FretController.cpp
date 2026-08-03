@@ -16,9 +16,9 @@ void FretController::init(StringConfig* cfg, PCA9685Manager* pca) {
   activeFret = -1;
 
   #ifdef DEBUG
-  Serial.print("FretController init - ");
+  Serial.print(F("FretController init - "));
   Serial.print(cfg->numFrets);
-  Serial.println(" frets");
+  Serial.println(F(" frets"));
   #endif
 
   // Set all frets to open position (rest)
@@ -28,7 +28,7 @@ void FretController::init(StringConfig* cfg, PCA9685Manager* pca) {
 bool FretController::pressFret(uint8_t fretNum) {
   if (config == nullptr || pcaManager == nullptr) {
     #ifdef DEBUG
-    Serial.println("ERROR: FretController not initialized");
+    Serial.println(F("ERROR: FretController not initialized"));
     #endif
     return false;
   }
@@ -38,11 +38,11 @@ bool FretController::pressFret(uint8_t fretNum) {
   // numFrets frets, and the top note is reachable).
   if (fretNum < 1 || fretNum > config->numFrets) {
     #ifdef DEBUG
-    Serial.print("ERROR: Fret number ");
+    Serial.print(F("ERROR: Fret number "));
     Serial.print(fretNum);
-    Serial.print(" out of range (1..");
+    Serial.print(F(" out of range (1.."));
     Serial.print(config->numFrets);
-    Serial.println(")");
+    Serial.println(F(")"));
     #endif
     return false;
   }
@@ -71,15 +71,15 @@ bool FretController::pressFret(uint8_t fretNum) {
   activeFret = fretNum;
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Press fret ");
+  Serial.print(F("Press fret "));
   Serial.print(fretNum);
-  Serial.print(" - angle: ");
+  Serial.print(F(" - angle: "));
   Serial.print(angle);
-  Serial.print("° (PCA");
+  Serial.print(F("° (PCA"));
   Serial.print(servo.pcaIndex);
-  Serial.print(", pin ");
+  Serial.print(F(", pin "));
   Serial.print(servo.pin);
-  Serial.println(")");
+  Serial.println(F(")"));
   #endif
 
   return true;
@@ -120,11 +120,11 @@ bool FretController::releaseFret(uint8_t fretNum) {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Release fret ");
+  Serial.print(F("Release fret "));
   Serial.print(fretNum);
-  Serial.print(" - angle: ");
+  Serial.print(F(" - angle: "));
   Serial.print(angle);
-  Serial.println("°");
+  Serial.println(F("°"));
   #endif
 
   return true;
@@ -136,7 +136,7 @@ bool FretController::releaseAll() {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.println("Releasing all frets");
+  Serial.println(F("Releasing all frets"));
   #endif
 
   bool allOk = true;

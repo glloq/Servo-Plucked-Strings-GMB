@@ -12,9 +12,13 @@ public:
   // Serial port initialization
   static void init();
 
-  // Logs with timestamp
+  // Logs with timestamp.
+  // The F() / __FlashStringHelper overloads keep the literal in flash on AVR
+  // (e.g. Leonardo), which matters because SRAM is scarce there.
   static void log(const char* message);
   static void log(const char* message, int value);
+  static void log(const __FlashStringHelper* message);
+  static void log(const __FlashStringHelper* message, int value);
 
   // System information display
   static void printSystemInfo();

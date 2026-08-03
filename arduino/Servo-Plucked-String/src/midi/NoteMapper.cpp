@@ -35,22 +35,22 @@ NoteMapping NoteMapper::mapNote(uint8_t midiNote) {
     result.valid = true;
 
     #ifdef DEBUG_VERBOSE
-    Serial.print("MIDI ");
+    Serial.print(F("MIDI "));
     Serial.print(midiNote);
-    Serial.print(" (");
+    Serial.print(F(" ("));
     Serial.print(noteToString(midiNote));
-    Serial.print(") → String ");
+    Serial.print(F(") → String "));
     Serial.print(bestString);
-    Serial.print(", Fret ");
+    Serial.print(F(", Fret "));
     Serial.println(bestFret);
     #endif
   } else {
     #ifdef DEBUG
-    Serial.print("WARNING: MIDI note ");
+    Serial.print(F("WARNING: MIDI note "));
     Serial.print(midiNote);
-    Serial.print(" (");
+    Serial.print(F(" ("));
     Serial.print(noteToString(midiNote));
-    Serial.println(") out of range");
+    Serial.println(F(") out of range"));
     #endif
   }
 

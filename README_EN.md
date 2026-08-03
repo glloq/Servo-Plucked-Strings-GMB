@@ -75,8 +75,8 @@ Plucking servo with alternating movement (oscillation around center):
 
 ## 🚀 Quick Start (Arduino)
 
-1. **Hardware**: a **native-USB** board (Leonardo, Micro, Zero, MKR, Due) +
-   one or more **PCA9685** boards + servomotors + a 5-6 V power supply.
+1. **Hardware**: an **Arduino Leonardo** (ATmega32u4, native USB) + one or
+   more **PCA9685** boards + servomotors + a 5-6 V power supply.
 2. **Libraries**: *Adafruit PWM Servo Driver* and *MIDIUSB*.
 3. **Open** `arduino/Servo-Plucked-String/Servo-Plucked-String.ino` in the
    Arduino IDE (or `pio run` with `arduino/platformio.ini`).

@@ -24,6 +24,9 @@
 - **[Moyen] Décalage d'indice des frettes** : la note la plus haute de chaque
   corde échouait silencieusement. Corrigé (frette N → index N-1).
 - **[Mineur]** test mort `if (angle < 0)` et variable `header` inutilisée.
+- **[Leonardo/SRAM]** tous les littéraux de log passés en `F()` (+ overload
+  `Debug::log(const __FlashStringHelper*)`) → `DEBUG` tient en SRAM sur la
+  cible **Arduino Leonardo** (2,5 Ko). Doc recentrée sur le Leonardo.
 
 ### Ajouté
 - `docs/LIMITES.md` — limites du projet (taille mémoire, rapidité/latence,

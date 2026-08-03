@@ -147,20 +147,21 @@ Depuis le dossier `arduino/` (qui contient `platformio.ini`) :
 pio run -e leonardo -t upload     # ou -e micro / -e zero / -e due
 ```
 
-### Plateforme Recommandée
+### Plateforme cible
 
-Le code utilise la bibliothèque **MIDIUSB**, donc une carte à **USB natif
-ATmega32u4 / SAMD / SAM** :
+Le projet est **conçu pour l'Arduino Leonardo** (ATmega32u4, USB natif),
+via la bibliothèque **MIDIUSB**.
 
-- ✅ **Leonardo / Micro** (32u4) — courant, mais SRAM limitée (2,5 Ko)
-- ⭐ **Zero / MKR** (SAMD21) — **conseillé** : même USB natif, 32 Ko de SRAM
-- ✅ **Due** (SAM3X)
+- ✅ **Arduino Leonardo** — cible du projet. Le **Micro** (même puce) est
+  interchangeable. SRAM limitée (2,5 Ko) → voir les limites ci-dessous.
+- ○ **Zero / MKR / Due** : compatibles MIDIUSB mais **non ciblés/testés** ici.
+- ⚠️ **Teensy** : API `usbMIDI` (≠ MIDIUSB) → il faut adapter
+  `src/midi/MIDIHandler.*`.
+- ❌ **Uno / Nano / Mega** : pas d'USB natif → `MIDIUSB` ne compile pas.
 
-⚠️ **Teensy** : utilise l'API `usbMIDI` (≠ MIDIUSB). Puissant, mais il faut
-adapter `src/midi/MIDIHandler.*`.
-❌ **Uno / Nano / Mega** : pas d'USB natif → `MIDIUSB` ne compile pas.
-
-Détails et arbitrages : [`docs/LIMITES.md`](docs/LIMITES.md).
+> 💡 Sur le Leonardo, les logs `DEBUG` sont gardés en **flash** (macro `F()`),
+> donc activables sans saturer la SRAM. Détails :
+> [`docs/LIMITES.md`](docs/LIMITES.md).
 
 ## 🎮 Utilisation
 

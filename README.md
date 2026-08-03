@@ -76,8 +76,8 @@ Servo de grattage avec mouvement alterné (oscillation autour d'un centre):
 
 ## 🚀 Démarrage Rapide (Arduino)
 
-1. **Matériel** : une carte à **USB natif** (Leonardo, Micro, Zero, MKR, Due)
-   + un ou plusieurs **PCA9685** + servomoteurs + alimentation 5-6 V.
+1. **Matériel** : un **Arduino Leonardo** (ATmega32u4, USB natif) + un ou
+   plusieurs **PCA9685** + servomoteurs + alimentation 5-6 V.
 2. **Bibliothèques** : *Adafruit PWM Servo Driver* et *MIDIUSB*.
 3. **Ouvrir** `arduino/Servo-Plucked-String/Servo-Plucked-String.ino` dans
    l'IDE Arduino (ou `pio run` avec `arduino/platformio.ini`).

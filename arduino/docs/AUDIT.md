@@ -110,6 +110,11 @@ avec cette convention. Documenté dans `string_configs.h`.
   `uint16_t` (jamais négatif) → supprimé ; borne haute conservée.
 - **L2** — `MIDIHandler::processMidiMessage` : variable `header` inutilisée
   (warning `-Wall`) → retirée (le statut MIDI est décodé depuis `byte1`).
+- **L3** — **SRAM Leonardo (cible du projet)** : tous les littéraux de log
+  (`Serial.print("…")`) passent maintenant par `F()`, avec un overload
+  `Debug::log(const __FlashStringHelper*)`. Sur l'ATmega32u4 (2,5 Ko de SRAM),
+  ces chaînes restent en flash au lieu d'être copiées en RAM → `DEBUG` reste
+  utilisable sans risque de dépassement. Voir `LIMITES.md §1.3`.
 
 ---
 
@@ -122,9 +127,9 @@ appliqués pour rester non-intrusif ; à décider par le mainteneur.
   copié en SRAM. Sur Leonardo/Micro, envisager `PROGMEM` (accès via
   `memcpy_P`) ou réduire `MAX_FRETS`. Sans objet sur Teensy. Voir
   `LIMITES.md §1`.
-- **R2 — Littéraux `F()`** : avec `DEBUG`, les `Serial.print("…")` non
-  enveloppés dans `F()` consomment de la SRAM sur AVR. Recommandé si cible
-  AVR ; inutile sur Teensy.
+- **R2 — Littéraux `F()`** : ✅ **fait** (voir L3 ci-dessus). Reste une piste
+  facultative : porter aussi `stringConfigs[]` en `PROGMEM` (R1) si besoin de
+  plus de SRAM.
 - **R3 — `NoteMapper::noteToString`** renvoie un `static char[8]` partagé :
   correct tel qu'utilisé (un appel par `print`), mais fragile si appelé deux
   fois dans une même expression.
@@ -136,12 +141,11 @@ appliqués pour rester non-intrusif ; à décider par le mainteneur.
 - **R6 — Fichier `LICENSE` absent** alors que le README annonce MIT et
   pointe vers `LICENSE`. À ajouter.
 - **R7 — Plateforme vs bibliothèque MIDI** : le code utilise la bibliothèque
-  **MIDIUSB** (`MidiUSB.read()`), qui cible les cartes 32u4/SAMD/SAM
-  (Leonardo, Micro, Zero, MKR, Due). L'ancien README recommandait le
-  **Teensy**, qui emploie une API **différente** (`usbMIDI`) et exigerait
-  d'adapter `MIDIHandler`. La documentation a été corrigée en ce sens
-  (voir `LIMITES.md §4.1`) ; pour viser réellement le Teensy, porter
-  `MIDIHandler` sur `usbMIDI`.
+  **MIDIUSB** (`MidiUSB.read()`). La **cible confirmée du projet est l'Arduino
+  Leonardo** (32u4), cohérente avec MIDIUSB. L'ancien README recommandait le
+  **Teensy**, qui emploie une API **différente** (`usbMIDI`) : documentation
+  corrigée et recentrée sur le Leonardo (voir `LIMITES.md §4.1`). Pour viser
+  le Teensy, il faudrait porter `MIDIHandler` sur `usbMIDI`.
 
 ---
 
@@ -155,4 +159,6 @@ appliqués pour rester non-intrusif ; à décider par le mainteneur.
 | `src/config/settings.h` | avertissement macros, `MUTE_DELAY` |
 | `src/config/string_configs.h` | convention d'indexation documentée |
 | `src/midi/MIDIHandler.cpp` | L2 (variable inutilisée) |
+| `src/utils/Debug.{h,cpp}` | L3 (overloads `F()` / `__FlashStringHelper`) |
+| *(tous les `.cpp` + `.ino`)* | L3 (`F()` sur tous les logs) |
 | *(arborescence)* | C2 (structure de sketch Arduino) |

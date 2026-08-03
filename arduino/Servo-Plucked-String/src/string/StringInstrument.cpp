@@ -12,7 +12,7 @@ void StringInstrument::init(StringConfig* cfg, PCA9685Manager* pcaManager) {
   config = cfg;
 
   #ifdef DEBUG
-  Serial.print("StringInstrument init - MIDI base note: ");
+  Serial.print(F("StringInstrument init - MIDI base note: "));
   Serial.println(cfg->baseMidiNote);
   #endif
 
@@ -35,7 +35,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
   // Check that this string can play this note
   if (!canPlayNote(midiNote)) {
     #ifdef DEBUG
-    Serial.print("ERROR: String cannot play MIDI note ");
+    Serial.print(F("ERROR: String cannot play MIDI note "));
     Serial.println(midiNote);
     #endif
     return false;
@@ -45,11 +45,11 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
   int8_t fret = midiNote - config->baseMidiNote;
 
   #ifdef DEBUG
-  Serial.print("Play note ");
+  Serial.print(F("Play note "));
   Serial.print(midiNote);
-  Serial.print(" → fret ");
+  Serial.print(F(" → fret "));
   Serial.print(fret);
-  Serial.print(", velocity ");
+  Serial.print(F(", velocity "));
   Serial.println(velocity);
   #endif
 
@@ -113,11 +113,11 @@ bool StringInstrument::stopNote(bool mute) {
   }
 
   #ifdef DEBUG
-  Serial.print("Stop note ");
+  Serial.print(F("Stop note "));
   Serial.print(currentMidiNote);
-  Serial.print(" (mute: ");
+  Serial.print(F(" (mute: "));
   Serial.print(mute ? "yes" : "no");
-  Serial.println(")");
+  Serial.println(F(")"));
   #endif
 
   // The caller already applied the AUTO_MUTE policy (see InstrumentManager),

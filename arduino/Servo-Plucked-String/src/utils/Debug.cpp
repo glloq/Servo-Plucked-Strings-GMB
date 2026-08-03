@@ -10,9 +10,9 @@ void Debug::init() {
   }
 
   Serial.println();
-  Serial.println("========================================");
-  Serial.println("  Orchestrion Plucked Strings Servos");
-  Serial.println("========================================");
+  Serial.println(F("========================================"));
+  Serial.println(F("  Orchestrion Plucked Strings Servos"));
+  Serial.println(F("========================================"));
   Serial.println();
 
   printSystemInfo();
@@ -21,37 +21,57 @@ void Debug::init() {
 
 void Debug::log(const char* message) {
   #ifdef DEBUG
-  Serial.print("[");
+  Serial.print(F("["));
   Serial.print(millis());
-  Serial.print("ms] ");
+  Serial.print(F("ms] "));
   Serial.println(message);
   #endif
 }
 
 void Debug::log(const char* message, int value) {
   #ifdef DEBUG
-  Serial.print("[");
+  Serial.print(F("["));
   Serial.print(millis());
-  Serial.print("ms] ");
+  Serial.print(F("ms] "));
   Serial.print(message);
-  Serial.print(": ");
+  Serial.print(F(": "));
+  Serial.println(value);
+  #endif
+}
+
+void Debug::log(const __FlashStringHelper* message) {
+  #ifdef DEBUG
+  Serial.print(F("["));
+  Serial.print(millis());
+  Serial.print(F("ms] "));
+  Serial.println(message);
+  #endif
+}
+
+void Debug::log(const __FlashStringHelper* message, int value) {
+  #ifdef DEBUG
+  Serial.print(F("["));
+  Serial.print(millis());
+  Serial.print(F("ms] "));
+  Serial.print(message);
+  Serial.print(F(": "));
   Serial.println(value);
   #endif
 }
 
 void Debug::printSystemInfo() {
   #ifdef DEBUG
-  Serial.println("System Information:");
-  Serial.print("  Strings: ");
+  Serial.println(F("System Information:"));
+  Serial.print(F("  Strings: "));
   Serial.println(NUM_STRINGS);
-  Serial.print("  PCA9685 count: ");
+  Serial.print(F("  PCA9685 count: "));
   Serial.println(PCA_COUNT);
-  Serial.print("  I2C frequency: ");
+  Serial.print(F("  I2C frequency: "));
   Serial.print(I2C_FREQUENCY / 1000);
-  Serial.println(" kHz");
-  Serial.print("  Fret stabilization: ");
+  Serial.println(F(" kHz"));
+  Serial.print(F("  Fret stabilization: "));
   Serial.print(FRET_STABILIZATION_DELAY);
-  Serial.println(" ms");
+  Serial.println(F(" ms"));
   Serial.println();
   #endif
 }
@@ -63,17 +83,17 @@ void Debug::printMemoryInfo() {
   extern int __heap_start, *__brkval;
   int v;
   int freeRam = (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
-  Serial.print("Free RAM: ");
+  Serial.print(F("Free RAM: "));
   Serial.print(freeRam);
-  Serial.println(" bytes");
+  Serial.println(F(" bytes"));
   #elif defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_SAM)
   // For ARM (Teensy, etc.)
   extern "C" char* sbrk(int incr);
   int freeRam = (int)sbrk(0);
-  Serial.print("Heap pointer: ");
+  Serial.print(F("Heap pointer: "));
   Serial.println(freeRam);
   #else
-  Serial.println("Memory info not available on this platform");
+  Serial.println(F("Memory info not available on this platform"));
   #endif
   #endif
 }
