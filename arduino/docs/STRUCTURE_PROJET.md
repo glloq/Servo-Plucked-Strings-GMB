@@ -1,76 +1,53 @@
 # Structure du Projet - Organisation des Fichiers
 
-## 1. ARBORESCENCE PROPOSÉE
+## 1. ARBORESCENCE ACTUELLE
+
+Structure réelle depuis la réorganisation par plateforme (la version Arduino
+est dans `arduino/`, une future version dans `esp32/`).
 
 ```
-Orchestrion_Plucked_Strings_Servomotors/
+Servo-Plucked-Strings-GMB/
 │
-├── README.md                          # Documentation principale
-├── ANALYSE_BESOIN.md                  # Étude du besoin
-├── LOGIQUE_CODE.md                    # Logique détaillée
-├── STRUCTURE_PROJET.md                # Ce fichier
+├── README.md / README_EN.md           # Page d'accueil multi-plateforme
+├── img/                               # Images et schémas partagés
+│   └── Schemas.png
 │
-├── img/                               # Images et schémas
-│   ├── Schemas.png
-│   └── ...
-│
-├── src/                               # Code source principal
-│   ├── main.ino                       # Fichier principal Arduino
+├── arduino/                           # ✅ Version Arduino (PCA9685 + MIDIUSB)
+│   ├── README.md                      # Guide de la plateforme Arduino
+│   ├── platformio.ini                 # Environnements PlatformIO
+│   ├── CHANGELOG.md
 │   │
-│   ├── config/                        # Configuration
-│   │   ├── settings.h                 # Paramètres globaux
-│   │   ├── string_configs.h           # Configuration des cordes
-│   │   └── pins.h                     # Définition des pins
+│   ├── docs/                          # Documentation détaillée
+│   │   ├── ANALYSE_BESOIN.md
+│   │   ├── LOGIQUE_CODE.md
+│   │   ├── LOGIQUE_SERVOS_DETAILLEE.md
+│   │   ├── STRUCTURE_PROJET.md        # ce fichier
+│   │   ├── GUIDE_MIDIUSB.md
+│   │   ├── LIMITES.md                 # limites (taille, rapidité, plateformes)
+│   │   └── AUDIT.md                   # audit du code
 │   │
-│   ├── core/                          # Classes principales
-│   │   ├── PCA9685Manager.h
-│   │   ├── PCA9685Manager.cpp
-│   │   ├── ServoController.h
-│   │   ├── ServoController.cpp
-│   │   ├── InstrumentManager.h
-│   │   └── InstrumentManager.cpp
-│   │
-│   ├── string/                        # Gestion des cordes
-│   │   ├── StringInstrument.h
-│   │   ├── StringInstrument.cpp
-│   │   ├── FretController.h
-│   │   ├── FretController.cpp
-│   │   ├── PluckController.h
-│   │   └── PluckController.cpp
-│   │
-│   ├── midi/                          # Gestion MIDI
-│   │   ├── MIDIHandler.h
-│   │   ├── MIDIHandler.cpp
-│   │   ├── NoteMapper.h
-│   │   └── NoteMapper.cpp
-│   │
-│   └── utils/                         # Utilitaires
-│       ├── Debug.h
-│       ├── Debug.cpp
-│       ├── SerialCommands.h
-│       └── SerialCommands.cpp
+│   └── Servo-Plucked-String/          # dossier du sketch (nom = .ino)
+│       ├── Servo-Plucked-String.ino   # Fichier principal (setup/loop)
+│       └── src/                       # modules compilés récursivement
+│           ├── config/                # settings.h, string_configs.h
+│           ├── core/                  # PCA9685Manager, InstrumentManager
+│           ├── string/                # StringInstrument, FretController, PluckController
+│           ├── midi/                  # MIDIHandler, NoteMapper
+│           └── utils/                 # Debug
 │
-├── examples/                          # Exemples de configuration
-│   ├── 4_string_bass/
-│   │   └── string_configs.h
-│   ├── 6_string_guitar/
-│   │   └── string_configs.h
-│   └── ukulele/
-│       └── string_configs.h
-│
-├── tools/                             # Outils de calibration
-│   ├── calibration_tool.ino           # Outil de calibration interactive
-│   └── servo_tester.ino               # Test individuel des servos
-│
-└── docs/                              # Documentation supplémentaire
-    ├── wiring_diagram.png
-    ├── calibration_guide.md
-    └── troubleshooting.md
+└── esp32/                             # 🚧 Version ESP32 (à venir)
+    └── README.md
 ```
+
+> Remarque : les sections suivantes mentionnent quelques modules « proposés »
+> (`pins.h`, `ServoController`, `SerialCommands`, dossiers `examples/` et
+> `tools/`) qui **ne font pas encore partie** du code livré ; ce sont des
+> pistes d'évolution. Le code actuel implémente les modules listés dans
+> l'arborescence ci-dessus.
 
 ## 2. DESCRIPTION DES MODULES
 
-### 2.1 Fichier Principal (main.ino)
+### 2.1 Fichier Principal (Servo-Plucked-String.ino)
 
 **Rôle** : Point d'entrée, setup() et loop()
 

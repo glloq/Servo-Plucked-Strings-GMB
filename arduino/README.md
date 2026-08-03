@@ -1,30 +1,43 @@
-# Code Source - Orchestrion Plucked Strings Servomotors
+# Version Arduino - Orchestrion Plucked Strings Servomotors
+
+> Plateforme **Arduino / PCA9685** du projet (MIDI via USB natif). Pour la
+> vue d'ensemble multi-plateforme, voir le [README racine](../README.md).
+> Une future version [ESP32](../esp32/) est prévue.
+
+> ⚙️ **Avant de commencer**, lisez les
+> [**limites du projet**](docs/LIMITES.md) (taille, rapidité, plateformes) et
+> l'[**audit du code**](docs/AUDIT.md).
 
 ## 📁 Structure du Projet
 
+Le code suit la disposition **compatible IDE Arduino** : le sketch et un
+sous-dossier `src/` compilé récursivement (par l'IDE Arduino **et** par
+PlatformIO).
+
 ```
-src/
-├── main.ino                 # Fichier principal Arduino
-│
-├── config/                  # Configuration
-│   ├── settings.h           # Paramètres globaux
-│   └── string_configs.h     # Configuration des cordes
-│
-├── core/                    # Classes principales
-│   ├── PCA9685Manager.h/cpp     # Gestion PCA9685
-│   └── InstrumentManager.h/cpp  # Gestionnaire global
-│
-├── string/                  # Gestion des cordes
-│   ├── StringInstrument.h/cpp   # Représentation d'une corde
-│   ├── FretController.h/cpp     # Contrôle des frettes
-│   └── PluckController.h/cpp    # Contrôle du grattage
-│
-├── midi/                    # Gestion MIDI
-│   ├── MIDIHandler.h/cpp        # Réception MIDI
-│   └── NoteMapper.h/cpp         # Conversion MIDI → Corde/Frette
-│
-└── utils/                   # Utilitaires
-    └── Debug.h/cpp              # Debug et logging
+arduino/
+├── README.md                        # ce fichier
+├── platformio.ini                   # environnements PlatformIO
+├── CHANGELOG.md
+├── docs/                            # documentation détaillée (+ LIMITES, AUDIT)
+└── Servo-Plucked-String/            # dossier du sketch
+    ├── Servo-Plucked-String.ino     # Fichier principal Arduino
+    └── src/                         # modules (compilés récursivement)
+        ├── config/                  # Configuration
+        │   ├── settings.h           #   Paramètres globaux
+        │   └── string_configs.h     #   Configuration des cordes
+        ├── core/                    # Classes principales
+        │   ├── PCA9685Manager.h/cpp     # Gestion PCA9685
+        │   └── InstrumentManager.h/cpp  # Gestionnaire global
+        ├── string/                  # Gestion des cordes
+        │   ├── StringInstrument.h/cpp   # Représentation d'une corde
+        │   ├── FretController.h/cpp     # Contrôle des frettes
+        │   └── PluckController.h/cpp    # Contrôle du grattage
+        ├── midi/                    # Gestion MIDI
+        │   ├── MIDIHandler.h/cpp        # Réception MIDI (MIDIUSB)
+        │   └── NoteMapper.h/cpp         # Conversion MIDI → Corde/Frette
+        └── utils/                   # Utilitaires
+            └── Debug.h/cpp              # Debug et logging
 ```
 
 ## 🔧 Dépendances
@@ -121,28 +134,33 @@ Dans `settings.h`:
 
 ### Arduino IDE
 
-1. Ouvrir `src/main.ino`
-2. Sélectionner la carte (Teensy 4.0 recommandé)
-3. Installer les bibliothèques
+1. Ouvrir `Servo-Plucked-String/Servo-Plucked-String.ino`
+2. Sélectionner une carte à USB natif (voir ci-dessous)
+3. Installer les bibliothèques (*Adafruit PWM Servo Driver*, *MIDIUSB*)
 4. Compiler et uploader
 
 ### PlatformIO
 
+Depuis le dossier `arduino/` (qui contient `platformio.ini`) :
+
 ```bash
-pio run -t upload
+pio run -e leonardo -t upload     # ou -e micro / -e zero / -e due
 ```
 
 ### Plateforme Recommandée
 
-**Teensy 4.0** ou **Teensy 4.1**
-- USB-MIDI natif
-- Performances excellentes
-- RAM suffisante (1MB)
-- I2C fiable
+Le code utilise la bibliothèque **MIDIUSB**, donc une carte à **USB natif
+ATmega32u4 / SAMD / SAM** :
 
-Autres options:
-- Arduino Mega (avec adaptateur USB-MIDI)
-- ESP32 (BLE-MIDI ou adaptateur)
+- ✅ **Leonardo / Micro** (32u4) — courant, mais SRAM limitée (2,5 Ko)
+- ⭐ **Zero / MKR** (SAMD21) — **conseillé** : même USB natif, 32 Ko de SRAM
+- ✅ **Due** (SAM3X)
+
+⚠️ **Teensy** : utilise l'API `usbMIDI` (≠ MIDIUSB). Puissant, mais il faut
+adapter `src/midi/MIDIHandler.*`.
+❌ **Uno / Nano / Mega** : pas d'USB natif → `MIDIUSB` ne compile pas.
+
+Détails et arbitrages : [`docs/LIMITES.md`](docs/LIMITES.md).
 
 ## 🎮 Utilisation
 
@@ -286,11 +304,14 @@ Modifier `baseMidiNote` pour chaque corde:
 
 ## 📚 Documentation Complète
 
-Voir les fichiers à la racine du projet:
-- `ANALYSE_BESOIN.md` - Architecture complète
-- `LOGIQUE_CODE.md` - Algorithmes détaillés
-- `LOGIQUE_SERVOS_DETAILLEE.md` - Logique des servos
-- `STRUCTURE_PROJET.md` - Organisation du code
+Voir le dossier [`docs/`](docs/):
+- [`docs/LIMITES.md`](docs/LIMITES.md) - **Limites** (taille, rapidité, plateformes)
+- [`docs/AUDIT.md`](docs/AUDIT.md) - **Audit** du code et corrections
+- [`docs/ANALYSE_BESOIN.md`](docs/ANALYSE_BESOIN.md) - Architecture complète
+- [`docs/LOGIQUE_CODE.md`](docs/LOGIQUE_CODE.md) - Algorithmes détaillés
+- [`docs/LOGIQUE_SERVOS_DETAILLEE.md`](docs/LOGIQUE_SERVOS_DETAILLEE.md) - Logique des servos
+- [`docs/STRUCTURE_PROJET.md`](docs/STRUCTURE_PROJET.md) - Organisation du code
+- [`docs/GUIDE_MIDIUSB.md`](docs/GUIDE_MIDIUSB.md) - Guide MIDIUSB
 
 ## 💡 Conseils
 

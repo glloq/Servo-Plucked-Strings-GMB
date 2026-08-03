@@ -10,11 +10,11 @@
  * Flexible configuration via configuration files
  */
 
-#include "config/settings.h"
-#include "config/string_configs.h"
-#include "utils/Debug.h"
-#include "core/InstrumentManager.h"
-#include "midi/MIDIHandler.h"
+#include "src/config/settings.h"
+#include "src/config/string_configs.h"
+#include "src/utils/Debug.h"
+#include "src/core/InstrumentManager.h"
+#include "src/midi/MIDIHandler.h"
 
 // Global instances
 InstrumentManager instrument;

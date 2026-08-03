@@ -41,7 +41,7 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
     return false;
   }
 
-  // Calculate the fret
+  // Calculate the fret (0 = open string, 1..numFrets = fretted)
   int8_t fret = midiNote - config->baseMidiNote;
 
   #ifdef DEBUG
@@ -53,45 +53,50 @@ bool StringInstrument::playNote(uint8_t midiNote, uint8_t velocity) {
   Serial.println(velocity);
   #endif
 
-  // If another note is already playing on this string
+  // LEGATO_MODE / VELOCITY_SENSITIVE are boolean *values* (true/false), so they
+  // must be tested with a runtime `if`, never with `#ifdef` (which only checks
+  // whether the macro is defined and would always be true here).
+  bool legatoTransition = false;
+
+  // If another note is already playing on this string, handle the transition.
   if (isPlaying && currentFret != fret) {
-    #ifdef LEGATO_MODE
-    // Legato mode: change fret without re-plucking
-    if (currentFret >= 0) {
-      fretController.releaseFret(currentFret);
+    if (LEGATO_MODE) {
+      // Legato: move the fret without re-plucking (hammer-on / pull-off)
+      if (currentFret > 0) {
+        fretController.releaseFret(currentFret);
+      }
+      if (fret > 0) {
+        if (!fretController.pressFret(fret)) {
+          return false;
+        }
+        delay(FRET_STABILIZATION_DELAY);
+      }
+      legatoTransition = true;
+    } else {
+      // Normal mode: release everything and restart from a clean state
+      stopNote(false);
+      delay(10);
     }
+  }
+
+  // A fresh attack (new note or normal re-attack) presses the fret then plucks.
+  // A legato transition already moved the fret above and must not re-pluck.
+  if (!legatoTransition) {
+    // Press the fret if necessary (fret 0 = open string, nothing to press)
     if (fret > 0) {
-      fretController.pressFret(fret);
+      if (!fretController.pressFret(fret)) {
+        return false;
+      }
       delay(FRET_STABILIZATION_DELAY);
     }
-    // Don't re-pluck in legato mode
-    #else
-    // Normal mode: release everything and restart
-    stopNote(false);
-    delay(10);
-    #endif
-  }
 
-  // Press the fret if necessary (fret 0 = open string)
-  if (fret > 0) {
-    if (!fretController.pressFret(fret)) {
+    // Pluck the string (velocity-sensitive amplitude when enabled)
+    bool plucked = VELOCITY_SENSITIVE ? pluckController.pluck(velocity)
+                                      : pluckController.pluck();
+    if (!plucked) {
       return false;
     }
-    delay(FRET_STABILIZATION_DELAY);
   }
-
-  // Pluck the string
-  #ifndef LEGATO_MODE
-  #ifdef VELOCITY_SENSITIVE
-  if (!pluckController.pluck(velocity)) {
-    return false;
-  }
-  #else
-  if (!pluckController.pluck()) {
-    return false;
-  }
-  #endif
-  #endif
 
   // Update state
   currentFret = fret;
@@ -115,12 +120,11 @@ bool StringInstrument::stopNote(bool mute) {
   Serial.println(")");
   #endif
 
-  // Mute or return to center
+  // The caller already applied the AUTO_MUTE policy (see InstrumentManager),
+  // so honour the runtime `mute` flag here instead of a `#ifdef`.
   if (mute) {
-    #ifdef AUTO_MUTE
     pluckController.mute();
-    delay(50);
-    #endif
+    delay(MUTE_DELAY);
   } else {
     pluckController.returnToCenter();
   }

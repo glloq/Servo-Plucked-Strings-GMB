@@ -10,7 +10,8 @@
 
 // ========== TIMING (in milliseconds) ==========
 #define FRET_STABILIZATION_DELAY 100  // Fret stabilization delay
-#define PLUCK_DELAY 50                // Pluck impulse duration
+#define PLUCK_DELAY 50                // Pluck impulse duration (reserved)
+#define MUTE_DELAY 50                 // Settling delay after a mute
 #define SERVO_TIMEOUT 5000            // Inactivity timeout before power off
 
 // ========== SERVO CALIBRATION ==========
@@ -23,6 +24,10 @@
 // All MIDI channels are automatically listened to
 
 // ========== PLAYING MODES ==========
+// IMPORTANT: these are boolean *values* (true/false), not presence flags.
+// Test them with a runtime `if (LEGATO_MODE)`, never with `#ifdef LEGATO_MODE`
+// (which is always true here because the macro is defined). The compiler folds
+// the constant, so an unused branch still costs nothing.
 #define LEGATO_MODE false          // true = no re-pluck on same string
 #define AUTO_MUTE true             // true = automatic mute on NOTE_OFF
 #define VELOCITY_SENSITIVE false   // true = velocity → pluck force

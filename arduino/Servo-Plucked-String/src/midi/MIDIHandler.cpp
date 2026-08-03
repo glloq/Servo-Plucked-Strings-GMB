@@ -26,8 +26,8 @@ void MIDIHandler::process() {
 }
 
 void MIDIHandler::processMidiMessage(midiEventPacket_t event) {
-  // Extract message information
-  byte header = event.header;
+  // Extract message information (event.header carries the USB cable/CIN,
+  // which we don't need here: the MIDI status is decoded from byte1)
   byte byte1 = event.byte1;
   byte byte2 = event.byte2;
   byte byte3 = event.byte3;

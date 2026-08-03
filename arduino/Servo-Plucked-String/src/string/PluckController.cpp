@@ -72,16 +72,16 @@ bool PluckController::pluck() {
 }
 
 bool PluckController::pluck(uint8_t velocity) {
-  #ifdef VELOCITY_SENSITIVE
+  // Velocity-aware pluck. Whether it is used at all is decided by the caller
+  // via the VELOCITY_SENSITIVE runtime flag (see StringInstrument::playNote).
   if (config == nullptr || pcaManager == nullptr) {
     return false;
   }
 
-  // Calculate dynamic amplitude based on velocity
-  // velocity: 0-127 → amplitude: 5-25°
+  // Map velocity (0-127) to a dynamic oscillation amplitude (5-25°)
   uint16_t dynamicAmplitude = map(velocity, 0, 127, 5, 25);
 
-  // Calculate angle
+  // Calculate angle around the center, based on the current direction
   uint16_t angle;
   if (currentDirection) {
     angle = config->pluckAngleCenter + dynamicAmplitude;
@@ -89,11 +89,12 @@ bool PluckController::pluck(uint8_t velocity) {
     angle = config->pluckAngleCenter - dynamicAmplitude;
   }
 
-  // Limit
-  if (angle > 180) angle = 180;
-  if (angle < 0) angle = 0;
+  // Limit angle to 0-180° (uint16_t can't be negative, only clamp the top)
+  if (angle > 180) {
+    angle = 180;
+  }
 
-  // Send
+  // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
   ServoMapping& servo = config->pluckServo;
 
@@ -110,12 +111,9 @@ bool PluckController::pluck(uint8_t velocity) {
   Serial.println(angle);
   #endif
 
+  // Alternate for next pluck
   currentDirection = !currentDirection;
   return true;
-  #else
-  // If velocity sensitive disabled, use normal pluck()
-  return pluck();
-  #endif
 }
 
 bool PluckController::returnToCenter() {
