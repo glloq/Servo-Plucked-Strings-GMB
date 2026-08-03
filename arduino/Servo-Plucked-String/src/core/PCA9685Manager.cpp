@@ -17,7 +17,7 @@ PCA9685Manager::~PCA9685Manager() {
 
 bool PCA9685Manager::init() {
   #ifdef DEBUG
-  Serial.println("Initializing PCA9685 controllers...");
+  Serial.println(F("Initializing PCA9685 controllers..."));
   #endif
 
   // Initialize I2C if not already done
@@ -38,9 +38,9 @@ bool PCA9685Manager::init() {
 
   #ifdef DEBUG
   if (allOk) {
-    Serial.println("All PCA9685 initialized successfully");
+    Serial.println(F("All PCA9685 initialized successfully"));
   } else {
-    Serial.println("WARNING: Some PCA9685 failed to initialize");
+    Serial.println(F("WARNING: Some PCA9685 failed to initialize"));
   }
   #endif
 
@@ -50,7 +50,7 @@ bool PCA9685Manager::init() {
 bool PCA9685Manager::initController(uint8_t index) {
   if (index >= PCA_COUNT) {
     #ifdef DEBUG
-    Serial.print("ERROR: Invalid PCA index: ");
+    Serial.print(F("ERROR: Invalid PCA index: "));
     Serial.println(index);
     #endif
     return false;
@@ -59,9 +59,9 @@ bool PCA9685Manager::initController(uint8_t index) {
   uint8_t addr = PCA9685_BASE_ADDR + index;
 
   #ifdef DEBUG
-  Serial.print("Init PCA9685 #");
+  Serial.print(F("Init PCA9685 #"));
   Serial.print(index);
-  Serial.print(" @ 0x");
+  Serial.print(F(" @ 0x"));
   Serial.println(addr, HEX);
   #endif
 
@@ -70,7 +70,7 @@ bool PCA9685Manager::initController(uint8_t index) {
 
   if (controllers[index] == nullptr) {
     #ifdef DEBUG
-    Serial.println("  ERROR: Failed to allocate memory");
+    Serial.println(F("  ERROR: Failed to allocate memory"));
     #endif
     return false;
   }
@@ -84,7 +84,7 @@ bool PCA9685Manager::initController(uint8_t index) {
   initialized[index] = true;
 
   #ifdef DEBUG
-  Serial.println("  OK");
+  Serial.println(F("  OK"));
   #endif
 
   return true;
@@ -93,23 +93,23 @@ bool PCA9685Manager::initController(uint8_t index) {
 bool PCA9685Manager::setPWM(uint8_t pcaIndex, uint8_t pin, uint16_t value) {
   if (pcaIndex >= PCA_COUNT) {
     #ifdef DEBUG
-    Serial.println("ERROR: Invalid PCA index");
+    Serial.println(F("ERROR: Invalid PCA index"));
     #endif
     return false;
   }
 
   if (!initialized[pcaIndex]) {
     #ifdef DEBUG
-    Serial.print("ERROR: PCA ");
+    Serial.print(F("ERROR: PCA "));
     Serial.print(pcaIndex);
-    Serial.println(" not initialized");
+    Serial.println(F(" not initialized"));
     #endif
     return false;
   }
 
   if (pin > 15) {
     #ifdef DEBUG
-    Serial.println("ERROR: Invalid pin (0-15)");
+    Serial.println(F("ERROR: Invalid pin (0-15)"));
     #endif
     return false;
   }
@@ -147,7 +147,7 @@ void PCA9685Manager::enablePower() {
   digitalWrite(PIN_OE, LOW);
 
   #ifdef DEBUG_VERBOSE
-  Serial.println("Servo power ENABLED");
+  Serial.println(F("Servo power ENABLED"));
   #endif
 }
 
@@ -156,6 +156,6 @@ void PCA9685Manager::disablePower() {
   digitalWrite(PIN_OE, HIGH);
 
   #ifdef DEBUG_VERBOSE
-  Serial.println("Servo power DISABLED");
+  Serial.println(F("Servo power DISABLED"));
   #endif
 }

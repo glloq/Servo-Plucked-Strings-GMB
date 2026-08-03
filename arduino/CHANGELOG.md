@@ -1,5 +1,44 @@
 # Changelog - Historique des Modifications
 
+## [Réorganisation & Audit] - 2026-08-03
+
+### Réorganisation par plateforme
+- **Regroupement de tout le projet Arduino dans `arduino/`**
+  - Sketch déplacé et renommé : `src/main.ino` → `arduino/Servo-Plucked-String/Servo-Plucked-String.ino`
+  - Modules placés sous `arduino/Servo-Plucked-String/src/` (compilés
+    récursivement par l'IDE Arduino **et** PlatformIO)
+  - Documentation déplacée dans `arduino/docs/`
+- **Ajout d'un dossier `esp32/`** (placeholder + feuille de route pour la
+  future version ESP32)
+- **Page d'accueil racine** (`README.md` / `README_EN.md`) refondue en
+  vue multi-plateforme
+
+### Audit du code (voir `docs/AUDIT.md`)
+- **[Critique] La corde n'était jamais grattée** : `#ifndef LEGATO_MODE`
+  excluait `pluck()` (macro à valeur testée au préprocesseur) → instrument
+  muet. Corrigé (test runtime `if`).
+- **[Critique] Structure non compilable dans l'IDE Arduino** : les `.cpp` en
+  sous-dossiers n'étaient pas compilés. Corrigé via le sous-dossier `src/`.
+- **[Important] Préprocesseur mal employé** sur `AUTO_MUTE` /
+  `VELOCITY_SENSITIVE` → tests runtime.
+- **[Moyen] Décalage d'indice des frettes** : la note la plus haute de chaque
+  corde échouait silencieusement. Corrigé (frette N → index N-1).
+- **[Mineur]** test mort `if (angle < 0)` et variable `header` inutilisée.
+- **[Leonardo/SRAM]** tous les littéraux de log passés en `F()` (+ overload
+  `Debug::log(const __FlashStringHelper*)`) → `DEBUG` tient en SRAM sur la
+  cible **Arduino Leonardo** (2,5 Ko). Doc recentrée sur le Leonardo.
+
+### Ajouté
+- `docs/LIMITES.md` — limites du projet (taille mémoire, rapidité/latence,
+  polyphonie, plateformes supportées)
+- `docs/AUDIT.md` — rapport d'audit et recommandations
+- `platformio.ini` — environnements PlatformIO (Leonardo, Micro, Zero, Due)
+- `MUTE_DELAY` dans `settings.h`
+
+### Vérifié
+- Compilation + édition de liens de tous les modules via en-têtes Arduino
+  simulés (`g++ -std=c++17 -Wall -Wextra`, sans warning)
+
 ## [Non versionnée] - 2026-01-03
 
 ### Ajouté
@@ -10,8 +49,8 @@
   - String (StringInstrument, FretController, PluckController)
   - MIDI (MIDIHandler, NoteMapper)
   - Utils (Debug)
-  - Main (main.ino)
-  - Documentation complète (src/README.md)
+  - Main (main.ino → Servo-Plucked-String.ino)
+  - Documentation complète (arduino/README.md)
 
 - **Support MIDIUSB** pour communication MIDI via USB natif
   - Remplacement de la bibliothèque MIDI standard par MIDIUSB

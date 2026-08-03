@@ -16,9 +16,9 @@ void FretController::init(StringConfig* cfg, PCA9685Manager* pca) {
   activeFret = -1;
 
   #ifdef DEBUG
-  Serial.print("FretController init - ");
+  Serial.print(F("FretController init - "));
   Serial.print(cfg->numFrets);
-  Serial.println(" frets");
+  Serial.println(F(" frets"));
   #endif
 
   // Set all frets to open position (rest)
@@ -28,32 +28,37 @@ void FretController::init(StringConfig* cfg, PCA9685Manager* pca) {
 bool FretController::pressFret(uint8_t fretNum) {
   if (config == nullptr || pcaManager == nullptr) {
     #ifdef DEBUG
-    Serial.println("ERROR: FretController not initialized");
+    Serial.println(F("ERROR: FretController not initialized"));
     #endif
     return false;
   }
 
-  if (fretNum >= config->numFrets) {
+  // Fret 0 is the open string (no servo). Valid pressed frets are 1..numFrets,
+  // stored in the config arrays at index fretNum-1 (so numFrets entries map to
+  // numFrets frets, and the top note is reachable).
+  if (fretNum < 1 || fretNum > config->numFrets) {
     #ifdef DEBUG
-    Serial.print("ERROR: Fret number ");
+    Serial.print(F("ERROR: Fret number "));
     Serial.print(fretNum);
-    Serial.print(" out of range (max: ");
-    Serial.print(config->numFrets - 1);
-    Serial.println(")");
+    Serial.print(F(" out of range (1.."));
+    Serial.print(config->numFrets);
+    Serial.println(F(")"));
     #endif
     return false;
   }
+
+  uint8_t idx = fretNum - 1;
 
   // Get the closing angle
-  uint16_t angle = config->fretCalibration[fretNum].angleClosed;
+  uint16_t angle = config->fretCalibration[idx].angleClosed;
 
   // Apply inversion if necessary
-  if (config->fretReversed[fretNum]) {
+  if (config->fretReversed[idx]) {
     angle = 180 - angle;
   }
 
   // Get the servo mapping
-  ServoMapping& servo = config->fretServos[fretNum];
+  ServoMapping& servo = config->fretServos[idx];
 
   // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
@@ -62,19 +67,19 @@ bool FretController::pressFret(uint8_t fretNum) {
   }
 
   // Update the state
-  fretStates[fretNum] = true;
+  fretStates[idx] = true;
   activeFret = fretNum;
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Press fret ");
+  Serial.print(F("Press fret "));
   Serial.print(fretNum);
-  Serial.print(" - angle: ");
+  Serial.print(F(" - angle: "));
   Serial.print(angle);
-  Serial.print("° (PCA");
+  Serial.print(F("° (PCA"));
   Serial.print(servo.pcaIndex);
-  Serial.print(", pin ");
+  Serial.print(F(", pin "));
   Serial.print(servo.pin);
-  Serial.println(")");
+  Serial.println(F(")"));
   #endif
 
   return true;
@@ -85,20 +90,22 @@ bool FretController::releaseFret(uint8_t fretNum) {
     return false;
   }
 
-  if (fretNum >= config->numFrets) {
+  if (fretNum < 1 || fretNum > config->numFrets) {
     return false;
   }
 
+  uint8_t idx = fretNum - 1;
+
   // Get the opening angle (rest)
-  uint16_t angle = config->fretCalibration[fretNum].angleOpen;
+  uint16_t angle = config->fretCalibration[idx].angleOpen;
 
   // Apply inversion if necessary
-  if (config->fretReversed[fretNum]) {
+  if (config->fretReversed[idx]) {
     angle = 180 - angle;
   }
 
   // Get the servo mapping
-  ServoMapping& servo = config->fretServos[fretNum];
+  ServoMapping& servo = config->fretServos[idx];
 
   // Send the command
   uint16_t pwm = pcaManager->angleToPWM(angle);
@@ -107,17 +114,17 @@ bool FretController::releaseFret(uint8_t fretNum) {
   }
 
   // Update the state
-  fretStates[fretNum] = false;
+  fretStates[idx] = false;
   if (activeFret == fretNum) {
     activeFret = -1;
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.print("Release fret ");
+  Serial.print(F("Release fret "));
   Serial.print(fretNum);
-  Serial.print(" - angle: ");
+  Serial.print(F(" - angle: "));
   Serial.print(angle);
-  Serial.println("°");
+  Serial.println(F("°"));
   #endif
 
   return true;
@@ -129,13 +136,13 @@ bool FretController::releaseAll() {
   }
 
   #ifdef DEBUG_VERBOSE
-  Serial.println("Releasing all frets");
+  Serial.println(F("Releasing all frets"));
   #endif
 
   bool allOk = true;
-  for (uint8_t f = 0; f < config->numFrets; f++) {
-    if (fretStates[f]) {
-      if (!releaseFret(f)) {
+  for (uint8_t idx = 0; idx < config->numFrets; idx++) {
+    if (fretStates[idx]) {
+      if (!releaseFret(idx + 1)) {  // fret number = array index + 1
         allOk = false;
       }
       delay(5);  // Small delay between each fret
@@ -147,8 +154,8 @@ bool FretController::releaseAll() {
 }
 
 bool FretController::isFretPressed(uint8_t fretNum) const {
-  if (fretNum >= MAX_FRETS) {
+  if (fretNum < 1 || fretNum > MAX_FRETS) {
     return false;
   }
-  return fretStates[fretNum];
+  return fretStates[fretNum - 1];
 }

@@ -29,17 +29,22 @@ struct FretCalibration {
 };
 
 // ========== CONFIGURATION STRUCTURE ==========
+// Fret indexing convention:
+//   - Fret 0 is the OPEN string (no servo, plays baseMidiNote).
+//   - Frets 1..numFrets are fretted; fret N uses array index N-1.
+//   - So `numFrets` entries map to `numFrets` frets and the highest note
+//     (baseMidiNote + numFrets) is reachable.
 struct StringConfig {
   uint8_t baseMidiNote;         // Open string MIDI note
-  uint8_t numFrets;             // Number of frets
+  uint8_t numFrets;             // Number of fretted positions (frets 1..numFrets)
 
-  // Fret servo mapping (1 per fret)
+  // Fret servo mapping: index i = fret (i+1)
   ServoMapping fretServos[MAX_FRETS];  // PCA+pin mapping for each fret
 
   // Plucking servo mapping
   ServoMapping pluckServo;      // PCA+pin mapping for pluck
 
-  // Fret calibration
+  // Fret calibration: index i = fret (i+1)
   FretCalibration fretCalibration[MAX_FRETS];  // Open + Closed for each fret
   bool fretReversed[MAX_FRETS];                // Reversed direction?
 
@@ -58,7 +63,7 @@ const StringConfig stringConfigs[NUM_STRINGS] = {
     .baseMidiNote = 40,           // E2
     .numFrets = 12,
 
-    // Fret servo mapping (only define the servos actually used)
+    // Fret servo mapping: index 0 = fret 1, ... index 11 = fret 12
     .fretServos = {
       {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7}, {0,8}, {0,9}, {0,10}, {0,11}
       // Remaining frets unused - no need to define them

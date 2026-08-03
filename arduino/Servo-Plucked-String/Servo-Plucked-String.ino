@@ -10,11 +10,11 @@
  * Flexible configuration via configuration files
  */
 
-#include "config/settings.h"
-#include "config/string_configs.h"
-#include "utils/Debug.h"
-#include "core/InstrumentManager.h"
-#include "midi/MIDIHandler.h"
+#include "src/config/settings.h"
+#include "src/config/string_configs.h"
+#include "src/utils/Debug.h"
+#include "src/core/InstrumentManager.h"
+#include "src/midi/MIDIHandler.h"
 
 // Global instances
 InstrumentManager instrument;
@@ -24,11 +24,11 @@ void setup() {
   // Initialize debug/serial
   Debug::init();
 
-  Debug::log("=== SETUP START ===");
+  Debug::log(F("=== SETUP START ==="));
 
   // Initialize the instrument
   if (!instrument.init()) {
-    Debug::log("ERROR: Instrument init failed!");
+    Debug::log(F("ERROR: Instrument init failed!"));
     while (1) {
       delay(1000);  // Block on critical error
     }
@@ -42,8 +42,8 @@ void setup() {
   performStartupTest();
   #endif
 
-  Debug::log("=== SETUP COMPLETE ===");
-  Debug::log("Ready to play!");
+  Debug::log(F("=== SETUP COMPLETE ==="));
+  Debug::log(F("Ready to play!"));
   Debug::printMemoryInfo();
 }
 
@@ -66,14 +66,14 @@ void loop() {
  * Plays a test sequence on each string
  */
 void performStartupTest() {
-  Debug::log("=== STARTUP TEST ===");
+  Debug::log(F("=== STARTUP TEST ==="));
 
   instrument.enableServoPower();
   delay(100);
 
   // Test each string
   for (int s = 0; s < NUM_STRINGS; s++) {
-    Debug::log("Testing string", s);
+    Debug::log(F("Testing string"), s);
 
     // Play the open string
     uint8_t baseNote = stringConfigs[s].baseMidiNote;
@@ -91,7 +91,7 @@ void performStartupTest() {
     }
   }
 
-  Debug::log("Test complete");
+  Debug::log(F("Test complete"));
   delay(1000);
 }
 #endif
@@ -127,9 +127,9 @@ void processSerialCommands() {
       if (comma > 0) {
         int note = cmd.substring(1, comma).toInt();
         int vel = cmd.substring(comma + 1).toInt();
-        Serial.print("Playing note ");
+        Serial.print(F("Playing note "));
         Serial.print(note);
-        Serial.print(" velocity ");
+        Serial.print(F(" velocity "));
         Serial.println(vel);
         instrument.playNote(note, vel);
       }
@@ -139,7 +139,7 @@ void processSerialCommands() {
     case 's': {
       // Stop note: s<note>
       int note = cmd.substring(1).toInt();
-      Serial.print("Stopping note ");
+      Serial.print(F("Stopping note "));
       Serial.println(note);
       instrument.stopNote(note);
       break;
@@ -147,7 +147,7 @@ void processSerialCommands() {
 
     case 'a': {
       // Stop all
-      Serial.println("Stopping all notes");
+      Serial.println(F("Stopping all notes"));
       instrument.stopAllNotes();
       break;
     }
@@ -160,19 +160,19 @@ void processSerialCommands() {
 
     case 'h': {
       // Help
-      Serial.println("=== Commands ===");
-      Serial.println("p<note>,<vel> - Play note (ex: p60,80)");
-      Serial.println("s<note>       - Stop note (ex: s60)");
-      Serial.println("a             - Stop all notes");
-      Serial.println("i             - Print instrument status");
-      Serial.println("h             - This help");
+      Serial.println(F("=== Commands ==="));
+      Serial.println(F("p<note>,<vel> - Play note (ex: p60,80)"));
+      Serial.println(F("s<note>       - Stop note (ex: s60)"));
+      Serial.println(F("a             - Stop all notes"));
+      Serial.println(F("i             - Print instrument status"));
+      Serial.println(F("h             - This help"));
       break;
     }
 
     default:
-      Serial.print("Unknown command: ");
+      Serial.print(F("Unknown command: "));
       Serial.println(cmd);
-      Serial.println("Type 'h' for help");
+      Serial.println(F("Type 'h' for help"));
       break;
   }
 }

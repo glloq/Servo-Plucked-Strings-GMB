@@ -7,13 +7,13 @@ InstrumentManager::InstrumentManager() {
 
 bool InstrumentManager::init() {
   #ifdef DEBUG
-  Serial.println("=== Instrument Manager Init ===");
+  Serial.println(F("=== Instrument Manager Init ==="));
   #endif
 
   // Initialize the PCA9685 manager
   if (!pcaManager.init()) {
     #ifdef DEBUG
-    Serial.println("ERROR: PCA9685Manager init failed");
+    Serial.println(F("ERROR: PCA9685Manager init failed"));
     #endif
     return false;
   }
@@ -21,7 +21,7 @@ bool InstrumentManager::init() {
   // Initialize each string
   for (int i = 0; i < NUM_STRINGS; i++) {
     #ifdef DEBUG
-    Serial.print("Init string ");
+    Serial.print(F("Init string "));
     Serial.println(i);
     #endif
 
@@ -34,7 +34,7 @@ bool InstrumentManager::init() {
   lastActivity = millis();
 
   #ifdef DEBUG
-  Serial.println("=== Instrument Ready ===");
+  Serial.println(F("=== Instrument Ready ==="));
   #endif
 
   return true;
@@ -46,7 +46,7 @@ bool InstrumentManager::playNote(uint8_t midiNote, uint8_t velocity) {
 
   if (!mapping.valid) {
     #ifdef DEBUG
-    Serial.print("ERROR: Cannot map MIDI note ");
+    Serial.print(F("ERROR: Cannot map MIDI note "));
     Serial.println(midiNote);
     #endif
     return false;
@@ -74,9 +74,9 @@ bool InstrumentManager::stopNote(uint8_t midiNote) {
 
   if (stringIdx < 0) {
     #ifdef DEBUG_VERBOSE
-    Serial.print("Note ");
+    Serial.print(F("Note "));
     Serial.print(midiNote);
-    Serial.println(" not currently playing");
+    Serial.println(F(" not currently playing"));
     #endif
     return false;
   }
@@ -91,7 +91,7 @@ bool InstrumentManager::stopNote(uint8_t midiNote) {
 
 bool InstrumentManager::stopAllNotes() {
   #ifdef DEBUG
-  Serial.println("Stop all notes");
+  Serial.println(F("Stop all notes"));
   #endif
 
   for (int i = 0; i < NUM_STRINGS; i++) {
@@ -121,27 +121,27 @@ void InstrumentManager::update() {
 }
 
 void InstrumentManager::printStatus() {
-  Serial.println("=== Instrument Status ===");
-  Serial.print("Servo power: ");
+  Serial.println(F("=== Instrument Status ==="));
+  Serial.print(F("Servo power: "));
   Serial.println(servoPowerEnabled ? "ON" : "OFF");
 
   for (int i = 0; i < NUM_STRINGS; i++) {
-    Serial.print("String ");
+    Serial.print(F("String "));
     Serial.print(i);
-    Serial.print(": ");
+    Serial.print(F(": "));
 
     if (strings[i].getIsPlaying()) {
-      Serial.print("MIDI ");
+      Serial.print(F("MIDI "));
       Serial.print(strings[i].getCurrentNote());
-      Serial.print(" (");
+      Serial.print(F(" ("));
       Serial.print(NoteMapper::noteToString(strings[i].getCurrentNote()));
-      Serial.print(") fret ");
+      Serial.print(F(") fret "));
       Serial.println(strings[i].getCurrentFret());
     } else {
-      Serial.println("idle");
+      Serial.println(F("idle"));
     }
   }
-  Serial.println("========================");
+  Serial.println(F("========================"));
 }
 
 StringInstrument* InstrumentManager::getString(uint8_t index) {
@@ -153,7 +153,7 @@ StringInstrument* InstrumentManager::getString(uint8_t index) {
 
 void InstrumentManager::moveAllServosToRestPosition() {
   #ifdef DEBUG
-  Serial.println("Moving all servos to rest position...");
+  Serial.println(F("Moving all servos to rest position..."));
   #endif
 
   enableServoPower();
@@ -186,7 +186,7 @@ void InstrumentManager::moveAllServosToRestPosition() {
   disableServoPower();
 
   #ifdef DEBUG
-  Serial.println("All servos at rest position");
+  Serial.println(F("All servos at rest position"));
   #endif
 }
 
@@ -209,9 +209,9 @@ void InstrumentManager::checkTimeouts() {
 
       if (inactivity > SERVO_TIMEOUT) {
         #ifdef DEBUG_VERBOSE
-        Serial.print("String ");
+        Serial.print(F("String "));
         Serial.print(i);
-        Serial.println(" timeout - releasing");
+        Serial.println(F(" timeout - releasing"));
         #endif
 
         // Timeout reached, release
@@ -225,7 +225,7 @@ void InstrumentManager::checkTimeouts() {
   // If no active strings, cut power
   if (!anyActive && servoPowerEnabled) {
     #ifdef DEBUG_VERBOSE
-    Serial.println("No active strings - disabling servo power");
+    Serial.println(F("No active strings - disabling servo power"));
     #endif
     disableServoPower();
   }
