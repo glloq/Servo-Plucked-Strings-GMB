@@ -21,10 +21,13 @@ dossier :
 | Plateforme | Dossier | État | MIDI |
 |------------|---------|------|------|
 | **Arduino / PCA9685** | [`arduino/`](arduino/) | ✅ Fonctionnel | USB natif (MIDIUSB) |
-| **ESP32** | [`esp32/`](esp32/) | 🚧 À venir | BLE-MIDI / Wi-Fi (prévu) |
+| **ESP32-S3 (servo-par-frette)** | [`esp32/`](esp32/) | ✅ Fonctionnel | Wi-Fi MIDI + CC corde/frette + SysEx |
 
-👉 **Commencez ici : [`arduino/README.md`](arduino/README.md)** — installation,
-configuration, calibration et utilisation de la version Arduino.
+👉 **Arduino** : [`arduino/README.md`](arduino/README.md) — installation, configuration,
+calibration et utilisation.
+👉 **ESP32** : [`esp32/README.md`](esp32/README.md) — version **servo-par-frette** (un
+servo par position de frette, interface web + assistant d'installation, réception MIDI
+avec CC de sélection corde/frette).
 
 **Caractéristiques:**
 - 🎸 Support multi-cordes (guitare, basse, ukulélé, etc.)
@@ -66,8 +69,13 @@ Servo de grattage avec mouvement alterné (oscillation autour d'un centre):
 │   │   └── src/                #    Modules (config, core, string, midi, utils)
 │   └── docs/                   #    Documentation détaillée + LIMITES + AUDIT
 │
-├── esp32/                      # 🚧 Version ESP32 (à venir)
-│   └── README.md
+├── esp32/                      # ✅ Version ESP32-S3 (servo-par-frette)
+│   ├── README.md               #    Guide de la plateforme ESP32
+│   ├── firmware/               #    Firmware (cœur C++ testable + adaptateurs + tests)
+│   ├── web-interface/          #    Interface web (wizard + assistant d'installation)
+│   ├── instrument-profiles/    #    Profils prêts (ukulélé, guitare, basse, mandoline, banjo)
+│   ├── board-profiles/         #    Carte ESP32-S3-DevKitC-1
+│   └── docs/                   #    Documentation détaillée
 │
 ├── img/                        # Schémas partagés
 ├── README.md                   # ce fichier

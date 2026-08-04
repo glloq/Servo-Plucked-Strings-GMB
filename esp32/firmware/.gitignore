@@ -1,0 +1,11 @@
+# Native test build artifacts
+test/run_tests
+*.o
+*.obj
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# Generated LittleFS image (mirror of ../web-interface)
+data/www/
