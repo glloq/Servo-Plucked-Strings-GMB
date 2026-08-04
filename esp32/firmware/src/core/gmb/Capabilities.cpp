@@ -32,12 +32,19 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     std::set<int> playable;
     int minNote = 128, maxNote = -1;
     uint8_t activeStrings = 0;
-    for (const auto& s : p.strings) {
+    for (size_t si = 0; si < p.strings.size(); ++si) {
+        const auto& s = p.strings[si];
         if (!s.enabled) continue;
         ++activeStrings;
-        int lo = s.openNote + capo + transpose;
-        int hi = lo + s.maxFret;
-        for (int n = lo; n <= hi; ++n) {
+        // Servo-per-fret: a note is playable on this string only on the open string
+        // (fret 0) or on a fret that actually carries a finger servo. A
+        // non-contiguous fretboard (gaps) or a maxFret above the highest finger
+        // must NOT be announced as continuous — that would tell a host it can play
+        // notes no servo can fret (spec: discrete-note mode for uneven frets).
+        uint32_t mask = p.availableFretMask(si);
+        for (int f = 0; f <= s.maxFret; ++f) {
+            if (f != 0 && !((mask >> f) & 1u)) continue;  // gap: no finger servo
+            int n = s.openNote + capo + transpose + f;
             if (n < 0 || n > 127) continue;
             playable.insert(n);
             minNote = std::min(minNote, n);

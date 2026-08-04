@@ -44,8 +44,11 @@ void InstrumentController::load(const Profile& p) {
         spec.openNote = static_cast<int16_t>(static_cast<int>(s.openNote) + pitchShift);
         spec.maxFret = s.maxFret;
         spec.enabled = s.enabled;
-        // Only frets that actually carry a finger servo are auto-allocatable.
+        // Only frets that actually carry a finger servo are auto-allocatable. The
+        // runtime always supplies an authoritative mask (a fingerless fretted
+        // string then only plays open).
         spec.fretMask = p.availableFretMask(i);
+        spec.fretMaskValid = true;
         specs.push_back(spec);
 
         StringController c;

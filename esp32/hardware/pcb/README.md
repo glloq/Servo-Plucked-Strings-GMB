@@ -1,3 +1,10 @@
+> ⚙️ **Legacy stepper reference — NOT the servo build.** This folder describes the
+> original stepper/TMC2209 electronics. The current firmware is **servo-per-fret**:
+> no stepper drivers, no 24 V rail, no HOME/LIMIT — servos are driven by PCA9685
+> (up to 8 boards) or direct GPIO. For the real servo wiring see
+> [`../../docs/PIN_CONFIGURATION.md`](../../docs/PIN_CONFIGURATION.md) and
+> [`../../README.md`](../../README.md).
+
 # PCB — Phase 5 deliverable
 
 The integrated PCB is a **Phase 5 (dedicated hardware)** deliverable of the

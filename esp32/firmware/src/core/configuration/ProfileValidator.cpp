@@ -70,6 +70,9 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         if (a.maxFret > kMaxFret)
             err(t + ".maxFret",
                 "maxFret exceeds the maximum supported fret (" + std::to_string(kMaxFret) + ")");
+        if (static_cast<int>(a.openNote) + a.maxFret > 127)
+            warn(t + ".maxFret",
+                 "openNote + maxFret exceeds MIDI 127; the highest frets are unreachable");
     }
 
     // Pin validation on the reference board.
@@ -238,6 +241,11 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     if (p.power.maxConcurrentMoves == 0)
         err("power.maxConcurrentMoves",
             "At least one servo must be allowed to move at a time");
+    if (p.power.maxConcurrentMoves > kMaxStrings * (kMaxFret + 2))
+        err("power.maxConcurrentMoves", "maxConcurrentMoves is unreasonably large");
+    if (p.power.staggerMs > 2000)
+        err("power.staggerMs",
+            "Stagger must be <= 2000 ms (a larger value would stall chord presses)");
 
     // String/fret selection CC configuration (selection spec section 18). The
     // string/fret CCs are only consumed when selection is enabled and not in the
@@ -308,6 +316,10 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         err("midi.sustainCc", "Sustain CC must be 0..119");
     if (p.instrument.capo < 0 || p.instrument.capo > 24)
         err("instrument.capo", "Capo must be 0..24");
+    if (p.instrument.gmProgram > 127)
+        err("instrument.gmProgram", "GM program must be 0..127");
+    if (p.instrument.typeId > 127)
+        err("instrument.typeId", "GMB type id must be 0..127 (7-bit SysEx value)");
     if (p.instrument.transpose < -48 || p.instrument.transpose > 48)
         err("instrument.transpose", "Transpose must be within +/-48 semitones");
     if (p.midi.transpose < -48 || p.midi.transpose > 48)

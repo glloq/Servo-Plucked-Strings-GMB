@@ -20,10 +20,13 @@ The repository is organized **per hardware platform**, each in its own folder:
 | Platform | Folder | Status | MIDI |
 |----------|--------|--------|------|
 | **Arduino / PCA9685** | [`arduino/`](arduino/) | ✅ Working | Native USB (MIDIUSB) |
-| **ESP32** | [`esp32/`](esp32/) | 🚧 Planned | BLE-MIDI / Wi-Fi (planned) |
+| **ESP32-S3 (servo-per-fret)** | [`esp32/`](esp32/) | ✅ Working | Wi-Fi MIDI + string/fret CC + SysEx |
 
-👉 **Start here: [`arduino/README.md`](arduino/README.md)** — install,
-configure, calibrate and use the Arduino version.
+👉 **Arduino**: [`arduino/README.md`](arduino/README.md) — install, configure,
+calibrate and use.
+👉 **ESP32**: [`esp32/README.md`](esp32/README.md) — the **servo-per-fret** version
+(one servo per fret position, web interface + guided install helper, MIDI reception
+with string/fret selection CC).
 
 **Features:**
 - 🎸 Multi-string support (guitar, bass, ukulele, etc.)
@@ -65,8 +68,13 @@ Plucking servo with alternating movement (oscillation around center):
 │   │   └── src/                #    Modules (config, core, string, midi, utils)
 │   └── docs/                   #    Detailed docs + LIMITS + AUDIT
 │
-├── esp32/                      # 🚧 ESP32 version (planned)
-│   └── README.md
+├── esp32/                      # ✅ ESP32-S3 version (servo-per-fret)
+│   ├── README.md               #    ESP32 platform guide
+│   ├── firmware/               #    Firmware (testable C++ core + adapters + tests)
+│   ├── web-interface/          #    Web UI (setup wizard + install helper)
+│   ├── instrument-profiles/    #    Ready profiles (ukulele, guitar, bass, mandolin, banjo)
+│   ├── board-profiles/         #    ESP32-S3-DevKitC-1 board
+│   └── docs/                   #    Detailed documentation
 │
 ├── img/                        # Shared schematics
 ├── README.md                   # French landing page
@@ -98,7 +106,7 @@ Full details in [`arduino/README.md`](arduino/README.md).
 | [arduino/docs/STRUCTURE_PROJET.md](arduino/docs/STRUCTURE_PROJET.md) | Code organization — French |
 | [arduino/docs/GUIDE_MIDIUSB.md](arduino/docs/GUIDE_MIDIUSB.md) | Complete MIDIUSB guide — French |
 | [arduino/CHANGELOG.md](arduino/CHANGELOG.md) | Change history |
-| [esp32/README.md](esp32/README.md) | ESP32 roadmap |
+| [esp32/README.md](esp32/README.md) | **ESP32 (servo-per-fret) guide** — firmware, web UI, install helper |
 
 ## 🤝 Contributing
 

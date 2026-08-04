@@ -1,61 +1,57 @@
-# Instrument profiles
+# Instrument profiles (servo-per-fret)
 
-Example configuration profiles for **Servo-Plucked-Strings-GMB** (servo-per-fret).
-Each file is
-a full, valid instrument profile matching the JSON format of SPECIFICATION.md
-§20 and the firmware `gmb::Profile` (`firmware/src/core/configuration/Profile.h`).
+Example configuration profiles for **Servo-Plucked-Strings-GMB**. Each file is a
+full, valid instrument profile matching the firmware `gmb::Profile`
+(`firmware/src/core/configuration/Profile.h`) and its JSON (de)serializer
+(`firmware/src/platform/esp32/ProfileStorage.cpp`). Import one from the web
+interface, then calibrate each finger's contact angle and the plucker.
 
-They are meant as realistic starting points: import one from the web interface,
-then calibrate homing, fret positions and servos for your physical build.
+They are generated from the firmware's own `Profile::makeDefault()` and pass the
+round-trip check (`firmware/test/profilecheck/run.sh`), so they are guaranteed to
+load on device.
 
 ## Files
 
-| File | Instrument | Strings | Tuning (MIDI) | Frets | Scale |
-| ---- | ---------- | :-----: | ------------- | :---: | :---: |
-| `ukulele-gcea.json` | Soprano ukulele | 4 | G4 C4 E4 A4 — 67 60 64 69 | 12 | 330 mm |
-| `guitar-standard.json` | Guitar, standard | 6 | E2 A2 D3 G3 B3 E4 — 40 45 50 55 59 64 | 19 | 648 mm |
-| `bass-4string.json` | Bass guitar | 4 | E1 A1 D2 G2 — 28 33 38 43 | 20 | 864 mm |
-| `mandolin-gdae.json` | Mandolin (4 courses) | 4 | G3 D4 A4 E5 — 55 62 69 76 | 12 | 350 mm |
-| `banjo-5string.json` | Banjo, open-G | 5 | D3 G3 B3 D4 + g G4 — 50 55 59 62 67 | 22 (5th: 17) | 660 mm |
+| File | Instrument | Strings | Tuning (MIDI) | Frets |
+| ---- | ---------- | :-----: | ------------- | :---: |
+| `ukulele-gcea.json` | Soprano ukulele | 4 | G4 C4 E4 A4 — 67 60 64 69 | 12 |
+| `guitar-standard.json` | Guitar, standard | 6 | E2 A2 D3 G3 B3 E4 — 40 45 50 55 59 64 | 12 |
+| `bass-4string.json` | Bass guitar | 4 | E1 A1 D2 G2 — 28 33 38 43 | 12 |
+| `mandolin-gdae.json` | Mandolin (4 courses) | 4 | G3 D4 A4 E5 — 55 62 69 76 | 12 |
+| `banjo-5string.json` | Banjo, open-G | 5 | D3 G3 B3 D4 g — 50 55 59 62 67 | 12 |
 
 MIDI note reference: 60 = C4 (middle C).
 
-## What varies between examples
-
-The set is intentionally diverse so it exercises the schema:
-
-* **Transmissions** — `beltGt2` (ukulele, guitar, banjo), `screw` (bass,
-  long-scale lead screw), and `custom` (mandolin, `customStepsPerMm`). See §12.1.
-* **String/fret selection** — the guitar sets `stringFretSelection.string.reverseOrder = true`
-  (string CC counts from the high E), and the mandolin uses an explicit
-  `mapping` `[3, 2, 1, 0]` to reverse logical → physical order. All others use
-  the identity mapping.
-* **Re-entrant strings** — the ukulele high-G and the banjo short 5th string
-  (its travel is limited to 17 frets while the rest reach 22).
-
 ## Conventions shared by every profile
 
-* **Pins** follow the recommended ESP32-S3-DevKitC-1 table (§11.5): `STEP` on
-  4/5/6/7/15/16, `DIR` on 17/18/8/9/10/11, `HOME` on 12/13/14/21/38/39, I²C
-  `SDA=40` / `SCL=41`, global `ENABLE=42`, PCA9685 `SERVO_OE=47`. Only the first
-  *N* rows are used for an *N*-string instrument. `board.automaticPinAssignment`
-  is `false` because the pins are written out explicitly.
-* **Servos on the PCA9685** — finger servos on channels `0 … N−1` and
-  individual pluck servos on channels `6 … 6+N−1`.
-* **One `strings[]` entry per string**, each with its own `homing` block.
-* **Selection ranges track the instrument** — `stringFretSelection.string.maximum`
-  equals the string count and `.fret.maximum` equals the largest `maxFret`.
-* `calibratedFretMm` is left empty (`[]`); positions are computed from the
-  theoretical fret formula (§14.2) until you run manual calibration (§14.3),
-  after which the calibrated table takes priority.
+* **Servo-per-fret wiring** — for each string, **one finger servo per fret**
+  (`function:"finger"`, with `stringIndex` and `fret` 1..12) plus **one plucker**
+  (`function:"pluck"`). Fret 0 (open string) has no servo. Frets need not be
+  contiguous — these examples happen to fill 1..12, but you may equip an arbitrary
+  subset.
+* **One PCA9685 per string** — every servo of string *i* is on `pcaBoard = i`;
+  fingers on channels `0 … maxFret−1`, the plucker on channel `maxFret`. Up to
+  **8 boards** (0x40–0x47). The mapping is free: any servo can be moved to any
+  `(pcaBoard, channel)` or to a direct GPIO (`source:"gpio"`).
+* **Pins** — only the PCA9685 bus and safety line: `SDA=40`, `SCL=41`,
+  `SERVO_OE=47`. No stepper STEP/DIR/HOME/ENABLE.
+* **Current governor** — a top-level `power` block
+  (`maxConcurrentMoves`, `staggerMs`) staggers simultaneous servo starts;
+  `disableAtRest` (per servo) cuts idle PWM.
+* **String / fret selection** — `stringFretSelection` follows the General-MIDI-Boop
+  preset (CC20 string, CC21 fret); ranges track the instrument.
+* **`strings[]`** — one entry per string, each just `{enabled, openNote, maxFret}`
+  (no homing, no mm geometry).
 
 ## Editing / validating
 
-These are plain JSON. After editing, confirm the file still parses:
+Plain JSON. After editing, confirm it still parses and round-trips:
 
 ```sh
 python3 -m json.tool instrument-profiles/guitar-standard.json > /dev/null
+firmware/test/profilecheck/run.sh      # loads all profiles through the real parser
 ```
 
-The firmware `ProfileValidator` performs the full semantic check (pin conflicts,
-servo channel ranges, selection bounds) when a profile is imported.
+The firmware `ProfileValidator` performs the full semantic check (finger
+`(string,fret)` uniqueness, PCA channel/board ranges, direct-GPIO conflicts,
+striker presence, selection bounds) when a profile is imported.

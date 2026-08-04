@@ -8,7 +8,8 @@
 
 Reference mechanical architecture for **Stepper-Plucked-Strings-GMB**
 (SPECIFICATION.md §5), and how each mechanical parameter maps to the instrument-profile
-fields (`firmware/src/core/motion/StepperAxis.h`, `instrument-profiles/`).
+fields (legacy stepper reference — the servo build has no `motion/` module; see
+`firmware/src/core/configuration/Profile.h` and `instrument-profiles/`).
 
 ## 1. One independent channel per string (§5.1)
 
@@ -75,7 +76,7 @@ end.
 Every servo picks its own source, so an instrument can be built **with or without
 a PCA9685**, or with a mix of both:
 
-* **PCA9685** — up to **four boards** (`pcaBoard` 0–3, I²C 0x40–0x43 = 64
+* **PCA9685** — up to **eight boards** (`pcaBoard` 0–7, I²C 0x40–0x47 = 128
   channels). Use this once you exceed the ESP32's free PWM pins.
 * **Direct GPIO** — the servo hangs off a free ESP32-S3 pin (LEDC 50 Hz PWM),
   handy when there is no PCA or only a couple of servos.

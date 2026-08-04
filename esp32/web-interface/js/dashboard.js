@@ -27,17 +27,17 @@
       h('div.panic-actions', [
         h('button.btn.danger.panic-big', { onclick: GMB.doPanic }, 'STOP'),
         h('button.btn', {
-          title: 'Recover from a panic / E-stop and re-home (refused while E-stop or a LIMIT is active)',
+          title: 'Recover from a panic / E-stop and re-arm (refused while the E-stop is active or the config is invalid)',
           onclick: function () {
             GMB.api.resetSystem().then(function (res) {
               if (res && res.ok === false) {
-                GMB.toast('Reset refused: ' + (res.error || 'E-stop/LIMIT active or invalid config') + '.', 'warn');
+                GMB.toast('Reset refused: ' + (res.error || 'E-stop active or invalid config') + '.', 'warn');
               } else {
-                GMB.toast('Reset accepted — re-homing.', 'ok');
+                GMB.toast('Reset accepted — re-arming (parking fingers).', 'ok');
               }
             }).catch(function (e) { GMB.toast('Reset failed: ' + (e && e.message || e), 'error'); });
           }
-        }, 'Reset & re-home')
+        }, 'Reset & re-arm')
       ])
     ]));
     host.appendChild(h('div.card', [h('h2', 'General state'), summary]));

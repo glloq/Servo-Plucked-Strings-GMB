@@ -19,6 +19,7 @@
   var step = 0;
   var activeStr = 0;   // per-string steps show one string at a time
   var installFret = 1; // Install helper: current fret being calibrated
+  var board = null;    // board GPIO capability map (for direct-GPIO servo filtering)
 
   var TUNINGS = {
     ukulele: { notes: [67, 60, 64, 69], maxFret: 12 },        // G C E A
@@ -40,13 +41,6 @@
     for (var i = 0; i < list.length; i++)
       if (list[i].function === 'finger' && list[i].stringIndex === strIdx && list[i].fret === fret)
         return list[i];
-    return null;
-  }
-  function strikerFor(strIdx) {
-    var list = GMB.state.profile.servos;
-    for (var i = 0; i < list.length; i++)
-      if ((list[i].function === 'pluck' || list[i].function === 'strum') &&
-          list[i].stringIndex === strIdx) return list[i];
     return null;
   }
   function servoIndexOf(sv) { return GMB.state.profile.servos.indexOf(sv); }
@@ -73,16 +67,6 @@
     var i = servoIndexOf(sv);
     if (i >= 0) { GMB.state.profile.servos.splice(i, 1); GMB.markDirty(); }
   }
-  function ensureStriker(strIdx) {
-    if (strikerFor(strIdx)) return;
-    var board = strIdx, ch = freeChannel(board);
-    if (ch < 0) { board = 0; ch = freeChannel(0); }
-    GMB.state.profile.servos.push(
-      GMB.servoDefaults('pluck', strIdx,
-        { pcaBoard: board, channel: ch < 0 ? 0 : ch, activeUs: 1700, travelMs: 90, settleMs: 20 }));
-    GMB.markDirty();
-  }
-
   // Wire (or re-wire) a whole string: one finger per fret 1..maxFret on its own
   // PCA board + a plucker. Replaces this string's existing servos.
   function autoWireString(strIdx) {
@@ -109,9 +93,12 @@
       p.servos = p.servos.filter(function (s) { return s.stringIndex < n; });
     }
     p.instrument.stringCount = n;
-    p.selector.string.maximum = n;
-    p.selector.string.mapping = [];
-    for (var k = 0; k < n; k++) p.selector.string.mapping.push(k);
+    var sfs = p.stringFretSelection;
+    if (sfs && sfs.string) {
+      sfs.string.maximum = n;
+      sfs.string.mapping = [];
+      for (var k = 0; k < n; k++) sfs.string.mapping.push(k);
+    }
     GMB.markDirty();
   }
 
@@ -132,7 +119,27 @@
 
   // ---- render / nav ---------------------------------------------------------
 
+  // Validate before saving so the wizard never reports a false success on an
+  // invalid config (the mock backend always "succeeds").
+  function finishAndSave() {
+    var issues = GMB.validateProfile(GMB.state.profile);
+    var errors = issues.filter(function (i) { return i.level === 'error'; });
+    if (errors.length) {
+      GMB.toast(errors.length + ' problem(s) — fix them on the Validation step.', 'error');
+      goto(STEPS.length - 1);
+      return;
+    }
+    GMB.saveProfile();
+  }
+
   function render(host) {
+    // Load the board capability map once so the direct-GPIO servo picker can filter
+    // to pins that can actually drive a servo (mirrors pins.js).
+    if (!board && GMB.api && GMB.api.getBoard) {
+      GMB.api.getBoard(GMB.state.profile.board.profile).then(function (b) {
+        board = b; GMB.render();
+      });
+    }
     host.appendChild(h('div.card.wizard-card', [
       h('div.stepper', STEPS.map(function (label, i) {
         return h('button.step' + (i === step ? '.active' : '') + (i < step ? '.done' : ''),
@@ -147,7 +154,7 @@
         h('span.spacer'),
         step < STEPS.length - 1
           ? GMB.button('Next', function () { goto(step + 1); }, 'primary')
-          : GMB.button('Finish & save', function () { GMB.saveProfile(); }, 'primary')
+          : GMB.button('Finish & save', finishAndSave, 'primary')
       ])
     ]));
     drawStep();
@@ -175,9 +182,12 @@
     if (t) {
       p.strings = t.notes.map(function (n) { return { enabled: true, openNote: n, maxFret: t.maxFret }; });
       p.instrument.stringCount = t.notes.length;
-      p.selector.string.maximum = t.notes.length;
-      p.selector.fret.maximum = t.maxFret;
-      p.selector.string.mapping = t.notes.map(function (_, i) { return i; });
+      var sfs = p.stringFretSelection;
+      if (sfs && sfs.string && sfs.fret) {
+        sfs.string.maximum = t.notes.length;
+        sfs.fret.maximum = t.maxFret;
+        sfs.string.mapping = t.notes.map(function (_, i) { return i; });
+      }
       p.servos = [];
       t.notes.forEach(function (_, i) {
         GMB.defaultStringServos(i, t.maxFret).forEach(function (s) { p.servos.push(s); });
@@ -251,6 +261,51 @@
 
   // ---- Step 3: Servos & frets ----------------------------------------------
 
+  var ROLE_LABEL = {
+    finger: 'Finger', pluck: 'Plucker', strum: 'Strum', strumLift: 'Strum lift',
+    damper: 'Damper', sharedDamper: 'Shared damper', aux: 'Auxiliary'
+  };
+  function isStrikerRole(fn) { return fn === 'pluck' || fn === 'strum' || fn === 'strumLift'; }
+
+  // Find a free (board, channel): prefer the string's own board, else any board.
+  function freeSlot(preferBoard) {
+    var ch = freeChannel(preferBoard);
+    if (ch >= 0) return { board: preferBoard, channel: ch };
+    for (var b = 0; b < 8; b++) { var c = freeChannel(b); if (c >= 0) return { board: b, channel: c }; }
+    return { board: preferBoard, channel: 0 };
+  }
+  function addServoRole(role, strIdx) {
+    var slot = freeSlot(strIdx < 0 ? 0 : strIdx);
+    var opts = { pcaBoard: slot.board, channel: slot.channel };
+    if (role === 'pluck' || role === 'strum') { opts.activeUs = 1700; opts.travelMs = 90; opts.settleMs = 20; }
+    GMB.state.profile.servos.push(GMB.servoDefaults(role, strIdx, opts));
+    GMB.markDirty();
+  }
+  function servosByRole(strIdx, role) {
+    return GMB.state.profile.servos.filter(
+      function (s) { return s.stringIndex === strIdx && s.function === role; });
+  }
+
+  // Direct-GPIO picker filtered to servo-capable, free pins (mirrors pins.js).
+  function gpioSelect(sv) {
+    var opts = [{ value: -1, label: '— none —' }];
+    var used = {};
+    GMB.state.profile.pins.forEach(function (a) { if (a.gpio >= 0) used[a.gpio] = a.signal; });
+    GMB.state.profile.servos.forEach(function (s2) {
+      if (s2 !== sv && s2.source === 'gpio' && s2.gpio >= 0) used[s2.gpio] = 'another servo';
+    });
+    if (board && board.pins) {
+      board.pins.forEach(function (pin) {
+        if (!GMB.pinSupports(pin, 'servo')) return;
+        var t = used[pin.gpio];
+        opts.push({ value: pin.gpio, label: 'GPIO ' + pin.gpio + (t ? ' (used: ' + t + ')' : '') });
+      });
+    } else {
+      (GMB.RECOMMENDED.SERVO || []).forEach(function (g) { opts.push({ value: g, label: 'GPIO ' + g }); });
+    }
+    return GMB.input(sv, 'gpio', { type: 'select', options: opts, coerce: Number });
+  }
+
   function servoSourceEditor(sv) {
     var srcSel = GMB.input(sv, 'source', {
       type: 'select', options: [{ value: 'pca', label: 'PCA9685' }, { value: 'gpio', label: 'Direct GPIO' }],
@@ -258,12 +313,56 @@
     });
     var fields = [GMB.field('Source', srcSel)];
     if (sv.source === 'gpio') {
-      fields.push(GMB.field('GPIO', GMB.input(sv, 'gpio', { type: 'number', min: -1, max: 48 })));
+      fields.push(GMB.field('GPIO', gpioSelect(sv), 'free servo-capable pins only'));
     } else {
       fields.push(GMB.field('PCA board', GMB.input(sv, 'pcaBoard', { type: 'number', min: 0, max: 7 })));
       fields.push(GMB.field('Channel', GMB.input(sv, 'channel', { type: 'number', min: 0, max: 15 })));
     }
     return fields;
+  }
+
+  // Advanced calibration; for strikers also the stroke-shaping (grattage) fields.
+  function servoAdvanced(sv, striker) {
+    var out = [h('div.grid3', [
+      angleField('Rest angle (°)', sv, 'restUs', 'resting position'),
+      GMB.field('Pulse min (µs)', GMB.input(sv, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
+      GMB.field('Pulse max (µs)', GMB.input(sv, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
+      GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 2000 })),
+      GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 2000 })),
+      GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' }))
+    ])];
+    if (striker) {
+      out.push(h('div.grid3', [
+        GMB.field('Alternate strokes', GMB.input(sv, 'alternateDirection', { type: 'checkbox' }),
+          'rake up/down on successive strikes'),
+        GMB.field('Up-stroke pulse (µs)', GMB.input(sv, 'activeAltUs', { type: 'number', min: 0, max: 3000 }),
+          '0 = mirror the down-stroke'),
+        GMB.field('Stroke time (ms)', GMB.input(sv, 'strokeMs', { type: 'number', min: 0, max: 1000 }),
+          'engaged time before return (0 = travel)'),
+        GMB.field('Min strike (µs)', GMB.input(sv, 'minStrikeUs', { type: 'number', min: 0, max: 3000 }),
+          'floor so soft notes still catch (0 = off)'),
+        GMB.field('Engage delay (ms)', GMB.input(sv, 'engageDelayMs', { type: 'number', min: 0, max: 500 }),
+          'strum-lift pause before the stroke')
+      ]));
+    }
+    return out;
+  }
+
+  // A full editor for one non-finger servo (pluck/strum/strumLift/damper/aux…).
+  function actuatorEditor(sv) {
+    var striker = isStrikerRole(sv.function);
+    var basic = servoSourceEditor(sv).concat([
+      angleField(striker ? 'Strike angle (°)' : 'Active angle (°)', sv, 'activeUs',
+        striker ? 'how deep it engages the string' : 'engaged position'),
+      GMB.field('Reverse direction', GMB.input(sv, 'inverted', { type: 'checkbox' }))
+    ]);
+    var rows = [h('div.grid3', basic)];
+    if (GMB.isAdvanced()) servoAdvanced(sv, striker).forEach(function (r) { rows.push(r); });
+    rows.push(h('div.row', [
+      testServoBtn('Test rest', sv, false),
+      testServoBtn(striker ? 'Test strike' : 'Test active', sv, true)
+    ]));
+    return rows;
   }
 
   // Angle (deg) editor bound to a servo's restUs / activeUs via us<->deg mapping.
@@ -302,16 +401,7 @@
       GMB.field('Reverse direction', GMB.input(sv, 'inverted', { type: 'checkbox' }))
     ]);
     var rows = [head, h('div.grid3', basic)];
-    if (GMB.isAdvanced()) {
-      rows.push(h('div.grid3', [
-        angleField('Rest angle (°)', sv, 'restUs', 'finger lifted off the string'),
-        GMB.field('Pulse min (µs)', GMB.input(sv, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
-        GMB.field('Pulse max (µs)', GMB.input(sv, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
-        GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 2000 })),
-        GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 2000 })),
-        GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' }))
-      ]));
-    }
+    if (GMB.isAdvanced()) servoAdvanced(sv, false).forEach(function (r) { rows.push(r); });
     rows.push(h('div.row', [testServoBtn('Test rest', sv, false), testServoBtn('Test contact', sv, true)]));
     return h('div.fret-row', rows);
   }
@@ -321,15 +411,15 @@
     GMB.state.profile.servos.forEach(function (s) {
       if (s.source === 'pca') used[s.pcaBoard + ':' + s.channel] = s;
     });
-    var board = strIdx;  // show this string's board
+    var bd = strIdx;  // show this string's board
     var chips = [];
     for (var c = 0; c < 16; c++) {
-      var key = board + ':' + c;
-      var s = used[key];
+      var s = used[bd + ':' + c];
       var cls = s ? (s.function === 'finger' ? 'used' : 'strike') : 'free';
       chips.push(h('span.chan-chip.' + cls, s ? (s.function === 'finger' ? ('f' + s.fret) : s.function.charAt(0)) : c));
     }
-    return h('div', [h('span.muted', 'PCA board ' + board + ' channels: '), h('span.chan-map', chips)]);
+    return h('div.chan-map', [h('span.muted', 'PCA board ' + bd + ' channels:'),
+      h('div.chan-chips', chips)]);
   }
 
   function stepServos(body) {
@@ -342,34 +432,63 @@
     var s = p.strings[activeStr];
     body.appendChild(pcaMap(activeStr));
 
-    // Plucker / striker for this string.
-    var striker = strikerFor(activeStr);
-    var strikerCard;
-    if (striker) {
-      var sk = servoSourceEditor(striker).concat([
-        angleField('Strike angle (°)', striker, 'activeUs', 'how deep the plectrum rakes the string')
-      ]);
-      strikerCard = h('div.card', [
-        h('div.card-head', [h('h3', 'Plucker (' + striker.function + ')'),
-          GMB.button('Remove', function () { removeServo(striker); drawStep(); }, 'ghost')]),
-        h('div.grid3', sk),
-        h('div.row', [testServoBtn('Test rest', striker, false), testServoBtn('Test strike', striker, true)])
-      ]);
-    } else {
-      strikerCard = h('div.card', [h('h3', 'Plucker'),
-        h('p.muted', 'This string has no plucker — it cannot sound.'),
-        GMB.button('+ Add plucker', function () { ensureStriker(activeStr); drawStep(); }, 'primary')]);
-    }
-    body.appendChild(strikerCard);
+    // Per-string actuators: the striker (pluck OR strum), an optional strum-lift,
+    // and an optional damper — all editable, with the grattage stroke-shaping in
+    // advanced mode. Every enabled string needs a pluck or strum to sound.
+    var actBlocks = [];
+    var hasStriker = servosByRole(activeStr, 'pluck').length || servosByRole(activeStr, 'strum').length;
+    if (!hasStriker)
+      actBlocks.push(h('p.muted', '⚠ This string has no plucker/strum — it cannot sound.'));
+    ['pluck', 'strum', 'strumLift', 'damper'].forEach(function (role) {
+      servosByRole(activeStr, role).forEach(function (sv) {
+        actBlocks.push(h('div.fret-row', [
+          h('div.fret-head', [h('strong', ROLE_LABEL[role]),
+            h('span.muted', sv.source === 'pca' ? ('PCA ' + sv.pcaBoard + ':' + sv.channel) : ('GPIO ' + sv.gpio)),
+            GMB.button('Remove', function () { removeServo(sv); drawStep(); }, 'ghost')]),
+        ].concat(actuatorEditor(sv))));
+      });
+    });
+    var addBtns = [
+      GMB.button('+ Plucker', function () { addServoRole('pluck', activeStr); drawStep(); }, 'ghost'),
+      GMB.button('+ Strum', function () { addServoRole('strum', activeStr); drawStep(); }, 'ghost'),
+      GMB.button('+ Strum lift', function () { addServoRole('strumLift', activeStr); drawStep(); }, 'ghost'),
+      GMB.button('+ Damper', function () { addServoRole('damper', activeStr); drawStep(); }, 'ghost')
+    ];
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'String actuators (pluck / strum / lift / damper)')]),
+      actBlocks.length ? h('div.fret-editor', actBlocks) : h('p.muted', 'None yet.'),
+      h('div.row', addBtns)
+    ]));
 
     // Finger servos, one row per fret 1..maxFret.
     var rows = [];
     for (var f = 1; f <= s.maxFret; f++) rows.push(fingerRow(activeStr, f));
     body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Finger servos'),
+      h('div.card-head', [h('h3', 'Finger servos (one per fret)'),
         GMB.button('Auto-wire all frets', function () { autoWireString(activeStr); drawStep(); }, 'ghost')]),
       h('div.fret-editor', rows)
     ]));
+
+    // Shared actuators (advanced): mechanisms spanning several strings.
+    if (GMB.isAdvanced()) {
+      var shared = [];
+      ['sharedDamper', 'aux'].forEach(function (role) {
+        servosByRole(-1, role).forEach(function (sv) {
+          shared.push(h('div.fret-row', [
+            h('div.fret-head', [h('strong', ROLE_LABEL[role]),
+              GMB.button('Remove', function () { removeServo(sv); drawStep(); }, 'ghost')]),
+          ].concat(actuatorEditor(sv))));
+        });
+      });
+      body.appendChild(h('div.card', [
+        h('h3', 'Shared actuators'),
+        shared.length ? h('div.fret-editor', shared) : h('p.muted', 'None.'),
+        h('div.row', [
+          GMB.button('+ Shared damper', function () { addServoRole('sharedDamper', -1); drawStep(); }, 'ghost'),
+          GMB.button('+ Auxiliary', function () { addServoRole('aux', -1); drawStep(); }, 'ghost')
+        ])
+      ]));
+    }
   }
 
   // ---- Step 4: Install helper (guided per-fret calibration) -----------------
@@ -508,29 +627,54 @@
           (is.field ? is.field + ' — ' : '') + is.message));
       });
     }
-    body.appendChild(h('div.row', [GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')]));
+    var blocking = issues.filter(function (i) { return i.level === 'error'; });
+    body.appendChild(h('div.row', [GMB.button('Save & publish', function () {
+      if (blocking.length) { GMB.toast('Fix the ' + blocking.length + ' error(s) first.', 'error'); return; }
+      GMB.saveProfile();
+    }, 'primary')]));
   }
 
   // Client-side pre-check (the firmware ProfileValidator is authoritative).
   GMB.validateProfile = function (p) {
     var out = [];
     var anyPca = false, direct = 0;
-    var pcaUsed = {}, fingerKey = {};
+    var pcaUsed = {}, fingerKey = {}, gpioUsed = {};
+    // Board pins already occupy GPIOs a direct servo must not reuse.
+    p.pins.forEach(function (a) { if (a.gpio >= 0) gpioUsed[a.gpio] = a.signal; });
+    // Board capability lookup (if the board profile has been loaded).
+    var pinCap = {};
+    if (board && board.pins) board.pins.forEach(function (pin) { pinCap[pin.gpio] = pin; });
     p.servos.forEach(function (s, i) {
       if (!s.enabled) return;
+      var tag = 'servos[' + i + ']';
       if (s.source === 'pca') {
         anyPca = true;
-        if (s.pcaBoard > 7) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA board must be 0..7' });
-        if (s.channel > 15) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA channel must be 0..15' });
+        if (s.pcaBoard > 7) out.push({ level: 'error', field: tag, message: 'PCA board must be 0..7' });
+        if (s.channel > 15) out.push({ level: 'error', field: tag, message: 'PCA channel must be 0..15' });
         var k = s.pcaBoard + ':' + s.channel;
-        if (pcaUsed[k]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA ' + k + ' used twice' });
+        if (pcaUsed[k]) out.push({ level: 'error', field: tag, message: 'PCA ' + k + ' used twice' });
         pcaUsed[k] = true;
-      } else { direct++; if (s.gpio < 0) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'direct servo needs a GPIO' }); }
+      } else {
+        direct++;
+        if (s.gpio < 0) {
+          out.push({ level: 'error', field: tag, message: 'direct servo needs a GPIO' });
+        } else {
+          if (gpioUsed[s.gpio] !== undefined)
+            out.push({ level: 'error', field: tag, message: 'GPIO ' + s.gpio + ' already used by ' + gpioUsed[s.gpio] });
+          else if (board && board.pins && (!pinCap[s.gpio] || !GMB.pinSupports(pinCap[s.gpio], 'servo')))
+            out.push({ level: 'error', field: tag, message: 'GPIO ' + s.gpio + ' cannot drive a servo on this board' });
+          gpioUsed[s.gpio] = 'servo ' + i;
+        }
+      }
       if (s.function === 'finger') {
-        if (s.fret < 1 || s.fret > 24) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'finger fret must be 1..24' });
-        var fk = s.stringIndex + '/' + s.fret;
-        if (fingerKey[fk]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'string ' + s.stringIndex + ' fret ' + s.fret + ' has two fingers' });
-        fingerKey[fk] = true;
+        if (s.fret < 1 || s.fret > 24) out.push({ level: 'error', field: tag, message: 'finger fret must be 1..24' });
+        else {
+          if (s.stringIndex >= 0 && p.strings[s.stringIndex] && s.fret > p.strings[s.stringIndex].maxFret)
+            out.push({ level: 'warning', field: tag, message: 'finger fret ' + s.fret + ' exceeds the string maxFret (unreachable)' });
+          var fk = s.stringIndex + '/' + s.fret;
+          if (fingerKey[fk]) out.push({ level: 'error', field: tag, message: 'string ' + s.stringIndex + ' fret ' + s.fret + ' has two fingers' });
+          fingerKey[fk] = true;
+        }
       }
     });
     if (direct > 8) out.push({ level: 'error', field: 'servos', message: 'at most 8 direct-GPIO servos (LEDC channels)' });
@@ -539,12 +683,18 @@
       out.push({ level: 'error', field: 'pins', message: 'SDA, SCL and SERVO_OE are required for PCA servos' });
     p.strings.forEach(function (s, i) {
       if (!s.enabled) return;
-      if (!strikerFor(i)) out.push({ level: 'error', field: 'string ' + i, message: 'no plucker/strum servo' });
+      // Validate the PASSED profile (not the global state): check its own servos.
+      var hasStrike = p.servos.some(function (sv) {
+        return sv.enabled && (sv.function === 'pluck' || sv.function === 'strum') && sv.stringIndex === i;
+      });
+      if (!hasStrike) out.push({ level: 'error', field: 'string ' + i, message: 'no plucker/strum servo' });
       if (s.maxFret > 0 && GMB.availableFrets(p, i).length === 0)
         out.push({ level: 'warning', field: 'string ' + i, message: 'no finger servo — only the open string plays' });
     });
     if (p.power && p.power.maxConcurrentMoves < 1)
       out.push({ level: 'error', field: 'power', message: 'at least one servo must be allowed to move' });
+    if (p.power && p.power.staggerMs > 2000)
+      out.push({ level: 'error', field: 'power', message: 'stagger must be <= 2000 ms' });
     return out;
   };
 

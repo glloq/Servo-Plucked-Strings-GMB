@@ -203,7 +203,6 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     mi["velocityCurve"] = velocityCurveName(p.midi.velocityCurve);
     mi["saturationStrategy"] = saturationName(p.midi.saturationStrategy);
     mi["noteExecutionDelayMs"] = p.midi.noteExecutionDelayMs;
-    mi["fingerLeadMs"] = p.midi.fingerLeadMs;
     mi["strumLeadMs"] = p.midi.strumLeadMs;
 
     JsonObject sf = doc["stringFretSelection"].to<JsonObject>();
@@ -327,7 +326,6 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.midi.velocityCurve = velocityCurveFrom(mi["velocityCurve"], &enumsOk);
     out.midi.saturationStrategy = saturationFrom(mi["saturationStrategy"], &enumsOk);
     out.midi.noteExecutionDelayMs = mi["noteExecutionDelayMs"] | 0;
-    out.midi.fingerLeadMs = mi["fingerLeadMs"] | 0;
     out.midi.strumLeadMs = mi["strumLeadMs"] | 0;
 
     JsonObjectConst sf = doc["stringFretSelection"];

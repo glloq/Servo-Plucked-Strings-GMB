@@ -59,8 +59,6 @@
       h('div.form-grid', [
         GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 500 }),
           'Fixed delay from Note On to the note actually sounding, giving the finger a constant window to reach the fret.'),
-        GMB.field('Finger lead (ms)', GMB.input(p.midi, 'fingerLeadMs', { type: 'number', min: 0, max: 500 }),
-          'Start the finger descent this long before the carriage is estimated to arrive (0 = press only on arrival). Tune to avoid dragging.'),
         GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs', { type: 'number', min: 0, max: 500 }),
           'Start lowering the strum lift this long before the string is ready, so it is engaged when the strike time comes.')
       ])

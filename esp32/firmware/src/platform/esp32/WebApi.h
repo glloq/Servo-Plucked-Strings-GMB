@@ -33,7 +33,7 @@ struct WebContext {
     // The enqueue callbacks return the assigned command id (0 = queue full), so
     // the 202 response can carry it and GET /api/commands can report the outcome.
     std::function<uint32_t()> onReset;                     // recover from panic/E-stop
-    std::function<std::string()> appState;                 // "boot"/"homing"/"ready"
+    std::function<std::string()> appState;                 // "boot"/"reconfiguring"/"ready"/"readyDegraded"
     std::function<int()> readyStrings;                     // axes homed & not faulted
     std::function<uint32_t(const Profile&)> onActivateProfile;  // validate + enqueue
     std::function<uint32_t(uint8_t, uint8_t, uint8_t, uint16_t)> onTestNote;  // ch,note,vel,ms

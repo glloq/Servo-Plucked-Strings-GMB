@@ -31,22 +31,20 @@ sync means the browser UI and the on-device validator agree about every pin.
 ### `recommendedAssignment`
 
 The default, conflict-free assignment the "Assign pins automatically"
-button proposes (SPECIFICATION.md §11.5). Array fields are indexed by
-string number (1..6); the first *N* entries are used for an *N*-string
-instrument.
+button proposes. Servo-per-fret needs no stepper STEP/DIR/HOME signals — every
+finger/plucker is a PCA9685 channel or a direct GPIO configured per servo — so
+only the I²C bus and the `/OE` safety line are board-level pins. `SERVO` lists
+good free output GPIOs for direct-GPIO servos.
 
 | Key | Meaning | Value |
 | --- | ------- | ----- |
-| `STEP` | STEP outputs, strings 1..6 | `[4, 5, 6, 7, 15, 16]` |
-| `DIR` | DIR outputs, strings 1..6 | `[17, 18, 8, 9, 10, 11]` |
-| `HOME` | HOME sensors, strings 1..6 | `[12, 13, 14, 21, 38, 39]` |
 | `SDA` | PCA9685 I²C data | `40` |
 | `SCL` | PCA9685 I²C clock | `41` |
-| `ENABLE` | global driver ENABLE | `42` |
 | `SERVO_OE` | PCA9685 `/OE` safety line | `47` |
+| `SERVO` | free output pins for direct-GPIO servos | `[4, 5, 6, 7, 15, 16, 17, 18]` |
 
 This is a starting profile, not a universal rule — the UI can override every
-line (SPECIFICATION.md §11.5).
+line.
 
 ### `pins[]` — `PinCapability`
 
@@ -59,8 +57,8 @@ Each entry describes one physical GPIO. Fields match
 | `exposed` | bool | Broken out on a board header. |
 | `input` | bool | Usable as a digital input. |
 | `output` | bool | Usable as a digital output. |
-| `interrupt` | bool | Can raise a GPIO interrupt (needed for HOME/LIMIT). |
-| `highSpeedOutput` | bool | Suitable for fast toggling / STEP generation. |
+| `interrupt` | bool | Can raise a GPIO interrupt. |
+| `highSpeedOutput` | bool | Suitable for fast toggling (unused by the servo build). |
 | `adc` | bool | Wired to an ADC channel. |
 | `reserved` | bool | Reserved by firmware policy or hardware; never assignable. |
 | `strapping` | bool | Boot-strapping pin (level sampled at reset). |

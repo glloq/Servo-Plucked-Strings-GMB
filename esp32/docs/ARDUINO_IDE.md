@@ -96,7 +96,7 @@ The interface is served from LittleFS (`/www`). It is uploaded separately:
 ## 8. First startup
 
 At power-on, the ESP32 creates the Wi-Fi access point
-**`Stepper-Plucked-Strings-GMB`**. Connect to it and open
+**`Servo-Plucked-Strings-GMB`**. Connect to it and open
 `http://192.168.4.1` to launch the configuration wizard
 (see [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md)).
 

@@ -107,7 +107,7 @@ Détails complets dans [`arduino/README.md`](arduino/README.md).
 | [arduino/docs/STRUCTURE_PROJET.md](arduino/docs/STRUCTURE_PROJET.md) | Organisation du code |
 | [arduino/docs/GUIDE_MIDIUSB.md](arduino/docs/GUIDE_MIDIUSB.md) | Guide MIDIUSB complet |
 | [arduino/CHANGELOG.md](arduino/CHANGELOG.md) | Historique des modifications |
-| [esp32/README.md](esp32/README.md) | Feuille de route ESP32 |
+| [esp32/README.md](esp32/README.md) | **Guide ESP32 (servo-par-frette)** — firmware, interface web, assistant d'installation |
 
 ## 🤝 Contribution
 

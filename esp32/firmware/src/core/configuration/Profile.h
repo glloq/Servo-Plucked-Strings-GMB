@@ -53,17 +53,12 @@ struct MidiConfig {
     //   noteExecutionDelayMs : fixed delay between receiving a Note On and the
     //                          note actually sounding, so the mechanics have a
     //                          predictable, constant window to get in position.
-    //   fingerLeadMs         : begin the finger descent up to this long before
-    //                          the carriage is estimated to reach the fret, so
-    //                          the finger arrives on the string around the same
-    //                          time (overlaps descent with the approach).
     //   strumLeadMs          : begin lowering the strum lift up to this long
     //                          before the string is ready, so the strummer is
-    //                          already engaged when the strike time comes.
-    // The two leads shrink the minimum achievable noteExecutionDelayMs; both
-    // default to 0 (no anticipation — the safe, strictly-sequential behaviour).
+    //                          already engaged when the strike time comes (0 = off).
+    // (There is no fingerLeadMs: servo-per-fret presses the finger right after the
+    // previous one lifts — there is no carriage travel to overlap with.)
     uint16_t noteExecutionDelayMs = 0;
-    uint16_t fingerLeadMs = 0;
     uint16_t strumLeadMs = 0;
 };
 

@@ -28,9 +28,13 @@ struct StringSpec {
     bool enabled = true;
     bool faulted = false;
     // Bit F set = fret F carries a finger servo (fret 0 = open, always playable and
-    // not represented). 0 = no mask supplied => every fret 1..maxFret is treated as
-    // available (back-compat for callers/tests that don't wire per-fret servos).
+    // not represented). Authoritative only when fretMaskValid is true: then a fret
+    // is playable iff it is open OR its bit is set — so a fretted string with NO
+    // finger servo (mask 0) can only play its open string, never a wrong pitch.
+    // When fretMaskValid is false (callers/tests that don't wire per-fret servos),
+    // every fret 1..maxFret is treated as available (chromatic back-compat).
     uint32_t fretMask = 0;
+    bool fretMaskValid = false;
 };
 
 struct StringRuntime {

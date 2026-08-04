@@ -34,18 +34,23 @@ Consequences:
   state machine, motor geometry, homing, GMB capabilities/SysEx, safety. No
   direct hardware access.
 * **Platform adapters** (`firmware/src/platform/esp32/`) — concrete
-  implementations that connect the core to the ESP32-S3 hardware:
-  `StepperBank` generates the steps via the **FastAccelStepper hardware engine**
-  (RMT/MCPWM + timer), thus **outside `loop()`** — the core's `MotionPlanner`
-  remains the reference trapezoidal model tested on a PC; `ServoBank` drives the
-  PCA9685 **and** the servos on direct GPIO (14-bit LEDC); `Net` (non-blocking
+  implementations that connect the core to the ESP32-S3 hardware. **Servo-per-fret
+  has no stepper: there is no `StepperBank`/FastAccelStepper.** `ServoBank` drives
+  the PCA9685 (up to 8 boards) **and** servos on direct GPIO (14-bit LEDC), and
+  provides the per-fret finger lookup (`fingerIndexForFret`); `Net` (non-blocking
   Wi-Fi), `WebApi` (REST + WebSocket), `MidiWifi` (transport), `ProfileStorage`
   (LittleFS + NVS for secrets). These layers consume the core without modifying
-  it.
-* **Native tests** (`firmware/test/`) — 86 unit tests compiled and run
-  with `g++ -std=c++17` via `firmware/test/Makefile`, covering the 8 modules of
-  the core (`test_board`, `test_selector`, `test_allocator`, `test_motion`,
-  `test_string_fsm`, `test_profile`, `test_sysex`, + `test_main`).
+  it. The current-stagger `ServoActivationGovernor` lives in the core and is used
+  by the `main.cpp` scheduler.
+* **Native tests** (`firmware/test/`) — the suite is compiled and run with
+  `g++ -std=c++17` via `firmware/test/Makefile`: `test_board`, `test_selector`,
+  `test_allocator`, `test_string_fsm`, `test_profile`, `test_sysex`,
+  `test_integration`, `test_midiparser`, `test_servos`, `test_fretservo`
+  (servo-per-fret masks/gaps), `test_governor` (current governor), `test_debounce`,
+  `test_audit`, + `test_main`. (There is no `test_motion`/`test_planner` — the
+  stepper/motion modules were removed.) Two extra checks:
+  `test/hostcheck/run.sh` compiles the ESP32 platform layer, and
+  `test/profilecheck/run.sh` round-trips the shipped JSON profiles.
 
 ```bash
 cd firmware/test && make        # compile the core + the tests, then run them
@@ -87,14 +92,13 @@ firmware/                        Specification §23             Implemented (cor
 │   ├── InstrumentController     instrument orchestration      (adapter, upcoming)
 │   ├── StringController         per-string state machine      core/instrument/StringController.{h,cpp}
 │   └── NoteAllocator            note allocation               core/instrument/NoteAllocator.{h,cpp}
-├── motion/
-│   ├── StepperAxis              geometry/conversion mm↔steps  core/motion/StepperAxis.{h,cpp}
-│   ├── MotionPlanner            trapezoidal profile (accel)   core/motion/MotionPlanner.{h,cpp}
-│   └── HomingController         non-blocking homing           core/motion/HomingController.{h,cpp}
+├── motion/                      REMOVED (servo-per-fret: no carriage, no homing)
+│   └── (fret selection)         press the fret's finger servo  main.cpp scheduler + ServoBank
 ├── actuators/
-│   ├── ServoManager             PCA9685                       ServoConfig (core/configuration)
-│   ├── FingerActuator           finger servo                  ServoConfig function="finger"
-│   ├── PluckActuator            pluck servo                   ServoConfig function="pluck"
+│   ├── ServoBank                PCA9685 + direct GPIO          platform/esp32/ServoBank.{h,cpp}
+│   ├── FingerActuator           finger servo (per fret)        ServoConfig function="finger", fret
+│   ├── PluckActuator            pluck servo                    ServoConfig function="pluck"
+│   ├── ServoActivationGovernor  current-stagger governor       core/instrument/ServoActivationGovernor.h
 │   └── DamperActuator           damper                        ServoConfig function="damper"
 ├── configuration/
 │   ├── Profile                  profile (source of truth)     core/configuration/Profile.{h,cpp}
@@ -232,10 +236,12 @@ in [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md#3-protocole-sysex-gmb).
 | `network` | `NetworkConfig` | AP/station mode, SSID, hostname, static IP |
 | `midi` | `MidiConfig` | channel, Omni, transposition, chord window, velocity curve, pedal |
 | `selector` | `SelectorConfig` | string/fret selection (CC20/CC21, mode, timeout, FIFO…) |
-| `strings` | `vector<AxisConfig>` | geometry/motor per string |
-| `homing` | `vector<HomingConfig>` | homing per axis |
-| `servos` | `vector<ServoConfig>` | servos (finger/pluck/damper/aux) |
+| `power` | `PowerConfig` | current-stagger governor (`maxConcurrentMoves`, `staggerMs`) |
+| `strings` | `vector<StringConfig>` | per string: `openNote`, `maxFret`, `enabled` (no geometry/homing) |
+| `servos` | `vector<ServoConfig>` | servos (finger *per fret*, pluck/strum/strumLift/damper/aux) |
 | `capabilitiesRevision` | `uint32_t` | revision counter (Block 8 notification) |
+
+(There is no `homing` vector and no `AxisConfig`: servo-per-fret has no carriage.)
 
 `Profile::instrumentView()` derives from it an `InstrumentView` shared by the
 string/fret selector and the capabilities generator.

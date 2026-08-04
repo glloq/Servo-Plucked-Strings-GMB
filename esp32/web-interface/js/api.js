@@ -257,7 +257,7 @@
         globalChannel: 0, omni: false, transpose: 0, chordWindowMs: 3,
         velocityCurve: 'linear', sustainPedal: true, sustainCc: 64,
         saturationStrategy: 'priorityLow',
-        noteExecutionDelayMs: 0, fingerLeadMs: 0, strumLeadMs: 0
+        noteExecutionDelayMs: 0, strumLeadMs: 0
       },
       stringFretSelection: {
         enabled: true, mode: 'hybrid', preset: 'general-midi-boop', perMidiChannel: true,

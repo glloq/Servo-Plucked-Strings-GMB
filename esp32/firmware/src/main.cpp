@@ -265,6 +265,11 @@ bool armInstrument(uint32_t nowMs) {
     g_safety.reset();  // -> PowerOnSafe
     g_degraded = false;
     g_governor.reset();
+    // Start from a clean logical state even if we were NOT panicked first (e.g. a
+    // reset issued while Ready and sounding): clear the FSMs, targets and the
+    // per-string scheduler so nothing is left "playing" against parked servos.
+    g_instrument.panic();
+    for (auto& s : g_sched) s = StringSched{};
     for (size_t i = 0; i < g_profile.strings.size(); ++i) {
         if (!g_profile.strings[i].enabled)
             g_instrument.string(i).disable();  // a disabled string never plays
@@ -380,11 +385,31 @@ bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,
 }
 
 // Web servo test: only when armed and only for a real, enabled servo. Used by the
-// installation/calibration wizard to press/release one finger at a time.
+// installation/calibration wizard to press/release one finger at a time. A finger
+// pressed here is recorded in g_currentFinger (releasing any other finger already
+// down on that string) so the one-finger-per-string invariant holds and a later
+// MIDI note lifts it instead of leaving two fingers clamped (audit).
 bool doTestServo(int index, bool active) {
     if (!g_safety.actuatorsAllowed()) return false;
     if (!g_servos.commandable(index)) return false;
-    if (active) g_servos.press(index); else g_servos.release(index);
+    int si = (index >= 0 && index < static_cast<int>(g_profile.servos.size()) &&
+              g_profile.servos[index].function == "finger")
+                 ? g_profile.servos[index].stringIndex
+                 : -1;
+    if (active) {
+        if (si >= 0 && si < static_cast<int>(g_currentFinger.size())) {
+            if (g_currentFinger[si] >= 0 && g_currentFinger[si] != index)
+                g_servos.release(g_currentFinger[si]);  // never two fingers on a string
+        }
+        if (!g_servos.press(index)) return false;
+        if (si >= 0 && si < static_cast<int>(g_currentFinger.size()))
+            g_currentFinger[si] = index;
+    } else {
+        g_servos.release(index);
+        if (si >= 0 && si < static_cast<int>(g_currentFinger.size()) &&
+            g_currentFinger[si] == index)
+            g_currentFinger[si] = -1;
+    }
     return true;
 }
 
@@ -781,6 +806,7 @@ void loop() {
     bool nowConnected = g_net.connected() && !g_net.accessPointActive();
     if (wasConnected && !nowConnected && g_phase == AppPhase::Ready) {
         g_instrument.panic();
+        purgeCommands();  // actually drop the queued web commands (message says so)
         g_safety.recordFault("wifi", "Wi-Fi link lost — pending commands cancelled", nowMs);
     }
     wasConnected = nowConnected;

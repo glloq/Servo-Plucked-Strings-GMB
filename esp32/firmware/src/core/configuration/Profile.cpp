@@ -35,38 +35,38 @@ Profile Profile::makeDefault(const std::string& name, uint8_t stringCount,
     p.instrument.stringCount = stringCount;
     if (maxFret > kMaxFret) maxFret = kMaxFret;
 
+    // Assign (PCA board, channel) with a running cursor: one finger servo per fret
+    // + a plucker, each string starting on a fresh board. For the common case
+    // (maxFret <= 15, i.e. <= 16 channels) this is exactly "one PCA9685 per string"
+    // (board = string index); a string needing more than 16 channels simply spills
+    // onto the next board, so a channel is NEVER out of the 0..15 range.
+    uint8_t board = 0, channel = 0;
+    auto place = [&](const std::string& fn, int8_t stringIndex, int8_t fret) {
+        if (channel > 15) { ++board; channel = 0; }
+        ServoConfig sv;
+        sv.enabled = true;
+        sv.function = fn;
+        sv.stringIndex = stringIndex;
+        sv.fret = fret;
+        sv.source = ServoSource::Pca;
+        sv.pcaBoard = board;
+        sv.channel = channel++;
+        sv.disableAtRest = true;  // idle servos draw ~0 A
+        if (fn == "pluck") { sv.activeUs = 1700; sv.travelMs = 90; sv.settleMs = 20; }
+        p.servos.push_back(sv);
+    };
     for (uint8_t i = 0; i < stringCount; ++i) {
         StringConfig s;
         s.openNote = i < tuning.size() ? tuning[i] : 40;
         s.maxFret = maxFret;
         p.strings.push_back(s);
 
-        // One dedicated finger servo per fret. Wired one PCA9685 per string
-        // (pcaBoard = i): frets 1..maxFret land on channels 0..maxFret-1, leaving
-        // the plucker on the next channel — well within a 16-channel board and
-        // spreading the current draw across boards (one PCA per string).
-        for (uint8_t f = 1; f <= maxFret; ++f) {
-            ServoConfig finger;
-            finger.enabled = true;
-            finger.function = "finger";
-            finger.stringIndex = static_cast<int8_t>(i);
-            finger.fret = static_cast<int8_t>(f);
-            finger.source = ServoSource::Pca;
-            finger.pcaBoard = i;                          // one PCA per string
-            finger.channel = static_cast<uint8_t>(f - 1); // fret 1 -> channel 0
-            finger.disableAtRest = true;                  // idle fingers draw ~0 A
-            p.servos.push_back(finger);
-        }
+        for (uint8_t f = 1; f <= maxFret; ++f)
+            place("finger", static_cast<int8_t>(i), static_cast<int8_t>(f));
+        place("pluck", static_cast<int8_t>(i), -1);
 
-        ServoConfig pluck;
-        pluck.enabled = true;
-        pluck.function = "pluck";
-        pluck.stringIndex = static_cast<int8_t>(i);
-        pluck.source = ServoSource::Pca;
-        pluck.pcaBoard = i;                               // same board as its frets
-        pluck.channel = maxFret;                          // channel after the fingers
-        pluck.disableAtRest = true;
-        p.servos.push_back(pluck);
+        // Next string starts on a fresh board (one PCA per string).
+        if (channel != 0) { ++board; channel = 0; }
     }
 
     // Default explicit selection follows the General-Midi-Boop preset.
