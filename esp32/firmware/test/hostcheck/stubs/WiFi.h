@@ -11,6 +11,7 @@ public:
   IPAddress softAPIP() { return IPAddress(); }
   void setHostname(const char*) {}
   void begin(const char*, const char*) {}
+  void disconnect(bool = false) {}
   int status() { return WL_CONNECTED; }
   IPAddress localIP() { return IPAddress(); }
 };

@@ -72,6 +72,16 @@ std::vector<int> g_currentFinger;    // PCA/GPIO servo index currently pressed, 
 int8_t g_estopPin = -1;
 Debouncer g_estopDeb;  // debounced E-stop input (avoids a spurious trip)
 
+// BOOT button (GPIO0) forces the Wi-Fi hotspot (AP + captive portal) on a long
+// press, so a wrong station config can never lock the user out. GPIO0 is the
+// universal ESP32 dev-board BOOT button — held LOW while pressed (INPUT_PULLUP).
+// A ~2 s hold avoids accidental triggers; the switch is live (no reboot).
+constexpr uint8_t kBootButtonPin = 0;
+constexpr uint32_t kBootHoldMs = 2000;
+uint32_t g_bootDownAtMs = 0;
+bool g_bootWasDown = false;
+bool g_bootTriggered = false;
+
 // Pending test-note Note Offs (scheduled by /api/test/note).
 struct TestNoteOff { uint8_t channel; uint8_t note; uint32_t atMs; };
 std::vector<TestNoteOff> g_testOffs;
@@ -140,6 +150,7 @@ QueueHandle_t g_cmdQueue = nullptr;
 SemaphoreHandle_t g_stateMutex = nullptr;
 SemaphoreHandle_t g_storageMutex = nullptr;
 std::atomic<bool> g_panicRequested{false};
+std::atomic<bool> g_hotspotRequested{false};  // BOOT button / web -> force AP
 bool g_authConfiguredCache = false;
 
 uint32_t enqueueCommand(const AppCommand& in) {
@@ -410,6 +421,23 @@ bool servicePanic(uint32_t nowMs) {
     doPanic();
     purgeCommands();
     return true;
+}
+
+// Force the Wi-Fi hotspot (AP + captive portal) from a BOOT-button long-press or a
+// web "Start hotspot" request. Runs on the main loop (owns Net + WiFi). Switching
+// the radio is independent of the instrument state, so it works in any phase.
+void serviceHotspotRequests(uint32_t nowMs) {
+    bool down = digitalRead(kBootButtonPin) == LOW;  // active-low BOOT button
+    if (down && !g_bootWasDown) { g_bootDownAtMs = nowMs; g_bootTriggered = false; }
+    if (down && !g_bootTriggered && nowMs - g_bootDownAtMs >= kBootHoldMs) {
+        g_bootTriggered = true;
+        g_hotspotRequested.store(true);
+    }
+    g_bootWasDown = down;
+    if (g_hotspotRequested.exchange(false)) {
+        g_net.forceAccessPoint();
+        Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
+    }
 }
 
 void drainCommands(uint32_t nowMs) {
@@ -701,6 +729,7 @@ void setup() {
     prefs.end();
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
+    pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
 
     WebContext ctx;
     ctx.profile = &g_profile;
@@ -711,6 +740,7 @@ void setup() {
     ctx.safety = &g_safety;
     ctx.storage = &g_storage;
     ctx.onPanic = []() { g_panicRequested.store(true); };
+    ctx.onStartHotspot = []() { g_hotspotRequested.store(true); };
     ctx.onTestNote = [](uint8_t channel, uint8_t note, uint8_t vel,
                         uint16_t durationMs) -> uint32_t {
         AppCommand c{CmdType::TestNote};
@@ -798,6 +828,7 @@ void loop() {
         }
     }
     bool panicked = servicePanic(nowMs);
+    serviceHotspotRequests(nowMs);  // BOOT-button / web hotspot (independent of phase)
 
     if (!panicked) drainCommands(nowMs);
     servicePendingActivation(nowMs);

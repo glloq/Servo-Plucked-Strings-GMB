@@ -312,7 +312,10 @@
     return GMB.button(label, function () {
       var idx = servoIndexOf(sv);
       if (idx < 0) return;
-      GMB.api.testServo({ index: idx, active: active }).then(function () {
+      // Send the DRAFT pulse (activeUs/restUs read at click time) so an unsaved
+      // calibration angle previews live, instead of the currently-active profile's.
+      var us = (active ? sv.activeUs : sv.restUs) | 0;
+      GMB.api.testServo({ index: idx, active: active, us: us }).then(function () {
         GMB.toast('Servo ' + idx + (active ? ' → contact' : ' → rest'), 'ok');
       }).catch(function () { GMB.toast('Servo test refused (arm the instrument first).', 'warn'); });
     }, 'ghost');
@@ -373,7 +376,9 @@
     if (geared) {
       rows.push(h('div.grid3', [
         GMB.field('Second fret (side B)', GMB.input(sv, 'fretB',
-          { type: 'number', min: 1, max: 24, onChange: drawStep }), 'the other fret this servo presses'),
+          { type: 'number', min: 1, max: 24, onChange: drawStep,
+            coerce: function (v) { return (v === null || v === '') ? -1 : (v | 0); } }),
+          'the other fret this servo presses'),
         angleField('Press B angle (°)', sv, 'activeBUs', 'where side B (fret ' + sv.fretB + ') presses'),
         angleField('Neutral angle (°)', sv, 'restUs', 'both fingers lifted (rest)')
       ]));
@@ -460,8 +465,16 @@
     var p = GMB.state.profile;
     body.appendChild(h('p.muted',
       'Guided setup: for each fret, press its finger, adjust the contact angle until it ' +
-      'cleanly frets the string, test the note, then move on. Arm the instrument first ' +
-      '(reset from the dashboard) so the servo tests can drive the hardware.'));
+      'cleanly frets the string, test the note, then move on. The instrument must be ' +
+      'armed for the servo tests to drive the hardware.'));
+    body.appendChild(h('div.toolbar', [
+      GMB.button('Arm for calibration', function () {
+        GMB.api.resetSystem().then(function (res) {
+          if (res && res.ok === false) GMB.toast('Arm refused: ' + (res.error || 'E-stop/invalid config') + '.', 'warn');
+          else GMB.toast('Armed — servo tests can now drive the hardware.', 'ok');
+        }).catch(function (e) { GMB.toast('Arm failed: ' + (e && e.message || e), 'error'); });
+      }, 'ghost')
+    ]));
     body.appendChild(stringTabs(function () { installFret = 1; }));
     var s = p.strings[activeStr];
     if (installFret > s.maxFret) installFret = s.maxFret;

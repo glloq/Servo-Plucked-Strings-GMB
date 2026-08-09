@@ -815,6 +815,12 @@
         body: JSON.stringify({ stationPassword: payload.stationPassword || '', apPassword: payload.apPassword || '' })
       }, function () { return { ok: true, note: 'stored (mock); reboot to apply' }; });
     },
+    // POST /api/hotspot -> switch to the access point + captive portal now.
+    startHotspot: function () {
+      return this._call('/api/hotspot', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+      }, function () { return { ok: true, note: 'Hotspot starting (mock) — rejoin the device Wi-Fi.' }; });
+    },
     // POST /api/sysex/request: build the request bytes for the block, send
     // { bytes:[...] }, then decode the returned response bytes for display.
     sysexRequest: function (kind) {

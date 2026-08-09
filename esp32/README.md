@@ -149,6 +149,7 @@ esp32/
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | Calibration servo-par-frette + assistant d'installation |
 | [docs/GEARED_FINGERS.md](docs/GEARED_FINGERS.md) | Doigts à engrenage (1 servo → 2 frettes) : étude, config, calibration |
 | [docs/PIN_CONFIGURATION.md](docs/PIN_CONFIGURATION.md) | Broches (I2C, /OE, servos directs) |
+| [docs/NETWORK_HOTSPOT.md](docs/NETWORK_HOTSPOT.md) | Hotspot bouton BOOT + portail captif (ouverture auto de la page) |
 | [docs/MIDI_PROTOCOL.md](docs/MIDI_PROTOCOL.md) | Notes, sélection CC corde/frette, SysEx |
 | [STRING_FRET_SELECTION.md](STRING_FRET_SELECTION.md) | Spécification de la sélection CC |
 | [docs/SAFETY.md](docs/SAFETY.md) | E-stop, /OE, gestion du courant |

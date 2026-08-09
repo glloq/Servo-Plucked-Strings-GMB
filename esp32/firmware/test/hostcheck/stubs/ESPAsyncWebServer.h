@@ -16,6 +16,7 @@ public:
 class AsyncWebServerRequest {
 public:
   void send(int, const String&, const String&) {}
+  void redirect(const String&) {}
   bool hasHeader(const char*) const { return false; }
   String header(const char*) const { return String(""); }
   bool hasParam(const char*) const { return false; }
@@ -52,5 +53,6 @@ public:
     static AsyncWebServerResponseStub r;
     return r;
   }
+  void onNotFound(ArRequestHandlerFunction) {}
   void begin() {}
 };

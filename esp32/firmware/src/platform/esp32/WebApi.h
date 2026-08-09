@@ -30,6 +30,9 @@ struct WebContext {
     SafetyManager* safety = nullptr;
     ProfileStorage* storage = nullptr;
     std::function<void()> onPanic;
+    // Switch to the access point + captive portal now (web "Start hotspot" button),
+    // mirroring the hardware BOOT-button hotspot. Serviced on the main loop.
+    std::function<void()> onStartHotspot;
     // The enqueue callbacks return the assigned command id (0 = queue full), so
     // the 202 response can carry it and GET /api/commands can report the outcome.
     std::function<uint32_t()> onReset;                     // recover from panic/E-stop
@@ -83,6 +86,7 @@ private:
     void registerRoutes();
     void fillStatus(JsonDocument& doc);
     bool authOk(AsyncWebServerRequest* req);  // token gate for write routes
+    std::string captivePortalUrl() const;     // "http://<ap-ip>/" for redirects
     // Cached, serialized status DTO produced by loop() via refreshStatus(); read
     // by the async web task under the state lock so it never touches live state.
     std::string cachedStatus_ = "{}";

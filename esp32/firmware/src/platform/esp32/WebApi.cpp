@@ -188,9 +188,39 @@ void WebApi::begin(const WebContext& ctx, uint16_t port) {
     server_->addHandler(&statusWs_);
     server_->addHandler(&midiWs_);
 
+    // ---- Captive portal ---------------------------------------------------
+    // The OS "is there internet?" probes must be answered with a REDIRECT (not the
+    // 204/success they expect) so the phone/laptop pops its "sign in" sheet and
+    // opens our page. Registered before the static handler so they take precedence.
+    // (Only reached in AP mode: in station mode the device is not the DNS/gateway.)
+    auto redirectToPortal = [this](AsyncWebServerRequest* req) {
+        req->redirect(captivePortalUrl().c_str());
+    };
+    for (const char* probe : {"/generate_204", "/gen_204", "/hotspot-detect.html",
+                              "/library/test/success.html", "/connecttest.txt",
+                              "/ncsi.txt", "/redirect", "/canonical.html"}) {
+        server_->on(probe, HTTP_GET, redirectToPortal);
+    }
+
     // Static UI from LittleFS (uploaded from web-interface/ via data/www).
     server_->serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
+
+    // Anything else: in AP mode send it to the portal (catches probes we did not
+    // name explicitly); otherwise a normal 404.
+    server_->onNotFound([this](AsyncWebServerRequest* req) {
+        if (ctx_.net && ctx_.net->accessPointActive()) {
+            req->redirect(captivePortalUrl().c_str());
+        } else {
+            req->send(404, "text/plain", "Not found");
+        }
+    });
     server_->begin();
+}
+
+std::string WebApi::captivePortalUrl() const {
+    std::string ip = ctx_.net ? ctx_.net->ipAddress() : "";
+    if (ip.empty()) ip = "192.168.4.1";  // ESP32 default softAP address
+    return "http://" + ip + "/";
 }
 
 bool WebApi::authOk(AsyncWebServerRequest* req) {
@@ -556,6 +586,19 @@ void WebApi::registerRoutes() {
         });
     testServo->setMethod(HTTP_POST);
     server_->addHandler(testServo);
+
+    // ---- POST /api/hotspot (switch to AP + captive portal now) ----
+    server_->on("/api/hotspot", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized";
+                            sendJson(req, d, 401); return; }
+        JsonDocument doc;
+        if (ctx_.onStartHotspot) ctx_.onStartHotspot();
+        doc["ok"] = true;
+        doc["note"] = "Switching to access point — rejoin the device's Wi-Fi network.";
+        // Serviced on the main loop; the station link (and this response's route home)
+        // may drop as the radio switches, which is expected.
+        sendJson(req, doc, 202);
+    });
 
     // (No stepper jog / endstop routes: servo-per-fret has no carriage or
     // HOME/LIMIT sensors. Per-fret finger calibration uses POST /api/test/servo.)

@@ -53,8 +53,9 @@
   function sampleFromProfile() {
     // First paint before the socket delivers anything.
     var p = GMB.state.profile;
+    var ssid = p.network.mode === 'station' ? (p.network.ssid || '(unset)') : p.network.apSsid;
     return {
-      state: '—', wifi: { mode: p.network.mode, ssid: p.network.apSsid, ip: '—', rssi: 0, connected: false },
+      state: '—', wifi: { mode: p.network.mode, ssid: ssid, ip: '—', rssi: 0, connected: false },
       midiSource: '—', activeProfile: p.instrument.name,
       stringsReady: 0, stringsTotal: p.instrument.stringCount, notesPlaying: 0,
       faults: [], temperatures: [], voltages: [],
@@ -131,8 +132,6 @@
     });
   }
 
-  function fmt(v) { return (v === null || v === undefined) ? '—' : Number(v).toFixed(1); }
-  function dot(on) { return h('span.leddot' + (on ? '.on' : '')); }
   function stateBadge(s) { return h('span.pill.' + stateClass(s), s); }
   function stateClass(s) {
     var u = String(s).toUpperCase();
