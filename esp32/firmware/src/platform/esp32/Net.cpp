@@ -140,6 +140,20 @@ void Net::tick(uint32_t nowMs) {
         return;
     }
 
+    // A BOOT-button / web-forced hotspot must NEVER fall back to the station — even
+    // if softAP failed to come up (transient heap/radio). Keep retrying the AP
+    // instead of attempting the (possibly wrong) station config. Throttled so a hard
+    // softAP failure can't hammer the radio every loop. (lastStationRetryMs_ doubles
+    // as the retry clock here; the station-retry branch above is gated off by
+    // apForced_, so there is no conflict.)
+    if (apForced_) {
+        if (nowMs - lastStationRetryMs_ >= 2000) {
+            lastStationRetryMs_ = nowMs;
+            startAccessPoint(false);
+        }
+        return;
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
         connected_ = true;
         failures_ = 0;

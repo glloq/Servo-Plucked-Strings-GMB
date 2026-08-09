@@ -96,7 +96,14 @@ sauvegarder → frette N+1 …
 
 Il s'appuie sur `POST /api/test/servo` (presser/relâcher un servo précis) et
 `POST /api/test/note` (jouer une note) — l'instrument doit être **armé**
-(bouton *Reset & re-arm* du tableau de bord) pour que les tests pilotent le matériel.
+(bouton *Reset & re-arm* du tableau de bord, ou *Arm for calibration* dans
+l'assistant) pour que les tests pilotent le matériel.
+
+> ⚠️ **Ne pas envoyer de notes MIDI pendant qu'un doigt est maintenu par
+> l'assistant.** Un test qui maintient un doigt (aperçu d'appui) n'est pas suivi par
+> l'ordonnanceur de jeu : si une note MIDI arrive sur la même corde au même moment,
+> le doigt de test n'est pas relâché avant le nouvel appui (deux doigts pressés).
+> Calibrez instrument à l'arrêt côté MIDI.
 
 ## 5. Calibration du grattage (`pluck` / `strum`)
 

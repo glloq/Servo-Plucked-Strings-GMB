@@ -200,6 +200,13 @@ Pour un doigt à engrenage (`fretB ≥ 0`) :
 - Pas adapté aux frettes trop étroites : y garder le doigt simple.
 - Extension envisageable : engrenages à **plus de deux** doigts (multi-cames) — non
   couvert ici.
+- **Re-frappe plus rapide que le déplacement.** Le temps de balayage est estimé
+  depuis la **dernière impulsion commandée** (`lastUs`), pas la position physique
+  réelle du doigt. Si une nouvelle note re-fretté le **même** servo à engrenage en
+  **moins de `travelMs`** (avant l'arrivée du doigt), l'estimation peut être trop
+  courte et le grattage partir un peu tôt (note brièvement étouffée). En pratique
+  masqué par l'étouffoir + `settleMs`, et le servo ne peut de toute façon pas suivre
+  une trille plus rapide que sa course. Sans conséquence hors de ce cas limite.
 
 ## 11. Où c'est dans le code
 

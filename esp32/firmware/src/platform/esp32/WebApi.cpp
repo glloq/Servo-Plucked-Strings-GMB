@@ -192,9 +192,13 @@ void WebApi::begin(const WebContext& ctx, uint16_t port) {
     // The OS "is there internet?" probes must be answered with a REDIRECT (not the
     // 204/success they expect) so the phone/laptop pops its "sign in" sheet and
     // opens our page. Registered before the static handler so they take precedence.
-    // (Only reached in AP mode: in station mode the device is not the DNS/gateway.)
+    // Gated on AP mode (like onNotFound below): in station mode the device is a
+    // normal host and must not hijack these paths to an unreachable AP address.
     auto redirectToPortal = [this](AsyncWebServerRequest* req) {
-        req->redirect(captivePortalUrl().c_str());
+        if (ctx_.net && ctx_.net->accessPointActive())
+            req->redirect(captivePortalUrl().c_str());
+        else
+            req->send(404, "text/plain", "Not found");
     };
     for (const char* probe : {"/generate_204", "/gen_204", "/hotspot-detect.html",
                               "/library/test/success.html", "/connecttest.txt",
