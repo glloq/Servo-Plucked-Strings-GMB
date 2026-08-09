@@ -34,8 +34,8 @@ actuators, SysEx block toggles, raw byte views, JSON import/export.
 | ----- | ----- | ------- |
 | 1 | **Instrument** | name, description, number of strings (1–6), instrument type (loads a tuning + a full servo-per-fret wiring), **capo**; Advanced adds GM program / GMB type id / transpose. A **Board & network** card lives here too: reserve native USB, Wi-Fi mode (access point / client), AP SSID, station SSID, hostname |
 | 2 | **Strings & tuning** | per string: enabled, open note (MIDI), highest fret; an **Auto-wire fingers 1–N** button (one PCA9685 for the string) |
-| 3 | **Servos & frets** | per string (string-tab strip): the **plucker** servo (strike angle), then **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle, a **Geared** toggle (one servo → two frets), and a per-row **Details** editor (reverse direction; in Advanced: source PCA channel or direct GPIO, pulse min/max, travel, settle, cut PWM at rest). Advanced also shows the PCA channel map and the optional **strum-lift / damper / auxiliary** actuators |
-| 4 | **Install helper** | guided per-fret calibration: **arm the instrument**, pick a fret on the strip, adjust its contact angle until it cleanly frets the string (previewed live on the servo), test rest/press, **play the note**, save & move on. A geared finger calibrates three positions: **neutral / press A / press B** |
+| 3 | **Frets** | the **finger servos only**, per string (string-tab strip): **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle and a **Geared** toggle (one servo → two frets). A clickable **coverage strip** shows equipped / geared / calibrated frets; clicking a fret opens its **inline guided calibration** (contact + rest angle previewed live, test rest/press, **play the note**, mark calibrated). Advanced adds the PCA channel map and per-servo wiring (source PCA channel or direct GPIO, pulse min/max, travel, settle, cut PWM at rest). A **test bench** sweeps one string or all strings |
+| 4 | **Plucking** | the **plucking mechanism only**, per string: the **plucker** servo (rest + strike angle), plus an optional **strum lift** and **damper**, and global **auxiliary** actuators. Test rest/strike and **pluck the open string**; a **test bench** plucks every open string, sweeps every plucker, and tests the strum lifts / dampers |
 | 5 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On, with a link to the full MIDI tab |
 | 6 | **Power** | current management: max servos moving at once, stagger between starts, fixed note-execution delay, strum lead |
 | 7 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); STOP (panic) |
@@ -45,21 +45,30 @@ actuators, SysEx block toggles, raw byte views, JSON import/export.
 and the **automatic pin assignment** is a button on the **GPIO Pins** tab — neither
 is a separate wizard step.
 
-The per-string steps (**Servos & frets** and **Install helper**) show **one string
-at a time** via a string-tab strip, so a 6-string instrument stays navigable. The
+The per-string steps (**Frets** and **Plucking**) show **one string at a time** via
+a string-tab strip, so a 6-string instrument stays navigable. The frets (frettes)
+and the plucking (grattage) of each string are configured on their **own steps**, so
+each can be equipped, calibrated and tested independently. The
 **Simplified / Advanced** toggle hides the fine tuning (pulse window, travel/settle,
 per-servo wiring) in Simplified mode. General MIDI parameters (sustain, chord
 **saturation strategy**, velocity curve…) live on the **MIDI** page.
 
+**Testing one servo or a group.** The Frets, Plucking and Test steps each carry an
+**Arm** control and a **test bench**: single-servo rest/press buttons, plus group
+tests (sweep every fret of a string or all strings, pluck every open string, sweep
+every plucker, play a scale, test everything) run through a cancellable client-side
+sequencer with a live status line and a **Stop** button.
+
 The step-by-step detail is in [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
 
-**Geared (paired) fingers.** On the *Servos & frets* tab, a finger card offers a
+**Geared (paired) fingers.** On the *Frets* step, a finger card offers a
 **"Geared (drives a 2nd fret)"** checkbox: one servo then presses two antagonistic
 frets through a gear (side A = `fret`, side B = `fretB`, neutral = both lifted). The
 card gains a second-fret picker and **Press A / Press B / Neutral** angle fields; the
-paired fret's own card shows *"driven by the geared servo on fret N"*. The install
-helper calibrates the three positions and previews each one live on the hardware.
-Full study and calibration procedure: [`GEARED_FINGERS.md`](GEARED_FINGERS.md).
+paired fret's own row shows *"side B of the geared servo on fret N"*. The inline
+calibration on the Frets step sets the three positions and previews each one live on
+the hardware. Full study and calibration procedure:
+[`GEARED_FINGERS.md`](GEARED_FINGERS.md).
 
 **Settings modal.** A gear button (⚙) in the top bar opens a consolidated
 **Settings** modal (device name / MIDI channel, network mode / SSIDs / hostname,
@@ -68,8 +77,8 @@ changes are saved with the profile and apply after a reboot; the hotspot button
 switches to the access point immediately. See
 [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md). An audit of the settings & calibration
 UI is in [`WEB_AUDIT.md`](WEB_AUDIT.md).
-The per-fret contact-angle calibration performed by the Install helper is detailed
-in [`CALIBRATION.md`](CALIBRATION.md).
+The per-fret contact-angle calibration on the Frets step is detailed in
+[`CALIBRATION.md`](CALIBRATION.md).
 
 ---
 

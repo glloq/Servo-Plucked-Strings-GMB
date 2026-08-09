@@ -366,18 +366,26 @@ Instrument name and description, type, number of strings (1–6), tuning preset,
 
 Per string: enabled, open MIDI note, highest reachable fret (`maxFret`).
 
-## Step 3 — Servos & frets
+## Step 3 — Frets (frettes)
 
-Per string, place the actuators:
+The **finger servos only** — the part that presses the string against a fret. Per string:
 
 * one **finger servo per fret** to equip (frets may be non-contiguous);
-* one **pluck** or **strum** servo; optional **strum lift** and **damper**;
 * optional **geared finger** — one servo for two frets (`fretB` / `activeBUs`);
 * per servo: **source** (a PCA9685 channel on board 0–7, or a direct GPIO), rest/active pulses, inversion.
 
-## Step 4 — Install helper
+A clickable **coverage strip** shows which frets are equipped, geared and calibrated. Clicking a fret opens its **inline guided calibration**: arm the instrument → adjust the contact / rest angle until the note frets cleanly (previewed live) → test rest/press → play the note → mark calibrated. A **test bench** sweeps every fret of a string, or of all strings, in one click.
 
-A guided, fret-by-fret assistant to set each finger's contact angle: select the fret → press the finger → adjust the active pulse until the note frets cleanly → test the note → next.
+## Step 4 — Plucking (grattage)
+
+The **plucking mechanism only** — the part that sounds the string. Per string:
+
+* one **pluck** or **strum** servo (rest/strike pulses, inversion);
+* optional **strum lift** (lowers the plucker for a stroke) and **damper** (mutes the string);
+* optional global **auxiliary** actuators (`stringIndex = -1`);
+* per servo: **source** (a PCA9685 channel or a direct GPIO).
+
+Each actuator has test rest/strike and pluck-open buttons, and a **test bench** plucks every open string, sweeps every plucker, and tests the strum lifts / dampers.
 
 ## Step 5 — MIDI
 
@@ -389,7 +397,7 @@ Servo-rail sizing and current management: `maxConcurrentMoves`, `staggerMs`, and
 
 ## Step 7 — Test
 
-Exercise each finger, each pluck/strum, each note, each string, a chord, and the general stop (`/OE`).
+Full-instrument test bench: exercise each finger, each pluck/strum, each note and each string individually, or run a **group test** (play all open strings, sweep all fingers, sweep all pluckers, a scale, or everything end-to-end) through a cancellable sequencer with a live status line and a Stop button, plus the general stop (`/OE`).
 
 ## Step 8 — Validation
 
@@ -545,7 +553,7 @@ This is only a mechanical construction aid (`fretPositionMm`). It is **not** use
 
 ## 14.3 Finger contact-angle calibration
 
-Each finger servo is calibrated for the pulse at which it frets its note cleanly, via the guided Install helper (§10, step 4):
+Each finger servo is calibrated for the pulse at which it frets its note cleanly, via the guided inline calibration on the Frets step (§10, step 3):
 
 1. select the fret;
 2. press its finger servo;

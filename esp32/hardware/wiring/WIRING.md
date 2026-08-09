@@ -120,7 +120,7 @@ activation governor staggers how many servos start moving together
    serves the web UI.
 4. Power the **servo rail**; with `/OE` high, verify no servo twitches, then arm
    and test one finger servo from the wizard.
-5. Calibrate each finger's rest/press angle fret by fret (Install helper), then a
-   plucker per string.
+5. Calibrate each finger's rest/press angle fret by fret (Frets step), then a
+   plucker per string (Plucking step).
 6. Verify the **STOP / panic** path neutralises the servos (forces `/OE` high and
    detaches direct servos).

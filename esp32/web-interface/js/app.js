@@ -150,6 +150,9 @@
   GMB.setMode = setMode;
 
   function navigate(id) {
+    // Leaving a view must never leave a group test driving the servos in the
+    // background: cancel any running sequence before switching.
+    if (GMB.testRunner) GMB.testRunner.stop();
     state.current = id;
     location.hash = '#' + id;
     document.querySelectorAll('.nav-item').forEach(function (n) {
@@ -260,6 +263,7 @@
 
   function doPanic() {
     if (!confirm('PANIC / STOP: disable all drivers, neutralise servos and flush the MIDI queue. Continue?')) return;
+    if (GMB.testRunner) GMB.testRunner.stop();   // halt any client-side group test too
     GMB.api.panic().then(function (r) { GMB.toast(r.message || 'Panic executed.', 'warn'); });
   }
   GMB.doPanic = doPanic;

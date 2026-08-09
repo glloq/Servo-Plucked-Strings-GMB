@@ -126,14 +126,14 @@ Un doigt à engrenage se règle en **trois** points au lieu de deux :
 
 Depuis l'interface web (**Setup Wizard**) :
 
-- **Onglet Servos & frettes** : sur la carte de la frette côté A, cocher **« Geared
-  (drives a 2nd fret) »** ; choisir la **2e frette** et régler **Press A / Press B /
-  Neutral** en degrés. La frette côté B affiche « *Driven by the geared servo on
+- **Étape Frets** : sur la ligne de la frette côté A, cocher **« gear »** ; ouvrir
+  **Calibrate** pour choisir la **2e frette** et régler **Press A / Press B /
+  Neutral** en degrés. La frette côté B affiche « *side B of the geared servo on
   fret N* » (une seule surface d'édition, pas de doublon).
-- **Assistant d'installation** : pour une frette portée par un servo à engrenage, un
-  curseur règle **le côté correspondant à la frette affichée** (A ou B), avec les
-  boutons **Neutral / Press A / Press B** qui pilotent le servo à l'**angle exact du
-  brouillon** (aperçu live), plus **Play the note**.
+- **Calibration inline (étape Frets)** : pour une frette portée par un servo à
+  engrenage, les curseurs règlent les trois positions (Press A / Press B /
+  Neutral), avec les boutons **Neutral / Press A / Press B** qui pilotent le servo à
+  l'**angle exact du brouillon** (aperçu live), plus **Play A / Play B**.
 
 > L'aperçu live utilise l'extension `POST /api/test/servo` avec un champ optionnel
 > `us` : quand il est présent, le firmware amène le servo à **cette impulsion exacte**

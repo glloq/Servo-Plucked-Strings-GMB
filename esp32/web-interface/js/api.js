@@ -972,6 +972,63 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Test sequencer — play an ordered list of servo / note / wait steps, cancellably.
+  //
+  // The firmware tests ONE servo at a time (POST /api/test/servo). A "group test"
+  // (sweep every finger of a string, pluck every string, test everything…) is built
+  // here as a sequence with a dwell between moves, so the in-rush current stays
+  // bounded and each move is visible. Only one sequence runs at a time; a global
+  // stop() (and the STOP / panic button) cancels it. Steps:
+  //   { kind:'servo', index, active?, us?, after?, label? }  -> POST /api/test/servo
+  //   { kind:'note',  channel, note, velocity, durationMs, after?, label? } -> /test/note
+  //   { kind:'wait',  ms, label? }                           -> pure delay
+  // `after` is an extra dwell (ms) once the step's request resolves; `label` drives
+  // the progress readout. run(steps, {onStep, onDone}) returns a handle with stop().
+  var _seq = { running: false, token: 0, onState: null };
+  function seqDelay(ms) { return new Promise(function (res) { setTimeout(res, ms | 0); }); }
+  GMB.testRunner = {
+    isRunning: function () { return _seq.running; },
+    // Register the single state listener (start/stop). Re-set on each render so the
+    // active step's Stop button + status line always reflect the live state.
+    onState: function (fn) { _seq.onState = fn || null; },
+    stop: function () {
+      var was = _seq.running;
+      _seq.running = false; _seq.token++;   // invalidate any in-flight loop
+      if (was && _seq.onState) { try { _seq.onState(false); } catch (e) {} }
+    },
+    run: function (steps, opts) {
+      opts = opts || {};
+      steps = steps || [];
+      var token = ++_seq.token;              // supersede any running sequence
+      var wasRunning = _seq.running;
+      _seq.running = true;
+      if (!wasRunning && _seq.onState) { try { _seq.onState(true); } catch (e) {} }
+      var i = 0;
+      function fin(cancelled) {
+        if (_seq.token === token) {
+          _seq.running = false;
+          if (_seq.onState) { try { _seq.onState(false); } catch (e) {} }
+        }
+        if (opts.onDone) { try { opts.onDone(cancelled); } catch (e) {} }
+      }
+      function step() {
+        if (_seq.token !== token) return fin(true);   // stopped / superseded
+        if (i >= steps.length) return fin(false);
+        var s = steps[i]; var at = i; i++;
+        if (opts.onStep) { try { opts.onStep(s, at, steps.length); } catch (e) {} }
+        var p;
+        if (s.kind === 'note') p = GMB.api.testNote(s).catch(function () {});
+        else if (s.kind === 'servo') p = GMB.api.testServo(s).catch(function () {});
+        else p = Promise.resolve();                   // 'wait' / 'label'
+        p.then(function () { return seqDelay(s.kind === 'wait' ? (s.ms || 0) : (s.after || 0)); })
+         .then(function () { if (_seq.token === token) step(); else fin(true); });
+      }
+      step();
+      return { stop: function () { GMB.testRunner.stop(); } };
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Small utilities.
   // ---------------------------------------------------------------------------
   function deepCopy(o) { return JSON.parse(JSON.stringify(o)); }

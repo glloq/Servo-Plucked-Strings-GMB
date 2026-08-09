@@ -37,8 +37,10 @@ password, network name, optional static IP, mDNS name. If the connection fails
 several times, the system automatically reverts to access-point mode. A long
 press on the **BOOT** button forces the hotspot back on at any time.
 
-The wizard has **8 steps**: Instrument → Strings & tuning → Servos & frets →
-Install helper → MIDI → Power → Test → Validation.
+The wizard has **8 steps**: Instrument → Strings & tuning → **Frets** →
+**Plucking** → MIDI → Power → Test → Validation. The frets (frettes) and the
+plucking (grattage) of each string are configured on their **own steps**, so each
+can be equipped, calibrated and tested on its own.
 
 ---
 
@@ -59,40 +61,56 @@ values set the note range announced to General-Midi-Boop (see
 For each string, set its **open-string MIDI note** (fret 0) and its **highest
 reachable fret** (`maxFret`). That is the entire per-string configuration — a
 string is just an open pitch plus its top fret. There is no vibrating length,
-transmission or steps/mm. The finger servos for the frets are wired in the next
-step.
+transmission or steps/mm. The finger servos (frets) and the plucker (plucking)
+are configured in the next two steps.
 
 ---
 
-## 4. Step 3 — Servos & frets
+## 4. Step 3 — Frets (frettes)
 
-Each fret position has its **own dedicated finger servo**, and each string also
-gets **one pluck/strum servo**. For every string you can:
+This step configures the **finger servos only** — the part that presses the
+string against a fret. Each fret position has its **own dedicated finger servo**.
+For every string (string-tab strip) you can:
 
 * **equip any fret** — gaps are allowed (for example frets 1, 3, 5, 12);
-* set each finger's **rest ↔ contact angle** (in µs) and its **rotation
-  direction** (`inverted`), so the servo can be mounted either way;
+* set each finger's **rest ↔ contact angle** and its **rotation direction**
+  (`inverted`), so the servo can be mounted either way;
 * **gear a finger** — one servo drives two adjacent frets of the same string
   through antagonistic fingers (`fretB` + `activeBUs`, neutral = both lifted),
   to halve the servo count on the wide low frets (see
   [`GEARED_FINGERS.md`](GEARED_FINGERS.md));
-* choose the **signal source per servo** — a **PCA9685** channel *or* a
-  **direct ESP32 GPIO**, mixable on the same instrument;
-* **add a plucker** for the string.
+* choose the **signal source per servo** (Advanced) — a **PCA9685** channel *or*
+  a **direct ESP32 GPIO**, mixable on the same instrument.
 
-The default wiring is **one PCA9685 per string**: that string's fret fingers on
-channels `0 … maxFret−1` and its plucker on channel `maxFret`.
+A clickable **coverage strip** shows which frets are equipped, geared and
+calibrated. Clicking a fret opens its **inline guided calibration**: **arm the
+instrument first** (servo tests are refused until armed), adjust the contact and
+rest angles until the finger cleanly frets the string (each move previewed live),
+**test rest / press**, **play the note**, then **mark it calibrated**. A geared
+finger calibrates three positions — neutral (both lifted), side A, side B. A
+**test bench** sweeps every fret of the string, or of all strings, in one click.
+See [`CALIBRATION.md`](CALIBRATION.md). The default wiring is **one PCA9685 per
+string**: that string's fret fingers on channels `0 … maxFret−1`.
 
 ---
 
-## 5. Step 4 — Install helper
+## 5. Step 4 — Plucking (grattage)
 
-Guided **per-fret calibration**. **Arm the instrument first** — servo tests are
-refused until it is armed. Then pick a fret in the strip, adjust its contact
-angle until it cleanly frets the string, **test the note live** on the hardware,
-and move on to the next fret. A geared finger calibrates three positions:
-neutral (both fingers lifted), side A and side B. See
-[`CALIBRATION.md`](CALIBRATION.md).
+This step configures the **plucking mechanism only** — the part that sounds the
+string. For every string you can:
+
+* **add a plucker** (pluck/strum servo) and set its **rest ↔ strike angle** and
+  rotation direction;
+* add an optional **strum lift** — it lowers the plucker onto the string for a
+  stroke, then raises it (with an engage delay);
+* add an optional **damper** — it presses the string to mute it;
+* add global **auxiliary** actuators (not tied to a string).
+
+By default the plucker sits on its string's PCA9685 board (channel `maxFret`).
+Each actuator has **Test rest / strike** buttons and a **▶ Pluck open** button,
+and a **test bench** plucks every open string, sweeps every plucker, and tests
+the strum lifts / dampers. Every string needs a plucker to sound (the validation
+step flags a string that has none).
 
 ---
 
@@ -118,9 +136,12 @@ chord re-frets several strings at once.
 
 ## 8. Step 7 — Test
 
-Play **each string** (its open note and a fretted note) to check every finger,
-plucker and note — arm the instrument first. Keep the **STOP** (panic) button
-within reach (software panic — see [`SAFETY.md`](SAFETY.md) §3).
+Full-instrument test bench. Arm the mechanics, then play **each string** (its
+open note and a fretted note) or run a **group test**: play every open string,
+sweep every finger, sweep every plucker, run a scale on the active string, or
+**test everything** end-to-end. A live status line shows progress and a **Stop**
+button cancels the sequence. Keep the **STOP** (panic) button within reach
+(software panic — see [`SAFETY.md`](SAFETY.md) §3).
 
 ---
 
@@ -140,8 +161,8 @@ Pin assignment is **not a wizard step** — it lives on the **GPIO Pins tab**.
 **"Assign automatically"** places only the board-level signals a PCA9685 needs:
 I²C `SDA = 40`, `SCL = 41`, and the PCA `/OE` safety line `SERVO_OE = 47`. There
 are **no per-string STEP / DIR / HOME / ENABLE pins**. A direct-GPIO servo
-carries its own pin in its servo entry (Step 3), not here. See
-[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
+carries its own pin in its servo entry (on the Frets or Plucking step), not here.
+See [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
 
 ---
 

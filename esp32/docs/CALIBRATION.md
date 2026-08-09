@@ -80,10 +80,11 @@ Dans l'interface : cocher **« Geared »** sur la carte de la frette côté A, r
 2e frette puis les angles **Press A / Press B / Neutral**. Les frettes trop étroites
 (haut du manche) gardent le doigt simple ; les deux mécanismes se mélangent.
 
-## 4. Assistant d'installation (aide au réglage)
+## 4. Calibration guidée (étape Frets)
 
-L'onglet *Setup Wizard → Install helper* enchaîne automatiquement ces étapes,
-**frette par frette**, pour une corde choisie :
+L'étape *Setup Wizard → Frets* intègre la calibration guidée, **frette par
+frette**, pour une corde choisie : cliquer une frette sur la bande de couverture
+ouvre son éditeur inline. Chaque frette enchaîne :
 
 ```
 choisir la corde
