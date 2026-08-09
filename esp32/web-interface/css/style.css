@@ -402,3 +402,35 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .settings-section h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .settings-section .muted { margin: 0 0 10px; }
 .settings-actions { display: flex; align-items: center; gap: 8px; padding: 14px 18px; }
+
+/* ---- Servos step: compact fret lines ------------------------------------ */
+.fret-lines { display: flex; flex-direction: column; gap: 6px; }
+.fret-line-wrap { display: flex; flex-direction: column; }
+.fret-line {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+}
+.fret-line.empty { opacity: .8; }
+.fret-line-id { display: flex; flex-direction: column; min-width: 88px; line-height: 1.2; }
+.fret-line-id strong { font-size: 14px; }
+.fret-gear { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.fret-slider-cell { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 190px; }
+.fret-slider-lbl { font-size: 11px; min-width: 46px; }
+.fret-slider-cell .install-slider-row { flex: 1; }
+.fret-detail { padding: 12px; margin-top: 2px; border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-2); display: flex; flex-direction: column; gap: 10px; }
+
+/* ---- Install helper: fret progress strip -------------------------------- */
+.fret-progress { margin: 10px 0 14px; }
+.fret-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fret-chip {
+  min-width: 30px; height: 30px; padding: 0 8px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.fret-chip.none { color: var(--muted); background: transparent; }
+.fret-chip.todo { background: var(--surface); }
+.fret-chip.done { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+.fret-chip.current { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fret-chip.mini { min-width: 14px; width: 14px; height: 14px; padding: 0; pointer-events: none; }
+.fret-legend { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.fret-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
