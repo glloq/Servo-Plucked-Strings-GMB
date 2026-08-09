@@ -218,9 +218,12 @@ void WebApi::begin(const WebContext& ctx, uint16_t port) {
 }
 
 std::string WebApi::captivePortalUrl() const {
-    std::string ip = ctx_.net ? ctx_.net->ipAddress() : "";
-    if (ip.empty()) ip = "192.168.4.1";  // ESP32 default softAP address
-    return "http://" + ip + "/";
+    // The ESP32 softAP always answers on 192.168.4.1 (no softAPConfig is set), so
+    // use the constant instead of reading Net's ip_ std::string from the async web
+    // task — that field is written by the main loop and a cross-task read could tear
+    // during an AP/station switch. (If you ever add softAPConfig, update this + the
+    // NETWORK_HOTSPOT.md note.)
+    return "http://192.168.4.1/";
 }
 
 bool WebApi::authOk(AsyncWebServerRequest* req) {

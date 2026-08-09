@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../../src/core/configuration/Profile.h"
+#include "../../src/core/configuration/ProfileValidator.h"
 #include "../../src/platform/esp32/ProfileStorage.h"
 
 using namespace gmb;
@@ -52,6 +53,9 @@ int main(int argc, char** argv) {
         CHECK(!json.empty(), "file is readable");
         Profile p;
         CHECK(parse(json, p), "loads through the firmware parser");
+        // A shipped profile must not just parse — it must be a valid, activatable
+        // instrument (pins, servo channels, finger frets incl. geared side B, …).
+        CHECK(ProfileValidator::isActivatable(p), "profile is activatable");
 
         // Re-serialise and re-parse: the enums must survive a full round trip.
         JsonDocument out;

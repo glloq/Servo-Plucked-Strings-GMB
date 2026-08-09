@@ -107,7 +107,10 @@
 
   function save() {
     function saveDraft() {
-      GMB.saveProfile().then(function () { close(); });
+      // saveProfile() resolves even when the backend rejects the profile (it toasts
+      // the 422 issues); it only clears the dirty flag on success. Close the modal
+      // only when the save actually took, so a rejected save keeps it open to fix.
+      GMB.saveProfile().then(function () { if (!GMB.state.dirty) close(); });
     }
     if (wifi.stationPassword || wifi.apPassword) {
       GMB.api.setWifi({ stationPassword: wifi.stationPassword, apPassword: wifi.apPassword })
