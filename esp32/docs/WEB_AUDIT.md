@@ -36,7 +36,7 @@ Liés : [`WEB_INTERFACE.md`](WEB_INTERFACE.md) · [`CALIBRATION.md`](CALIBRATION
 | # | Constat | Statut |
 |---|---------|--------|
 | C1 | `dashboard.js` : helpers `fmt` / `dot` inutilisés (hérités de la version stepper). | ✅ Retirés. |
-| C2 | `WEB_INTERFACE.md` décrit encore des étapes **stepper** (moteur, homing, jog, capture position) qui ne s'appliquent pas au servo-par-frette. | ℹ️ Noté (nettoyage doc à part). |
+| C2 | `WEB_INTERFACE.md` décrivait encore des étapes **stepper** (moteur, homing, jog, capture position) qui ne s'appliquent pas au servo-par-frette. | ✅ Corrigé (réécrit servo-par-frette). |
 
 ## 4. Points vérifiés OK
 

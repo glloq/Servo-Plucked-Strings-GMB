@@ -1,10 +1,4 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
-# First configuration guide — Stepper-Plucked-Strings-GMB
+# First configuration guide — Servo-Plucked-Strings-GMB
 
 > Source: `SPECIFICATION.md` §8, §10, §26 (first configuration guide).
 > Related documents: [`WEB_INTERFACE.md`](WEB_INTERFACE.md) · [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) · [`CALIBRATION.md`](CALIBRATION.md) · [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) · [`SAFETY.md`](SAFETY.md).
@@ -16,12 +10,13 @@ the **simplified mode** of the Web interface. No code modification is needed.
 
 ## 0. Before you begin
 
-* Power the board and the motors according to the recommended rails (see
-  [`SAFETY.md`](SAFETY.md) §6). **Never power the servos from the ESP32
-  regulator.**
-* At startup, the system is in a safe state: drivers disabled, servos
-  neutralized, MIDI queues empty (see [`SAFETY.md`](SAFETY.md) §1). Nothing moves
-  until the configuration has been validated.
+* Power the board and the servos on their recommended rails (a 5–6 V servo
+  supply plus 3.3 V logic — there is no 24 V rail; see [`SAFETY.md`](SAFETY.md)
+  §6). **Never power the servos from the ESP32 regulator.**
+* At startup, the system is in a safe state: the PCA9685 outputs are disabled
+  through `/OE`, servos are neutralized, MIDI queues are empty (see
+  [`SAFETY.md`](SAFETY.md) §1). Nothing moves until the configuration has been
+  validated and the instrument is armed.
 
 ---
 
@@ -30,7 +25,7 @@ the **simplified mode** of the Web interface. No code modification is needed.
 At first power-on, the ESP32 starts in **access-point mode**:
 
 ```text
-Default SSID: Stepper-Plucked-Strings-GMB
+Default SSID: Servo-Plucked-Strings-GMB
 ```
 
 1. Connect your phone/computer to this Wi-Fi network.
@@ -39,98 +34,114 @@ Default SSID: Stepper-Plucked-Strings-GMB
 
 You can later switch to **client mode** (the ESP32 joins your network): SSID,
 password, network name, optional static IP, mDNS name. If the connection fails
-several times, the system automatically reverts to access-point mode.
+several times, the system automatically reverts to access-point mode. A long
+press on the **BOOT** button forces the hotspot back on at any time.
+
+The wizard has **8 steps**: Instrument → Strings & tuning → Servos & frets →
+Install helper → MIDI → Power → Test → Validation.
 
 ---
 
-## 2. Step 1 — Identification
+## 2. Step 1 — Instrument
 
-Fill in: instrument name, description (optional), **number of strings** (1 to 6),
-instrument type (ukulele, guitar, bass, mandolin, banjo…), proposed tuning,
-maximum number of frets. These values determine the note range and are announced
-to General-Midi-Boop (see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3).
-
----
-
-## 3. Step 2 — Board selection
-
-Select the model (**ESP32-S3-DevKitC-1** supported by default), the revision, the
-Flash, the presence of PSRAM and the variant. The board profile automatically
-sets the GPIO pins that are available, reserved, recommended, and to be used with
-caution (see [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)).
-
-> Warning: on certain DevKitC-1 variants, GPIO35/36/37 are used for Flash/PSRAM
-> and are not offered without verifying the variant.
+Fill in: instrument name, description (optional), **instrument type** (ukulele,
+guitar, bass, mandolin, banjo…) and **number of strings** (1 to 6). Picking a
+type loads a proposed tuning **and** a full servo-per-fret wiring. This step
+also holds **Board & network**: the board model (**ESP32-S3-DevKitC-1**, the
+only supported board) and the network mode (access point / Wi-Fi client). These
+values set the note range announced to General-Midi-Boop (see
+[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3).
 
 ---
 
-## 4. Step 3 — Automatic pin assignment
+## 3. Step 2 — Strings & tuning
 
-Click **"Assign pins automatically"**. The system chooses a conflict-free
-configuration based on the number of strings, the enabled interfaces, the board,
-the reservation of the future USB (GPIO19/20), the diagnostics port (UART), the
-I²C bus and the sensors. In simplified mode, you only see the **green** pins. If a
-signal cannot be placed, the wizard explains it and suggests an alternative.
-
-Example assignment obtained (DevKitC-1 profile, see
-[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) §5): STEP on 4/5/6…, DIR on 17/18…,
-HOME on 12/13…, I²C SDA 40 / SCL 41, ENABLE 42, PCA9685 safety 47.
+For each string, set its **open-string MIDI note** (fret 0) and its **highest
+reachable fret** (`maxFret`). That is the entire per-string configuration — a
+string is just an open pitch plus its top fret. There is no vibrating length,
+transmission or steps/mm. The finger servos for the frets are wired in the next
+step.
 
 ---
 
-## 5. Step 4 — Mechanical configuration
+## 4. Step 3 — Servos & frets
 
-For each string: open-string MIDI note, max frets, vibrating length, transmission
-type (GT2 belt / screw / custom), motor steps per revolution, microstepping,
-travel per revolution, direction inversion, max speed and acceleration, rest
-position. The interface **automatically computes the steps/mm** (belt/screw
-formulas in [`CALIBRATION.md`](CALIBRATION.md) §1).
+Each fret position has its **own dedicated finger servo**, and each string also
+gets **one pluck/strum servo**. For every string you can:
 
----
+* **equip any fret** — gaps are allowed (for example frets 1, 3, 5, 12);
+* set each finger's **rest ↔ contact angle** (in µs) and its **rotation
+  direction** (`inverted`), so the servo can be mounted either way;
+* **gear a finger** — one servo drives two adjacent frets of the same string
+  through antagonistic fingers (`fretB` + `activeBUs`, neutral = both lifted),
+  to halve the servo count on the wide low frets (see
+  [`GEARED_FINGERS.md`](GEARED_FINGERS.md));
+* choose the **signal source per servo** — a **PCA9685** channel *or* a
+  **direct ESP32 GPIO**, mixable on the same instrument;
+* **add a plucker** for the string.
 
-## 6. Step 5 — Homing
-
-For each axis: sensor enabled, sensor GPIO, NO/NC contact, active level, homing
-direction, fast/slow speeds, back-off distance, offset after origin, timeout,
-maximum search distance. Homing is non-blocking and independent per string (state
-machine `CHECK_SENSOR → … → READY`, see [`CALIBRATION.md`](CALIBRATION.md) §2).
-
----
-
-## 7. Step 6 — Servo calibration
-
-For each servo: PCA9685 channel, rest position, active position, min/max limits,
-inverted direction, travel time, settling time, disable at rest. Typical channel
-allocation: fingers 0–5, plucking 6–11, auxiliaries 12–15 (see
-[`CALIBRATION.md`](CALIBRATION.md) §4).
+The default wiring is **one PCA9685 per string**: that string's fret fingers on
+channels `0 … maxFret−1` and its plucker on channel `maxFret`.
 
 ---
 
-## 8. Step 7 — Note calibration
+## 5. Step 4 — Install helper
 
-Two methods:
-
-* **Automatic fret computation**: `position = longueur vibrante × (1 − 2^(−fret/12))`.
-* **Manual calibration**: for each fret, move the motor with the buttons, test
-  the note, adjust, and record the exact position. The calibrated table takes
-  **priority** over the theory (see [`CALIBRATION.md`](CALIBRATION.md) §3).
+Guided **per-fret calibration**. **Arm the instrument first** — servo tests are
+refused until it is armed. Then pick a fret in the strip, adjust its contact
+angle until it cleanly frets the string, **test the note live** on the hardware,
+and move on to the next fret. A geared finger calibrates three positions:
+neutral (both fingers lifted), side A and side B. See
+[`CALIBRATION.md`](CALIBRATION.md).
 
 ---
 
-## 9. Step 8 — Test
+## 6. Step 5 — MIDI
 
-Test progressively: each motor, each sensor, each finger, each pick, each note,
-each string, a chord, then the **general stop** (STOP). Keep the STOP button
+Global MIDI channel, Omni, sustain pedal, velocity curve, and **string/fret
+selection**: `CC20` selects the string and `CC21` the fret before a `Note On`
+(General-Midi-Boop tablature). The full CC/selection editor and the GMB
+identity/capabilities live on the **MIDI tab** (see
+[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3).
+
+---
+
+## 7. Step 6 — Power
+
+The **current governor** limits PCA9685 in-rush current. Three combined
+mechanisms: idle fingers cut their PWM (`disableAtRest`), only **one finger
+presses per string at a time**, and the governor **staggers** how many servos
+start moving together (`maxConcurrentMoves`, `staggerMs`) — important when a
+chord re-frets several strings at once.
+
+---
+
+## 8. Step 7 — Test
+
+Play **each string** (its open note and a fretted note) to check every finger,
+plucker and note — arm the instrument first. Keep the **STOP** (panic) button
 within reach (software panic — see [`SAFETY.md`](SAFETY.md) §3).
 
 ---
 
-## 10. Step 9 — Validation
+## 9. Step 8 — Validation
 
-The interface shows **"Configuration valid"** or the precise list of problems.
-No actuator is enabled in normal mode as long as critical errors remain
-uncorrected. Once valid, the configuration is saved (profile), and the
-capabilities are published to General-Midi-Boop.
+The interface shows **"No problems found — ready to save"** or the precise list
+of problems (pin conflicts, a PCA channel used twice, a string with no
+plucker…). No actuator is enabled as long as critical errors remain. Once valid,
+the configuration is saved (profile) and the capabilities are published to
+General-Midi-Boop.
+
+---
+
+## 10. GPIO pins (the Pins tab)
+
+Pin assignment is **not a wizard step** — it lives on the **GPIO Pins tab**.
+**"Assign automatically"** places only the board-level signals a PCA9685 needs:
+I²C `SDA = 40`, `SCL = 41`, and the PCA `/OE` safety line `SERVO_OE = 47`. There
+are **no per-string STEP / DIR / HOME / ENABLE pins**. A direct-GPIO servo
+carries its own pin in its servo entry (Step 3), not here. See
+[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
 
 ---
 

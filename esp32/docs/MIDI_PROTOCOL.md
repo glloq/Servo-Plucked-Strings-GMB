@@ -440,7 +440,7 @@ its discovery (Block 1 → 6 → 7, and 5 if necessary). GMB only replaces the
 configuration if all responses are valid; otherwise the old one stays active with
 a warning.
 
-### 3.8 Revision number (§13)
+### 3.8 Revision number
 
 `capabilitiesRevision` (in `Profile`) is incremented on each valid save,
 persistent, included in the Block 8 notification, displayed in the UI, and serves
