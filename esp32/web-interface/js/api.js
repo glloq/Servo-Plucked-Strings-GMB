@@ -261,7 +261,7 @@
         globalChannel: 0, omni: false, transpose: 0, chordWindowMs: 3,
         velocityCurve: 'linear', sustainPedal: true, sustainCc: 64,
         saturationStrategy: 'priorityLow',
-        noteExecutionDelayMs: 0, fingerLeadMs: 0, strumLeadMs: 0
+        noteExecutionDelayMs: 0, strumLeadMs: 0
       },
       stringFretSelection: {
         enabled: true, mode: 'hybrid', preset: 'general-midi-boop', perMidiChannel: true,
@@ -349,8 +349,6 @@
       notesPlaying: 0,
       faults: [],
       capabilitiesRevision: p.capabilitiesRevision,
-      temperatures: [{ name: 'Servo driver', c: 34.2 }],
-      voltages: [{ name: '5V servo rail', v: 5.02 }, { name: '3V3 logic', v: 3.31 }],
       strings: p.strings.map(function (s, i) {
         return {
           index: i, state: 'IDLE',
@@ -722,7 +720,7 @@
       });
     },
     // POST /api/profiles/load -> { ok } (404 if the slot is empty).
-    // NOTE: this ACTIVATES the slot and triggers a re-home on the firmware.
+    // NOTE: this ACTIVATES the slot and triggers a reconfigure on the firmware.
     loadProfileSlot: function (slot) {
       return this._call('/api/profiles/load', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot: slot })
@@ -734,7 +732,7 @@
       });
     },
     // POST /api/profiles/read -> the slot's profile JSON, WITHOUT activating it
-    // (no homing / no actuator movement). Used by copy / rename / set-startup.
+    // (no actuator movement). Used by copy / rename / set-startup.
     readProfileSlot: function (slot) {
       return this._call('/api/profiles/read', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot: slot })
@@ -744,7 +742,7 @@
         return deepCopy(stored);
       });
     },
-    // POST /api/reset -> recover from a panic / E-stop, then re-home.
+    // POST /api/reset -> recover from a panic / E-stop, then re-arm.
     resetSystem: function () {
       return this._call('/api/reset', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
@@ -782,7 +780,7 @@
       });
     },
     // POST /api/test/note -> { ok:true } (200) or { ok:false, error } (409 when
-    // the instrument is homing / not ready). The firmware reads only
+    // the instrument is not ready). The firmware reads only
     // channel/note/velocity/durationMs; the richer payload feeds the mock trace.
     testNote: function (payload) {
       var wire = { channel: payload.channel | 0, note: payload.note | 0,
@@ -803,7 +801,7 @@
       }, function () { return mockTestServo(payload); });
     },
     // GET /api/commands?id=N -> { id, state:"queued"|"succeeded"|"refused"|"unknown" }.
-    // Lets a 202-accepted command (e.g. a jog) be followed up for its real outcome.
+    // Lets a 202-accepted command (e.g. a servo test) be followed up for its real outcome.
     commandState: function (id) {
       return this._call('/api/commands?id=' + encodeURIComponent(id), null,
         function () { return { id: id, state: 'succeeded' }; });
@@ -969,8 +967,6 @@
     statusTimer = setInterval(function () {
       if (!statusSubscribers.length) { clearInterval(statusTimer); statusTimer = null; return; }
       var st = sampleStatus();
-      st.temperatures[0].c = +(33 + Math.random() * 3).toFixed(1);
-      st.voltages[0].v = +(23.9 + Math.random() * 0.3).toFixed(2);
       statusSubscribers.forEach(function (fn) { try { fn(st); } catch (e) {} });
     }, 1500);
   }

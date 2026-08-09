@@ -38,11 +38,11 @@ public:
     // Emergency stop everything (spec §21.3).
     void panic();
 
-    // Take a string out of service at runtime (failed homing, etc.): fault its
+    // Take a string out of service at runtime (a servo fault, etc.): fault its
     // state machine, mark it faulted in the allocator, drop its target and any
     // active note. It can no longer be chosen automatically OR by explicit CC.
     void faultString(size_t index);
-    // Undo a runtime fault so the axis can be re-homed and played again (explicit
+    // Undo a runtime fault so the string can be recovered and played again (explicit
     // reset). Clears the StringController fault and the allocator fault flag.
     void recoverString(size_t index);
 

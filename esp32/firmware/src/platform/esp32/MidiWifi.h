@@ -4,7 +4,7 @@
 // later without touching the instrument logic (§8.3).
 //
 // Each poll() processes a BOUNDED number of packets so a UDP flood cannot
-// monopolise loop() or starve the E-stop / LIMIT checks. Every SysEx request is
+// monopolise loop() or starve the E-stop check. Every SysEx request is
 // tagged with its sender so the response goes back to the right client.
 #pragma once
 

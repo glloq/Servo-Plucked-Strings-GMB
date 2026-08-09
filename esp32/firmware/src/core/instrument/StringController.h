@@ -13,7 +13,7 @@ namespace gmb {
 // Servo-per-fret: there is no carriage and no homing. "Moving" is retained as the
 // (now instantaneous) step where the scheduler selects the target fret's finger
 // servo before pressing it, so the note lifecycle and command-id guards are
-// unchanged from the stepper design.
+// unchanged.
 enum class StringState : uint8_t {
     Disabled,
     Idle,

@@ -1,7 +1,6 @@
-// Time-based contact debouncer for HOME / LIMIT / E-stop inputs
-// (spec §13.2 robustness). A raw reading must hold steady for a
-// configured window before it is accepted, so a bounce or a short spike cannot
-// trigger a false reference, a false LIMIT, or a spurious E-stop.
+// Time-based contact debouncer for the E-stop input (input robustness).
+// A raw reading must hold steady for a configured window before it is accepted,
+// so a bounce or a short spike cannot trigger a spurious E-stop.
 //
 // Pure C++ (no Arduino) so it is unit-tested on the host. Overflow-safe: uses
 // signed time differences, so it survives the ~71 min micros()/millis() wrap.
