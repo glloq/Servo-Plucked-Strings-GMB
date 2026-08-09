@@ -100,8 +100,12 @@
       sv.activeUs = Math.min(sv.pulseMaxUs || 2500, mid + 400);   // side A press
       sv.activeBUs = Math.max(sv.pulseMinUs || 500, mid - 400);   // side B press
     } else {
+      var oldB = sv.fretB;
       sv.fretB = -1;
       sv.activeBUs = 0;  // back to a plain single finger (keeps rest/active as-is)
+      // Un-gearing: give the fret that side B used to cover its own finger back, so
+      // it doesn't silently become unplayable (symmetric with enabling).
+      if (oldB >= 1 && !fingerFor(strIdx, oldB)) addFinger(strIdx, oldB);
     }
     GMB.markDirty();
   }
@@ -141,9 +145,9 @@
       p.servos = p.servos.filter(function (s) { return s.stringIndex < n; });
     }
     p.instrument.stringCount = n;
-    p.selector.string.maximum = n;
-    p.selector.string.mapping = [];
-    for (var k = 0; k < n; k++) p.selector.string.mapping.push(k);
+    p.stringFretSelection.string.maximum = n;
+    p.stringFretSelection.string.mapping = [];
+    for (var k = 0; k < n; k++) p.stringFretSelection.string.mapping.push(k);
     GMB.markDirty();
   }
 
@@ -207,9 +211,9 @@
     if (t) {
       p.strings = t.notes.map(function (n) { return { enabled: true, openNote: n, maxFret: t.maxFret }; });
       p.instrument.stringCount = t.notes.length;
-      p.selector.string.maximum = t.notes.length;
-      p.selector.fret.maximum = t.maxFret;
-      p.selector.string.mapping = t.notes.map(function (_, i) { return i; });
+      p.stringFretSelection.string.maximum = t.notes.length;
+      p.stringFretSelection.fret.maximum = t.maxFret;
+      p.stringFretSelection.string.mapping = t.notes.map(function (_, i) { return i; });
       p.servos = [];
       t.notes.forEach(function (_, i) {
         GMB.defaultStringServos(i, t.maxFret).forEach(function (s) { p.servos.push(s); });
@@ -377,7 +381,7 @@
       rows.push(h('div.grid3', [
         GMB.field('Second fret (side B)', GMB.input(sv, 'fretB',
           { type: 'number', min: 1, max: 24, onChange: drawStep,
-            coerce: function (v) { return (v === null || v === '') ? -1 : (v | 0); } }),
+            coerce: function (v) { return (v === null || v === '' || v < 1) ? -1 : (v | 0); } }),
           'the other fret this servo presses'),
         angleField('Press B angle (°)', sv, 'activeBUs', 'where side B (fret ' + sv.fretB + ') presses'),
         angleField('Neutral angle (°)', sv, 'restUs', 'both fingers lifted (rest)')
