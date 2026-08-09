@@ -13,6 +13,7 @@ then calibrate homing, fret positions and servos for your physical build.
 | File | Instrument | Strings | Tuning (MIDI) | Frets | Scale |
 | ---- | ---------- | :-----: | ------------- | :---: | :---: |
 | `ukulele-gcea.json` | Soprano ukulele | 4 | G4 C4 E4 A4 — 67 60 64 69 | 12 | 330 mm |
+| `ukulele-gcea-geared.json` | Soprano ukulele, **geared low neck** | 4 | G4 C4 E4 A4 — 67 60 64 69 | 12 | 330 mm |
 | `guitar-standard.json` | Guitar, standard | 6 | E2 A2 D3 G3 B3 E4 — 40 45 50 55 59 64 | 19 | 648 mm |
 | `bass-4string.json` | Bass guitar | 4 | E1 A1 D2 G2 — 28 33 38 43 | 20 | 864 mm |
 | `mandolin-gdae.json` | Mandolin (4 courses) | 4 | G3 D4 A4 E5 — 55 62 69 76 | 12 | 350 mm |
@@ -32,6 +33,10 @@ The set is intentionally diverse so it exercises the schema:
   the identity mapping.
 * **Re-entrant strings** — the ukulele high-G and the banjo short 5th string
   (its travel is limited to 17 frets while the rest reach 22).
+* **Geared fingers** — `ukulele-gcea-geared.json` pairs the wide low frets
+  (1‑2, 3‑4, 5‑6) onto **one antagonistic servo each** (`fretB` + `activeBUs`,
+  neutral at `restUs`), keeping frets 7‑12 as plain one‑servo‑per‑fret: **40
+  servos instead of 52**. See [`../docs/GEARED_FINGERS.md`](../docs/GEARED_FINGERS.md).
 
 ## Conventions shared by every profile
 

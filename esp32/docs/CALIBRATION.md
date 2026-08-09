@@ -33,11 +33,13 @@ automatique).
 |-------|------|
 | `function` | `finger` / `pluck` / `strum` / `strumLift` / `damper` |
 | `stringIndex` | corde propriétaire |
-| `fret` | (doigt) numéro de frette pressée (1..24) |
+| `fret` | (doigt) numéro de frette pressée, côté A (1..24) |
+| `fretB` | (doigt à **engrenage**) 2e frette pressée côté B ; `-1` = doigt simple |
 | `source` | `pca` (PCA9685) **ou** `gpio` (GPIO direct ESP32) |
 | `pcaBoard` / `channel` | carte 0..7 (0x40–0x47) et canal 0..15 |
 | `gpio` | broche ESP32 (source GPIO) |
-| `restUs` / `activeUs` | **position de repos / de contact** (µs) |
+| `restUs` / `activeUs` | **position de repos / de contact** (µs) — pour un doigt à engrenage, `restUs` = **neutre** (2 doigts levés) et `activeUs` = appui **côté A** |
+| `activeBUs` | (engrenage) impulsion d'appui du **côté B** (`fretB`) |
 | `inverted` | **sens de rotation** (miroir dans la fenêtre d'impulsion) |
 | `pulseMinUs` / `pulseMaxUs` | fenêtre mécanique du servo |
 | `travelMs` / `settleMs` | temps de course / stabilisation |
@@ -63,6 +65,20 @@ Pour chaque frette équipée :
 3. **Sens** : si le servo est monté à l'envers, cocher `inverted`.
 4. **Vérifier la note** : jouer la note (`openNote + fret`) et écouter la justesse.
 5. **Sauvegarder**.
+
+### 3.1 Doigt à engrenage (un servo, deux frettes)
+
+Un servo à **engrenage** entraîne **deux doigts antagonistes** et couvre **deux
+frettes** d'une même corde (voir [`GEARED_FINGERS.md`](GEARED_FINGERS.md)). Il se
+règle en **trois** positions au lieu de deux :
+
+1. **Neutre** (`restUs`) : les **deux** doigts franchement décollés — c'est le repos.
+2. **Press A** (`activeUs`) : le doigt A plaque nettement la frette `fret`.
+3. **Press B** (`activeBUs`) : le doigt B plaque nettement la frette `fretB`.
+
+Dans l'interface : cocher **« Geared »** sur la carte de la frette côté A, régler la
+2e frette puis les angles **Press A / Press B / Neutral**. Les frettes trop étroites
+(haut du manche) gardent le doigt simple ; les deux mécanismes se mélangent.
 
 ## 4. Assistant d'installation (aide au réglage)
 

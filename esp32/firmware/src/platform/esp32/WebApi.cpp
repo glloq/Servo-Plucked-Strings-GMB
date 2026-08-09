@@ -540,10 +540,13 @@ void WebApi::registerRoutes() {
                 return;
             }
             // Never drive a servo from the async task: enqueue for loop(), which
-            // also rejects an invalid / disabled index.
+            // also rejects an invalid / disabled index. Optional `us` drives the
+            // servo to an exact pulse and holds it (live calibration, incl. a geared
+            // finger's side-B press); absent/0 keeps the press/release semantics.
             int idx = body["index"] | -1;
             bool active = body["active"] | true;
-            uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active) : 0;
+            int us = body["us"] | 0;
+            uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active, us) : 0;
             bool queued = cmdId != 0;
             doc["ok"] = queued;
             doc["accepted"] = queued;

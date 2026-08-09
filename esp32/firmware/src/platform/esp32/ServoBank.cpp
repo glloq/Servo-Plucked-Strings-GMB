@@ -1,5 +1,6 @@
 #include "ServoBank.h"
 
+#include "../../core/configuration/FingerTarget.h"
 #include "../../core/configuration/ServoStroke.h"
 
 #if defined(ARDUINO)
@@ -175,6 +176,22 @@ bool ServoBank::press(int index) {
     return ok;  // false => the servo could not be driven (attach/PCA failure)
 }
 
+bool ServoBank::pressFret(int index, int fret) {
+    if (index < 0 || index >= (int)servos_.size()) return false;
+    // A geared finger presses side B (activeBUs) for its second fret, side A
+    // (activeUs) otherwise — identical to press() for a plain single finger.
+    bool ok = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
+    rt_[index].mode = Mode::Active;
+    return ok;
+}
+
+bool ServoBank::holdMicros(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return false;
+    bool ok = writeMicros(index, us);  // clamped to the servo's pulse window
+    rt_[index].mode = Mode::Active;    // hold: no rest-time PWM cut during a test
+    return ok;
+}
+
 void ServoBank::release(int index) {
     if (index < 0 || index >= (int)servos_.size()) return;
     toRest(index);
@@ -272,8 +289,9 @@ int ServoBank::fingerIndexForFret(int stringIndex, int fret) const {
     if (fret <= 0) return -1;  // open string: no finger
     for (size_t i = 0; i < servos_.size(); ++i) {
         const ServoConfig& s = servos_[i];
-        if (s.enabled && s.function == "finger" && s.stringIndex == stringIndex &&
-            s.fret == fret)
+        // Matches a plain finger on `fret` OR a geared finger whose side A or side B
+        // frets `fret` (fingerServesFret checks both).
+        if (s.enabled && s.stringIndex == stringIndex && fingerServesFret(s, fret))
             return static_cast<int>(i);
     }
     return -1;

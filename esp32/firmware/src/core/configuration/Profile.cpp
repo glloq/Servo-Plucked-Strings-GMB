@@ -11,6 +11,9 @@ uint32_t Profile::availableFretMask(size_t stringIndex) const {
         if (s.stringIndex != static_cast<int8_t>(stringIndex)) continue;
         if (s.fret >= 1 && s.fret <= static_cast<int8_t>(kMaxFret))
             mask |= (1u << s.fret);
+        // A geared finger also makes its second fret (side B) playable.
+        if (s.fretB >= 1 && s.fretB <= static_cast<int8_t>(kMaxFret))
+            mask |= (1u << s.fretB);
     }
     return mask;
 }

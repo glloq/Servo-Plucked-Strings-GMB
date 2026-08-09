@@ -106,6 +106,7 @@ struct AppCommand {
     uint16_t durationMs = 0;
     int16_t servoIndex = -1;
     bool servoActive = false;
+    uint16_t servoUs = 0;  // >0: drive the test servo to this exact pulse (live cal)
 };
 
 std::atomic<uint32_t> g_nextCmdId{1};
@@ -380,10 +381,14 @@ bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,
 }
 
 // Web servo test: only when armed and only for a real, enabled servo. Used by the
-// installation/calibration wizard to press/release one finger at a time.
-bool doTestServo(int index, bool active) {
+// installation/calibration wizard to press/release one finger at a time. When `us`
+// is non-zero the servo is driven to that exact pulse and held, so the wizard can
+// preview any calibration angle live — including a geared finger's neutral / press-A
+// / press-B positions (the pulse is clamped to the servo's mechanical window).
+bool doTestServo(int index, bool active, uint16_t us) {
     if (!g_safety.actuatorsAllowed()) return false;
     if (!g_servos.commandable(index)) return false;
+    if (us > 0) return g_servos.holdMicros(index, us);
     if (active) g_servos.press(index); else g_servos.release(index);
     return true;
 }
@@ -422,7 +427,7 @@ void drainCommands(uint32_t nowMs) {
                 ok = doTestNote(c->channel, c->note, c->velocity, c->durationMs, nowMs);
                 break;
             case CmdType::TestServo:
-                ok = doTestServo(c->servoIndex, c->servoActive);
+                ok = doTestServo(c->servoIndex, c->servoActive, c->servoUs);
                 break;
         }
         setCommandResult(c->id, ok ? 1 : 2);
@@ -525,7 +530,10 @@ void tickString(size_t i, uint32_t nowMs) {
             // chord's presses are staggered and the PCA in-rush stays bounded.
             if (!sch.fingerPressStarted) {
                 if (!g_governor.requestStart(nowMs)) break;  // wait for a permit
-                if (!g_servos.press(sch.fingerIndex)) {
+                // pressFret drives a geared finger toward the correct antagonistic
+                // side for tgt.fret (activeUs for side A, activeBUs for side B); for
+                // a plain single finger it is identical to press().
+                if (!g_servos.pressFret(sch.fingerIndex, tgt.fret)) {
                     faultRuntimeAxis(i, "finger servo write failed", nowMs);
                     break;
                 }
@@ -693,10 +701,11 @@ void setup() {
         c.durationMs = durationMs;
         return enqueueCommand(c);
     };
-    ctx.onTestServo = [](int index, bool active) -> uint32_t {
+    ctx.onTestServo = [](int index, bool active, int us) -> uint32_t {
         AppCommand c{CmdType::TestServo};
         c.servoIndex = static_cast<int16_t>(index);
         c.servoActive = active;
+        c.servoUs = us > 0 ? static_cast<uint16_t>(us > 65535 ? 65535 : us) : 0;
         return enqueueCommand(c);
     };
     ctx.commandState = [](uint32_t id) -> std::string { return commandStateStr(id); };

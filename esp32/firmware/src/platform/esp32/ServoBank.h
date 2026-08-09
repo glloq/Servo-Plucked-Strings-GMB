@@ -31,6 +31,11 @@ public:
     void toRest(int index);
     void toActive(int index);
     void toMicros(int index, uint16_t us);
+    // Drive a servo to an exact pulse and HOLD it (marks it active so the rest-time
+    // PWM cut-off never releases it mid-test). Used by the calibration wizard to
+    // preview any angle live, including a geared finger's side-B press. Returns
+    // false if the servo could not be driven.
+    bool holdMicros(int index, uint16_t us);
 
     // Non-blocking motion helpers (honour travelMs / settleMs / disableAtRest):
     //   press  : hold active   (finger down)
@@ -39,6 +44,10 @@ public:
     // Returns false if the servo could not actually be driven (LEDC re-attach or
     // PCA write failure) so the caller can fault the axis (audit P1-5).
     bool press(int index);
+    // Geared fingers: press the finger at `index` toward the SIDE that frets `fret`
+    // (activeUs for side A / a plain finger, activeBUs for a geared side-B fret).
+    // Same return contract as press().
+    bool pressFret(int index, int fret);
     void release(int index);
     // intensity 0..1 scales the strike depth between rest and active (velocity).
     void strike(int index, double intensity = 1.0);

@@ -52,6 +52,14 @@ chord **saturation strategy**, velocity curve…) and a **Playback timing** card
 (fixed note-execution delay, finger lead, strum lead) live on the **MIDI** page.
 
 The step-by-step detail is in [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
+
+**Geared (paired) fingers.** On the *Servos & frets* tab, a finger card offers a
+**"Geared (drives a 2nd fret)"** checkbox: one servo then presses two antagonistic
+frets through a gear (side A = `fret`, side B = `fretB`, neutral = both lifted). The
+card gains a second-fret picker and **Press A / Press B / Neutral** angle fields; the
+paired fret's own card shows *"driven by the geared servo on fret N"*. The install
+helper calibrates the three positions and previews each one live on the hardware.
+Full study and calibration procedure: [`GEARED_FINGERS.md`](GEARED_FINGERS.md).
 The computations for steps 4–7 are in [`CALIBRATION.md`](CALIBRATION.md).
 
 ---
@@ -180,7 +188,7 @@ option is set).
 | `POST` | `/api/pins/validate` | pin validation → list of `PinError` |
 | `POST` | `/api/panic` | software panic (`SafetyManager::panic`) |
 | `POST` | `/api/test/note` | play a test note (string, fret, note, velocity, channel) |
-| `POST` | `/api/test/servo` | pulse a servo to rest/active (armed only) |
+| `POST` | `/api/test/servo` | pulse a servo to rest/active, or to an exact `us` pulse and hold it (live calibration, incl. a geared finger's side B); armed only |
 | `POST` | `/api/test/jog` | nudge one axis by a signed mm delta (armed only) |
 | `POST` | `/api/test/endstop` | read a HOME/LIMIT sensor for one axis |
 | `POST` | `/api/sysex/request` | simulate a GMB SysEx request → decoded response |

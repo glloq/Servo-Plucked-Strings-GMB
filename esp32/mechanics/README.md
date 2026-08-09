@@ -50,6 +50,14 @@ string. The reference mechanism is **one servo per string** (PCA9685 channels
 Open string: finger stays lifted; the note is plucked directly (§15.3). An
 advanced option can instead press "fret 0" for specific mechanics.
 
+**Geared (paired) fingers.** To cut the servo count on the wide low frets, one
+servo can drive **two antagonistic fingers** through a gear/rocker: it presses
+fret `fret` at `activeUs` (side A) and fret `fretB` at `activeBUs` (side B), and
+lifts BOTH at `restUs` (neutral). Since a string only ever frets one note at a
+time, pairing two of its frets adds no play conflict. Narrow high frets keep a
+plain one-servo finger (`fretB = -1`); the two mechanisms mix per servo. See
+[`../docs/GEARED_FINGERS.md`](../docs/GEARED_FINGERS.md).
+
 ## 3. Setting the string vibrating (§5.3)
 
 Each string is set vibrating by **its own** actuator — there is no shared

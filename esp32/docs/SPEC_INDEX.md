@@ -35,5 +35,6 @@ connection with the code implemented in `firmware/src/core/*`:
 | [`WEB_INTERFACE.md`](WEB_INTERFACE.md) | interface levels, wizard, pages, REST/WS API | §9, §10, §18–20 |
 | [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) | MIDI transport, string/fret selection, GMB SysEx | §8 + related specs |
 | [`CALIBRATION.md`](CALIBRATION.md) | steps/mm, homing, frets, servos | §12–15 |
+| [`GEARED_FINGERS.md`](GEARED_FINGERS.md) | geared finger (1 servo → 2 frets): study, config, calibration | §5.2, §15 |
 | [`SAFETY.md`](SAFETY.md) | safe states, panic, E-stop, power supply | §21, §22 |
 | [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md) | beginner's guide to the wizard | §26 |

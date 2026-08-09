@@ -255,6 +255,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
         o["function"] = s.function;
         o["stringIndex"] = s.stringIndex;
         o["fret"] = s.fret;
+        o["fretB"] = s.fretB;          // geared finger's second fret (-1 = plain)
         o["source"] = s.source == ServoSource::DirectGpio ? "gpio" : "pca";
         o["pcaBoard"] = s.pcaBoard;
         o["channel"] = s.channel;
@@ -263,6 +264,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
         o["pulseMaxUs"] = s.pulseMaxUs;
         o["restUs"] = s.restUs;
         o["activeUs"] = s.activeUs;
+        o["activeBUs"] = s.activeBUs;  // geared finger's side-B press pulse
         o["inverted"] = s.inverted;
         o["travelMs"] = s.travelMs;
         o["settleMs"] = s.settleMs;
@@ -388,6 +390,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
         s.function = o["function"] | "finger";
         s.stringIndex = o["stringIndex"] | -1;
         s.fret = o["fret"] | -1;
+        s.fretB = o["fretB"] | -1;      // absent -> plain single finger (back-compat)
         std::string src = o["source"] | "pca";
         s.source = src == "gpio" ? ServoSource::DirectGpio : ServoSource::Pca;
         s.pcaBoard = o["pcaBoard"] | 0;
@@ -397,6 +400,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
         s.pulseMaxUs = o["pulseMaxUs"] | 2500;
         s.restUs = o["restUs"] | 1000;
         s.activeUs = o["activeUs"] | 1800;
+        s.activeBUs = o["activeBUs"] | 0;  // geared finger's side-B press pulse
         s.inverted = o["inverted"] | false;
         s.travelMs = o["travelMs"] | 120;
         s.settleMs = o["settleMs"] | 30;

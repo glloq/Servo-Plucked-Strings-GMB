@@ -37,11 +37,16 @@
   }
   function fingerFor(strIdx, fret) {
     var list = GMB.state.profile.servos;
-    for (var i = 0; i < list.length; i++)
-      if (list[i].function === 'finger' && list[i].stringIndex === strIdx && list[i].fret === fret)
-        return list[i];
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      // Matches a plain finger on `fret` OR a geared finger whose side A (fret) or
+      // side B (fretB) presses this fret.
+      if (s.function === 'finger' && s.stringIndex === strIdx &&
+          (s.fret === fret || s.fretB === fret)) return s;
+    }
     return null;
   }
+  function isGeared(sv) { return !!sv && sv.function === 'finger' && sv.fretB >= 1; }
   function strikerFor(strIdx) {
     var list = GMB.state.profile.servos;
     for (var i = 0; i < list.length; i++)
@@ -72,6 +77,33 @@
   function removeServo(sv) {
     var i = servoIndexOf(sv);
     if (i >= 0) { GMB.state.profile.servos.splice(i, 1); GMB.markDirty(); }
+  }
+
+  // Toggle a finger between plain (one fret) and geared (drives a second, antagonist
+  // fret through a gear). Enabling picks an adjacent fret as side B, removes that
+  // fret's now-redundant standalone servo, and seeds a CENTRED neutral with a
+  // symmetric press on each side (the user then fine-tunes all three positions).
+  function setGeared(sv, on, strIdx) {
+    if (on) {
+      var maxFret = GMB.state.profile.strings[strIdx].maxFret;
+      var b = sv.fret + 1 <= maxFret ? sv.fret + 1 : sv.fret - 1;
+      if (b < 1) { GMB.toast('No adjacent fret available to pair.', 'warn'); return; }
+      // Drop a standalone finger already sitting on side B (the gear replaces it).
+      var partner = null, list = GMB.state.profile.servos;
+      for (var i = 0; i < list.length; i++)
+        if (list[i] !== sv && list[i].function === 'finger' &&
+            list[i].stringIndex === strIdx && list[i].fret === b) { partner = list[i]; break; }
+      if (partner) removeServo(partner);
+      sv.fretB = b;
+      var mid = Math.round(((sv.pulseMinUs || 500) + (sv.pulseMaxUs || 2500)) / 2);
+      sv.restUs = mid;                                            // neutral: both up
+      sv.activeUs = Math.min(sv.pulseMaxUs || 2500, mid + 400);   // side A press
+      sv.activeBUs = Math.max(sv.pulseMinUs || 500, mid - 400);   // side B press
+    } else {
+      sv.fretB = -1;
+      sv.activeBUs = 0;  // back to a plain single finger (keeps rest/active as-is)
+    }
+    GMB.markDirty();
   }
   function ensureStriker(strIdx) {
     if (strikerFor(strIdx)) return;
@@ -286,10 +318,44 @@
     }, 'ghost');
   }
 
+  // Drive a servo to the EXACT draft pulse held in sv[key] (read at click time), so
+  // a not-yet-saved calibration angle — including a geared finger's neutral / side-B
+  // — can be previewed live on the hardware.
+  function testPulseBtn(label, sv, key, toastMsg) {
+    return GMB.button(label, function () {
+      var idx = servoIndexOf(sv);
+      if (idx < 0) return;
+      GMB.api.testServo({ index: idx, active: true, us: sv[key] | 0 }).then(function () {
+        GMB.toast(toastMsg || ('Servo ' + idx + ' → ' + (sv[key] | 0) + ' µs'), 'ok');
+      }).catch(function () { GMB.toast('Servo test refused (arm the instrument first).', 'warn'); });
+    }, 'ghost');
+  }
+
+  // A checkbox that toggles gearing on a finger (bound to sv.fretB >= 1).
+  function gearedToggle(sv, strIdx) {
+    var cb = h('input', { type: 'checkbox' });
+    cb.checked = isGeared(sv);
+    cb.addEventListener('change', function () { setGeared(sv, cb.checked, strIdx); drawStep(); });
+    return GMB.field('Geared (drives a 2nd fret)', cb,
+                     'one servo + a gear presses two frets — rest = both fingers up');
+  }
+
   function fingerRow(strIdx, fret) {
     var p = GMB.state.profile;
     var note = GMB.noteName(p.strings[strIdx].openNote + fret);
     var sv = fingerFor(strIdx, fret);
+
+    // Side-B row of a geared servo: the servo is edited on its side-A (owner) row,
+    // so here we only show that this fret is covered + a live "test press B" button.
+    if (sv && isGeared(sv) && sv.fret !== fret) {
+      var headB = h('div.fret-head', [h('strong', 'Fret ' + fret), h('span.muted', note),
+        h('span.muted', 'geared side B')]);
+      return h('div.fret-row', [headB,
+        h('span.muted', 'Driven by the geared servo on fret ' + sv.fret +
+          ' (side B). Calibrate its “Press B” angle on that fret’s card.'),
+        h('div.row', [testPulseBtn('Test press B', sv, 'activeBUs', 'Servo → press B')])]);
+    }
+
     var head = h('div.fret-head', [
       h('strong', 'Fret ' + fret), h('span.muted', note),
       sv
@@ -297,22 +363,37 @@
         : GMB.button('+ Add servo', function () { addFinger(strIdx, fret); drawStep(); }, 'ghost')
     ]);
     if (!sv) return h('div.fret-row.empty', [head, h('span.muted', 'no finger — this fret is not playable')]);
+    var geared = isGeared(sv);
     var basic = servoSourceEditor(sv).concat([
-      angleField('Contact angle (°)', sv, 'activeUs', 'where the finger presses the string'),
+      angleField(geared ? 'Press A angle (°)' : 'Contact angle (°)', sv, 'activeUs',
+                 geared ? 'where side A (fret ' + sv.fret + ') presses' : 'where the finger presses the string'),
       GMB.field('Reverse direction', GMB.input(sv, 'inverted', { type: 'checkbox' }))
     ]);
-    var rows = [head, h('div.grid3', basic)];
+    var rows = [head, h('div.grid3', basic), h('div.grid3', [gearedToggle(sv, strIdx)])];
+    if (geared) {
+      rows.push(h('div.grid3', [
+        GMB.field('Second fret (side B)', GMB.input(sv, 'fretB',
+          { type: 'number', min: 1, max: 24, onChange: drawStep }), 'the other fret this servo presses'),
+        angleField('Press B angle (°)', sv, 'activeBUs', 'where side B (fret ' + sv.fretB + ') presses'),
+        angleField('Neutral angle (°)', sv, 'restUs', 'both fingers lifted (rest)')
+      ]));
+    }
     if (GMB.isAdvanced()) {
       rows.push(h('div.grid3', [
-        angleField('Rest angle (°)', sv, 'restUs', 'finger lifted off the string'),
+        geared ? null : angleField('Rest angle (°)', sv, 'restUs', 'finger lifted off the string'),
         GMB.field('Pulse min (µs)', GMB.input(sv, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
         GMB.field('Pulse max (µs)', GMB.input(sv, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
         GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 2000 })),
         GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 2000 })),
         GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' }))
-      ]));
+      ].filter(Boolean)));
     }
-    rows.push(h('div.row', [testServoBtn('Test rest', sv, false), testServoBtn('Test contact', sv, true)]));
+    var tests = geared
+      ? [testPulseBtn('Neutral', sv, 'restUs', 'Servo → neutral'),
+         testPulseBtn('Press A', sv, 'activeUs', 'Servo → press A'),
+         testPulseBtn('Press B', sv, 'activeBUs', 'Servo → press B')]
+      : [testServoBtn('Test rest', sv, false), testServoBtn('Test contact', sv, true)];
+    rows.push(h('div.row', tests));
     return h('div.fret-row', rows);
   }
 
@@ -327,7 +408,8 @@
       var key = board + ':' + c;
       var s = used[key];
       var cls = s ? (s.function === 'finger' ? 'used' : 'strike') : 'free';
-      chips.push(h('span.chan-chip.' + cls, s ? (s.function === 'finger' ? ('f' + s.fret) : s.function.charAt(0)) : c));
+      chips.push(h('span.chan-chip.' + cls, s ? (s.function === 'finger'
+        ? ('f' + s.fret + (s.fretB >= 1 ? '/' + s.fretB : '')) : s.function.charAt(0)) : c));
     }
     return h('div', [h('span.muted', 'PCA board ' + board + ' channels: '), h('span.chan-map', chips)]);
   }
@@ -399,35 +481,48 @@
       body2.push(h('p.muted', 'No finger servo on this fret yet.'));
       body2.push(GMB.button('+ Add a finger servo here', function () { addFinger(activeStr, installFret); drawStep(); }, 'primary'));
     } else {
-      var deg = GMB.usToAngle(sv, sv.activeUs);
+      // A geared servo calibrates three positions: neutral (restUs), side-A press
+      // (activeUs, fret sv.fret) and side-B press (activeBUs, fret sv.fretB). The
+      // slider edits whichever side owns the fret currently shown.
+      var geared = isGeared(sv);
+      var sideB = geared && installFret === sv.fretB;
+      var key = sideB ? 'activeBUs' : 'activeUs';
+      var deg = GMB.usToAngle(sv, sv[key]);
       var slider = h('input.install-slider', { type: 'range', min: 0, max: 180, value: deg });
       var readout = h('span.install-deg', deg + '°');
       slider.addEventListener('input', function () {
         readout.textContent = slider.value + '°';
-        sv.activeUs = GMB.angleToUs(sv, Number(slider.value));
+        sv[key] = GMB.angleToUs(sv, Number(slider.value));
       });
       slider.addEventListener('change', function () {
         GMB.markDirty();
         var idx = servoIndexOf(sv);
-        GMB.api.testServo({ index: idx, active: true }).catch(function () {});
+        GMB.api.testServo({ index: idx, active: true, us: sv[key] | 0 }).catch(function () {});
       });
+      if (geared)
+        body2.push(h('p.muted', 'Geared servo: one actuator presses fret ' + sv.fret +
+          ' (side A) and fret ' + sv.fretB + ' (side B); neutral lifts both. Calibrating ' +
+          (sideB ? 'side B (fret ' + sv.fretB + ').' : 'side A (fret ' + sv.fret + ').')));
       body2.push(h('div.grid2', servoSourceEditor(sv)));
-      body2.push(GMB.field('Contact angle', h('div.install-slider-row', [slider, readout])));
+      body2.push(GMB.field(sideB ? 'Press B angle' : (geared ? 'Press A angle' : 'Contact angle'),
+        h('div.install-slider-row', [slider, readout])));
       body2.push(GMB.field('Reverse direction', GMB.input(sv, 'inverted', { type: 'checkbox' })));
-      body2.push(h('div.row', [
-        testServoBtn('Rest', sv, false),
-        testServoBtn('Press (contact)', sv, true),
-        GMB.button('Play the note', function () {
-          GMB.api.testNote({ channel: 0, note: s.openNote + installFret, velocity: 100, durationMs: 400 })
-            .then(function () { GMB.toast('Playing ' + note, 'ok'); })
-            .catch(function () { GMB.toast('Play refused (arm the instrument first).', 'warn'); });
-        }, 'primary'),
-        GMB.button('Save & next fret', function () {
-          GMB.markDirty();
-          if (installFret < s.maxFret) installFret++;
-          drawStep();
-        }, 'ghost')
-      ]));
+      var actions = geared
+        ? [testPulseBtn('Neutral', sv, 'restUs', 'Servo → neutral'),
+           testPulseBtn('Press A', sv, 'activeUs', 'Servo → press A'),
+           testPulseBtn('Press B', sv, 'activeBUs', 'Servo → press B')]
+        : [testServoBtn('Rest', sv, false), testServoBtn('Press (contact)', sv, true)];
+      actions.push(GMB.button('Play the note', function () {
+        GMB.api.testNote({ channel: 0, note: s.openNote + installFret, velocity: 100, durationMs: 400 })
+          .then(function () { GMB.toast('Playing ' + note, 'ok'); })
+          .catch(function () { GMB.toast('Play refused (arm the instrument first).', 'warn'); });
+      }, 'primary'));
+      actions.push(GMB.button('Save & next fret', function () {
+        GMB.markDirty();
+        if (installFret < s.maxFret) installFret++;
+        drawStep();
+      }, 'ghost'));
+      body2.push(h('div.row', actions));
     }
     body.appendChild(h('div.card', body2));
   }
@@ -527,11 +622,24 @@
         pcaUsed[k] = true;
       } else { direct++; if (s.gpio < 0) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'direct servo needs a GPIO' }); }
       if (s.function === 'finger') {
-        if (s.fret < 1 || s.fret > 24) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'finger fret must be 1..24' });
-        var fk = s.stringIndex + '/' + s.fret;
-        if (fingerKey[fk]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'string ' + s.stringIndex + ' fret ' + s.fret + ' has two fingers' });
-        fingerKey[fk] = true;
+        var claim = function (fret, label) {
+          if (fret < 1 || fret > 24) {
+            out.push({ level: 'error', field: 'servos[' + i + ']', message: label + ' fret must be 1..24' });
+            return;
+          }
+          var fk = s.stringIndex + '/' + fret;
+          if (fingerKey[fk]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'string ' + s.stringIndex + ' fret ' + fret + ' has two fingers' });
+          fingerKey[fk] = true;
+        };
+        claim(s.fret, 'finger');
+        if (s.fretB >= 0) {  // geared / paired finger
+          if (s.fretB === s.fret) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'geared finger frets must differ' });
+          else claim(s.fretB, 'geared side-B');
+          if (s.activeBUs < s.pulseMinUs || s.activeBUs > s.pulseMaxUs)
+            out.push({ level: 'error', field: 'servos[' + i + ']', message: 'geared side-B pulse outside pulse min/max' });
+        }
       }
+
     });
     if (direct > 8) out.push({ level: 'error', field: 'servos', message: 'at most 8 direct-GPIO servos (LEDC channels)' });
     var hasPin = function (sig) { return p.pins.some(function (a) { return a.signal === sig && a.gpio >= 0; }); };

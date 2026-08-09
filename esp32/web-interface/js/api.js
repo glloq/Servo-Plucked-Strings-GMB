@@ -174,6 +174,7 @@
       function: fn,
       stringIndex: stringIndex === undefined ? -1 : stringIndex,
       fret: opts.fret === undefined ? -1 : opts.fret,        // finger: fret 1..24
+      fretB: opts.fretB === undefined ? -1 : opts.fretB,     // geared finger: 2nd fret (-1 = plain)
       source: opts.source || 'pca',   // "pca" | "gpio"
       pcaBoard: opts.pcaBoard || 0,   // 0..7 (0x40..0x47)
       channel: opts.channel === undefined ? 0 : opts.channel, // 0..15 (source == pca)
@@ -182,6 +183,7 @@
       pulseMaxUs: opts.pulseMaxUs || 2500,
       restUs: opts.restUs || 1000,
       activeUs: opts.activeUs || 1800,
+      activeBUs: opts.activeBUs || 0,   // geared finger: side-B press pulse (fretB)
       inverted: !!opts.inverted,
       travelMs: opts.travelMs || 120,
       settleMs: opts.settleMs || 30,
@@ -215,8 +217,10 @@
   GMB.availableFrets = function (p, stringIndex) {
     var frets = [];
     (p.servos || []).forEach(function (sv) {
-      if (sv.enabled && sv.function === 'finger' && sv.stringIndex === stringIndex &&
-          sv.fret >= 1) frets.push(sv.fret);
+      if (!sv.enabled || sv.function !== 'finger' || sv.stringIndex !== stringIndex) return;
+      if (sv.fret >= 1) frets.push(sv.fret);
+      // A geared finger also makes its second fret (side B) playable.
+      if (sv.fretB >= 1) frets.push(sv.fretB);
     });
     frets.sort(function (a, b) { return a - b; });
     return frets;
@@ -787,9 +791,13 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(wire)
       }, function () { return mockTestNote(payload); });
     },
-    // POST /api/test/servo -> { ok } (409 if not armed). Body: { index, active }.
+    // POST /api/test/servo -> { ok } (409 if not armed). Body: { index, active }
+    // plus an optional { us }: when present the firmware drives the servo to that
+    // exact pulse and holds it (live calibration, incl. a geared finger's side-B
+    // press); absent/0 keeps the rest/active press-release semantics.
     testServo: function (payload) {
       var wire = { index: payload.index | 0, active: !!payload.active };
+      if (payload.us) wire.us = payload.us | 0;
       return this._call('/api/test/servo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(wire)
       }, function () { return mockTestServo(payload); });
@@ -849,8 +857,9 @@
   // Mock servo test (/api/test/servo): matches the firmware contract
   // { ok } for a { index, active } request.
   function mockTestServo(payload) {
-    var to = payload.active ? 'active' : 'rest';
-    var us = payload.active ? (payload.activeUs || 1800) : (payload.restUs || 1000);
+    var us = payload.us ? (payload.us | 0)
+      : (payload.active ? (payload.activeUs || 1800) : (payload.restUs || 1000));
+    var to = payload.us ? 'exact pulse' : (payload.active ? 'active' : 'rest');
     var where = payload.source === 'gpio'
       ? ('GPIO' + (payload.gpio >= 0 ? payload.gpio : '—'))
       : ('PCA board ' + (payload.pcaBoard || 0) + ', channel ' + (payload.channel || 0));
