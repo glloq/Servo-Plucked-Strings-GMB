@@ -1,54 +1,46 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
 # Mechanics — reference architecture
 
-Reference mechanical architecture for **Stepper-Plucked-Strings-GMB**
-(SPECIFICATION.md §5), and how each mechanical parameter maps to the instrument-profile
-fields (`firmware/src/core/motion/StepperAxis.h`, `instrument-profiles/`).
+Reference mechanical architecture for the **ESP32 servo-per-fret** version of
+Servo-Plucked-Strings-GMB (SPECIFICATION.md §5), and how each mechanical choice
+maps to the profile fields (`firmware/src/core/configuration/StringConfig.h`,
+`ServoConfig` in `Profile.h`, `instrument-profiles/`).
+
+There is **no stepper, no carriage, no transmission and no homing** — a string
+does not *move* a finger to a position; instead **each fret has its own finger
+servo** that presses straight onto the string. (The stepper/carriage machine is
+the separate reference project `Stepper-Plucked-Strings-GMB`.)
 
 ## 1. One independent channel per string (§5.1)
 
-Every string is a self-contained channel. A stepper motor moves a **single**
-finger along the string to select the note:
+Every string is a self-contained channel: a bank of **finger servos — one per
+equipped fret** — and its **own plucker**. To play a note the firmware releases
+the currently pressed finger, presses the target fret's finger, lets it settle,
+then plucks:
 
 ```text
-Stepper motor
-      ↓
-Mechanical transmission
-      ↓
-Longitudinal carriage
-      ↓
-Single finger
-      ↓
-Position on the string
+        one string
+   [finger fret1] [finger fret2] [finger fret3] …      ← one servo each
+   ═════●═════════════●═════════════●══════════════     ← the string
+   0     1             2             3   (fret positions)
+   └─ pluck servo (per string) sets the string vibrating
 ```
 
-Hard invariant (§4, §6): **one movable finger per string, one stepper per
-string, never shared**. Active strings = active stepper axes = movable fingers.
+Equipped frets **need not be contiguous** (e.g. frets {1, 2, 3, 5, 7, 12}); fret
+0 is the open string and never carries a servo. Which frets exist is derived from
+the servo list, not from a range.
 
-Per string the reference build carries (§1):
-
-```text
-1 stepper motor        1 finger-press mechanism
-1 linear axis          1 pluck mechanism
-1 carriage             1 HOME reference sensor
-1 single finger
-```
+Hard invariant (§4, §6): **one finger pressed per string at a time**. The firmware
+releases the old finger before pressing the new one, so a string never fights
+itself and only one press-load is ever active per string.
 
 ## 2. Finger press (§5.2)
 
-Once the carriage is positioned, the finger must be able to press onto the
-string, hold it, lift, stay lifted while moving, and stay lifted for an open
-string. The reference mechanism is **one servo per string** (PCA9685 channels
-0–5). In the profile this is a servo with `function: "finger"`, using `restUs`
-(lifted) and `activeUs` (pressed), plus `travelMs`/`settleMs` timing.
+A finger servo presses the string at its fret and lifts off it. In the profile
+this is a servo with `function: "finger"` carrying its `fret`, using `restUs`
+(lifted) and `activeUs` (pressed), plus `travelMs`/`settleMs` timing and
+`disableAtRest` (cut PWM once lifted, so an idle finger draws ~0 A).
 
-Open string: finger stays lifted; the note is plucked directly (§15.3). An
-advanced option can instead press "fret 0" for specific mechanics.
+Open string: no finger is pressed; the note is plucked directly.
 
 **Geared (paired) fingers.** To cut the servo count on the wide low frets, one
 servo can drive **two antagonistic fingers** through a gear/rocker: it presses
@@ -63,125 +55,75 @@ plain one-servo finger (`fretB = -1`); the two mechanisms mix per servo. See
 Each string is set vibrating by **its own** actuator — there is no shared
 strummer; strumming is per string:
 
-* **Individual pluck** — one pluck actuator per string (servo `function: "pluck"`,
-  PCA9685 channels 6–11). Enables chords, repeated notes, per-string tremolo and
-  velocity, and precise per-string triggering.
+* **Individual pluck** — one pluck actuator per string (`function: "pluck"`).
+  Enables chords, repeated notes, per-string tremolo and velocity, and precise
+  per-string triggering.
 * **Per-string strum** — a per-string strum servo (`function: "strum"`) with an
-  optional `strumLift` that lowers the strum servo onto the string for a stroke
-  and raises it after. Supports up/down alternating strokes, adjustable stroke
-  speed and depth, and an engage delay — all per string.
+  optional **`strumLift`** that lowers it onto the string for a stroke and raises
+  it after (`engageDelayMs` = extra pause once down). Supports up/down alternating
+  strokes (`alternateDirection`, `activeAltUs`), adjustable stroke time
+  (`strokeMs`) and a minimum strike depth (`minStrikeUs`).
 
-Per string, several servo roles can be defined: `finger` (press), `pluck`
-(individual plectrum), `strum` (per-string strum), `strumLift` (an optional
-servo that lowers the strum servo onto the string for a stroke, then raises it)
-and `damper` (per-string mute). Each string also has its own endstop
-: the `HOME` reference sensor, plus an optional `LIMIT` switch at the far
-end.
+An optional per-string **`damper`** servo can mute the string, and one or more
+global **`aux`** servos cover any other auxiliary actuator. Velocity scales the
+strike depth between `restUs` and `activeUs`.
 
-## 3.1 Servo signal source: PCA9685 or direct GPIO
+## 4. Servo signal source: PCA9685 or direct GPIO
 
 Every servo picks its own source, so an instrument can be built **with or without
 a PCA9685**, or with a mix of both:
 
-* **PCA9685** — up to **four boards** (`pcaBoard` 0–3, I²C 0x40–0x43 = 64
-  channels). Use this once you exceed the ESP32's free PWM pins.
+* **PCA9685** — up to **eight boards** (`pcaBoard` 0–7, I²C 0x40–0x47 = 128
+  channels). The recommended convention is one board per string. Use PCA once you
+  exceed the ESP32's handful of free servo pins — which a full fretboard quickly
+  does.
 * **Direct GPIO** — the servo hangs off a free ESP32-S3 pin (LEDC 50 Hz PWM),
-  handy when there is no PCA or only a couple of servos.
+  up to **eight** direct servos; handy with no PCA or for a couple of servos.
 
-The web interface exposes this choice per servo and prevents channel/pin
-conflicts (see [`../docs/CALIBRATION.md`](../docs/CALIBRATION.md) §4).
+The web interface exposes this choice per servo and only offers pins/channels
+that are free and capable, so it cannot create a conflict (see
+[`../docs/CALIBRATION.md`](../docs/CALIBRATION.md) §4).
 
-## 4. Transmission options (§5.1)
+## 5. Fret layout (physical build aid)
 
-The carriage can be driven by any of:
-
-* **GT2 belt** (`transmission: "beltGt2"`)
-* **Trapezoidal / ball lead screw** (`transmission: "screw"`)
-* **Rack and pinion** — model via `custom`
-* **Cable drive** — model via `custom`
-* **Experimental** — model via `custom`
-
-## 5. The millimetre abstraction
-
-The firmware never thinks in the transmission's native units. Everything happens
-in **millimetres**, converted to motor steps by a transmission-dependent
-`stepsPerMm` factor (§5.1, §12.1):
-
-```text
-position in millimetres → conversion → position in motor steps
-```
-
-This keeps note allocation, motion planning and the profiles independent of the
-mechanical type. Theoretical fret positions come from the equal-temperament
-formula (§14.2):
+The firmware needs no geometry — it only needs to know **which frets carry a
+servo**. For laying out where to mount each finger, the theoretical fret position
+along the string follows equal temperament:
 
 ```text
 position(fret) = scaleLengthMm × (1 − 2^(−fret / 12))
 ```
 
-A calibrated table (`calibratedFretMm`) overrides theory when present (§14.3).
+This is a build-time reference for the mechanics only; the firmware never
+computes millimetres or moves to a position.
 
 ## 6. Parameter → profile-field mapping
 
-`stepsPerMm` is computed from the transmission (SPECIFICATION.md §12.1):
+**String** (`strings[]`, `StringConfig`):
 
-**Belt (GT2):**
+| Quantity | Field | Notes |
+| -------- | ----- | ----- |
+| String enabled | `enabled` | |
+| Open-string note | `openNote` (MIDI) | fret 0 |
+| Highest reachable fret | `maxFret` | ceiling for finger frets |
 
-```text
-stepsPerMm = (stepsPerRevolution × microsteps) / (pulleyTeeth × beltPitchMm)
-```
+**Servo** (`servos[]`, `ServoConfig` — one entry per finger and per plucker):
 
-**Screw:**
+| Quantity | Field | Applies to |
+| -------- | ----- | ---------- |
+| Role | `function` (`finger`/`pluck`/`strum`/`strumLift`/`damper`/`aux`) | all |
+| Owning string | `stringIndex` (−1 = global) | all |
+| Fret pressed | `fret` (side A), `fretB` (geared side B) | finger |
+| Signal source | `source` (`pca`/`gpio`) | all |
+| PCA location | `pcaBoard` (0–7), `channel` (0–15) | source = pca |
+| Direct pin | `gpio` | source = gpio |
+| Pulse window | `pulseMinUs`, `pulseMaxUs` | all |
+| Lifted / pressed pulse | `restUs`, `activeUs`, `activeBUs` (geared side B) | all |
+| Direction sense | `inverted` | all |
+| Motion / settle timing | `travelMs`, `settleMs` | all |
+| Cut PWM when idle | `disableAtRest` | all |
+| Stroke shaping | `alternateDirection`, `activeAltUs`, `strokeMs`, `minStrikeUs` | pluck/strum |
+| Strum-lift pause | `engageDelayMs` | strumLift |
 
-```text
-stepsPerMm = (stepsPerRevolution × microsteps) / leadPerRevolutionMm
-```
-
-**Custom:** use `customStepsPerMm` directly.
-
-| Mechanical quantity | Profile field (`strings[]`) | Used when |
-| ------------------- | --------------------------- | --------- |
-| Vibrating (scale) length | `scaleLengthMm` | always (fret geometry) |
-| Transmission type | `transmission` (`beltGt2`/`screw`/`custom`) | always |
-| Motor full steps per revolution | `stepsPerRevolution` (e.g. 200 for 1.8°) | always |
-| Driver microstepping | `microsteps` (e.g. 16) | always |
-| Pulley tooth count | `pulleyTeeth` | belt |
-| Belt tooth pitch | `beltPitchMm` (GT2 = 2 mm) | belt |
-| Screw lead per revolution | `leadPerRevolutionMm` (e.g. 8 mm) | screw |
-| Explicit steps/mm override | `customStepsPerMm` | custom |
-| Direction sense | `invertDirection` | always |
-| Soft travel limits | `minPositionMm`, `maxPositionMm` | always |
-| Motion profile | `maxSpeedMmS`, `maxAccelMmS2` | always |
-| Open-string note | `openNote` (MIDI) | always |
-| Highest reachable fret | `maxFret` | always |
-| Calibrated fret table | `calibratedFretMm[]` (index = fret) | overrides theory |
-
-### Worked example (GT2 belt)
-
-`stepsPerRevolution = 200`, `microsteps = 16`, `pulleyTeeth = 20`,
-`beltPitchMm = 2`:
-
-```text
-stepsPerMm = (200 × 16) / (20 × 2) = 3200 / 40 = 80 steps/mm
-```
-
-At 16 microsteps and 80 steps/mm the position resolution is 1/80 mm = 12.5 µm,
-comfortably finer than fret spacing on every example instrument.
-
-## 7. Homing (§13) — mechanical reference
-
-Each axis references itself against its HOME sensor with a non-blocking state
-machine (`CHECK_SENSOR → SEEK_FAST → BACKOFF → SEEK_SLOW → SET_ZERO →
-MOVE_TO_OFFSET → READY`). Mechanically relevant profile fields per string
-(`strings[].homing`):
-
-| Field | Meaning |
-| ----- | ------- |
-| `direction` | travel direction toward the sensor (+1 / −1) |
-| `fastSpeedMmS` / `slowSpeedMmS` | seek and re-approach speeds |
-| `backoffMm` | retreat distance after the first trigger |
-| `offsetMm` | final resting offset past zero |
-| `timeoutMs` / `maxSearchMm` | fault guards |
-| `sensorActiveHigh` | electrical active level (NO/NC support) |
-
-A failing axis is disabled without disturbing the others (§13.2).
+A failing servo axis is faulted at runtime without disturbing the others
+(§13.2): the note allocator simply stops routing to it.
