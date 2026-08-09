@@ -1,15 +1,8 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Spécification héritée du projet
-> pas-à-pas d'origine. Dans cette version, le moteur pas-à-pas est remplacé par un
-> servo dédié à **chaque frette** ; les passages « stepper / homing / position mm /
-> fin de course » **ne s'appliquent pas**. La réception MIDI (sélection CC
-> corde/frette) et le grattage restent valables. Voir [`README.md`](README.md),
-> [`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/PIN_CONFIGURATION.md`](docs/PIN_CONFIGURATION.md).
-
 # Automatic capabilities communication via SysEx
 
 ## 1. Objective
 
-Stepper-Plucked-Strings-GMB must automatically communicate its capabilities to General-Midi-Boop.
+Servo-Plucked-Strings-GMB must automatically communicate its capabilities to General-Midi-Boop.
 
 The announced information must be generated from the active profile stored in the ESP32.
 
@@ -390,7 +383,7 @@ F0 7D 00 07 01
 F7
 ```
 
-For Stepper-Plucked-Strings-GMB:
+For Servo-Plucked-Strings-GMB:
 
 ```text
 is_fretless = 0
@@ -569,7 +562,7 @@ F7
 |   2 | general capabilities modified        |
 |   3 | string configuration modified        |
 |   4 | CC mapping modified                  |
-|   5 | restart or new homing required       |
+|   5 | restart / reconfiguration required   |
 |   6 | reserved                             |
 
 ---
@@ -714,10 +707,9 @@ Others require returning to a safe state:
 
 * changing the number of strings;
 * changing pins;
-* changing the steps/mm ratio;
-* changing the motor direction;
-* changing the limits;
-* changing the HOME sensor;
+* changing the finger-servo set or fret positions;
+* changing a servo's pins/PCA channel;
+* changing the /OE safety pin;
 * changing the fret positions.
 
 For these modifications:
@@ -727,16 +719,15 @@ For these modifications:
 2. finish or cancel active notes;
 3. disable the actuators;
 4. apply the configuration;
-5. perform a homing if necessary;
-6. rebuild the capabilities;
-7. send the SysEx notification.
+5. rebuild the capabilities;
+6. send the SysEx notification.
 ```
 
 The interface must clearly indicate:
 
 ```text
 Immediate application
-Homing required
+Safe state required
 Restart required
 ```
 
