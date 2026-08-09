@@ -63,6 +63,11 @@ public:
     // Servo-per-fret: the finger servo pressing a SPECIFIC fret on a string. Fret 0
     // (open) never has one. Returns -1 if that fret carries no finger.
     int fingerIndexForFret(int stringIndex, int fret) const;
+    // Estimated ms to sweep the finger at `index` from where it currently is to the
+    // pulse that frets `fret`, scaled from travelMs by the real pulse distance. Lets
+    // a direct geared sweep A<->B (skipping neutral) wait for its true motion; a
+    // re-press of the same side returns ~0. See FingerTarget.h::fingerSweepMs.
+    uint16_t sweepMsToFret(int index, int fret) const;
     // First finger of a string, if any (used to lift on shutdown / fault). Prefer
     // fingerIndexForFret for play; a string may have many fingers now.
     int fingerIndex(int stringIndex) const { return servoIndex("finger", stringIndex); }
@@ -110,6 +115,7 @@ private:
         uint32_t restAtMs = 0;    // when a resting servo may cut its PWM
         bool pwmOff = false;
         bool strokeParity = false;  // toggles per strike for alternateDirection
+        uint16_t lastUs = 0;        // last logical pulse commanded (pre-inversion)
     };
     std::vector<Rt> rt_;
 

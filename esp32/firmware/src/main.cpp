@@ -91,6 +91,8 @@ struct StringSched {
     uint32_t executeAtMs = 0;    // earliest time the note may sound (fixed delay)
     bool executeAnchored = false;
     bool fingerPressStarted = false;  // press begun (after a governor permit)
+    bool fingerSweep = false;         // direct A<->B sweep on one geared servo (no neutral)
+    uint16_t fingerMoveMs = 0;        // time budget for the current finger move (press/sweep)
     uint32_t liftStartMs = 0;
     bool liftStarted = false;
 };
@@ -488,9 +490,16 @@ void tickString(size_t i, uint32_t nowMs) {
         sch.liftStarted = false;
         sch.strikeIndex = -1;
         sch.commandId = tgt.commandId;
-        // Lift the currently-pressed finger and wait for it to travel up before
-        // pressing the new fret (never two fingers driving at once on a string).
-        sch.releaseWaitMs = releaseCurrentFinger(i);
+        // Direct sweep: when the target fret is driven by the SAME servo already
+        // pressed — a geared finger's other side, or a re-fret of the same fret —
+        // keep it engaged and sweep straight to the new side instead of lifting
+        // through neutral (no spurious release, the finger stays powered). Otherwise
+        // lift the current finger and wait for it to travel up before pressing the
+        // new fret (never two fingers driving at once on a string).
+        int prevFinger = i < g_currentFinger.size() ? g_currentFinger[i] : -1;
+        int targetFinger = g_servos.fingerIndexForFret(static_cast<int>(i), tgt.fret);
+        sch.fingerSweep = (prevFinger >= 0 && targetFinger == prevFinger);
+        sch.releaseWaitMs = sch.fingerSweep ? 0 : releaseCurrentFinger(i);
         sch.phase = StringSched::ReleasingFinger;
         sch.phaseStartMs = nowMs;
     }
@@ -530,6 +539,14 @@ void tickString(size_t i, uint32_t nowMs) {
             // chord's presses are staggered and the PCA in-rush stays bounded.
             if (!sch.fingerPressStarted) {
                 if (!g_governor.requestStart(nowMs)) break;  // wait for a permit
+                // A direct sweep travels farther than a press from neutral (it crosses
+                // the whole A..B span), so budget the wait by the real pulse distance;
+                // a normal press from neutral uses the calibrated travelMs. Compute it
+                // BEFORE pressFret writes the new target (sweep time reads the current
+                // pulse).
+                sch.fingerMoveMs = sch.fingerSweep
+                    ? g_servos.sweepMsToFret(sch.fingerIndex, tgt.fret)
+                    : g_servos.travelMs(sch.fingerIndex);
                 // pressFret drives a geared finger toward the correct antagonistic
                 // side for tgt.fret (activeUs for side A, activeBUs for side B); for
                 // a plain single finger it is identical to press().
@@ -541,7 +558,7 @@ void tickString(size_t i, uint32_t nowMs) {
                 sch.fingerPressStarted = true;
                 sch.phaseStartMs = nowMs;
             }
-            if (nowMs - sch.phaseStartMs >= g_servos.travelMs(sch.fingerIndex)) {
+            if (nowMs - sch.phaseStartMs >= sch.fingerMoveMs) {
                 sc.fingerPressed();
                 sch.phase = StringSched::Settling;
                 sch.phaseStartMs = nowMs;

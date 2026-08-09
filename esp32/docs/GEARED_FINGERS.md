@@ -149,8 +149,20 @@ Depuis l'interface web (**Setup Wizard**) :
 - `release()` ramène au **neutre** (`restUs`) : les deux doigts remontent — c'est la
   position « ne touche pas la corde » universelle (repos, corde à vide, ou frette
   gérée par un autre servo).
-- Enchaîner A→B sur le même servo passe par le neutre (bref instant « corde libre »),
-  exactement comme relâcher un doigt puis en presser un autre.
+- **Balayage direct A↔B.** Quand la nouvelle frette est portée par **le même servo**
+  que la frette actuellement pressée (l'autre côté d'un servo à engrenage, ou un
+  re-jeu de la **même** frette), le firmware **ne relâche pas vers le neutre** : il
+  balaie le doigt **directement** vers le nouveau côté, en le gardant **sous
+  tension** (pas de neutre « mou », mouvement continu). L'attente est **proportionnelle
+  à la distance réelle** d'impulsion (`sweepMsToFret` / `fingerSweepMs`), donc jamais
+  d'appui incomplet.
+  - **Re-jeu de la même frette** (note tenue redéclenchée) : distance nulle → le doigt
+    **ne se lève plus** et on économise ~2×`travelMs` (gain net).
+  - **A↔B** : comme le neutre est **sur le trajet** A→B (impulsion centrée), la durée
+    *modélisée* reste ~identique à un passage par le neutre ; le gain est la
+    **continuité** (pas d'arrêt au neutre, doigt toujours tenu), plus fluide et fiable.
+  - Une nouvelle note **corde à vide** (frette 0) n'est jamais un balayage : on relâche
+    bien vers le neutre pour lever les deux doigts.
 
 ## 8. Points d'attention mécaniques / courant
 
@@ -178,9 +190,11 @@ Pour un doigt à engrenage (`fretB ≥ 0`) :
 
 ## 10. Limites & évolutions possibles
 
-- La transition A→B passe par le neutre (mute très bref) — acceptable, identique à un
-  changement de doigt. *Évolution* : balayage direct A↔B (sauter le neutre) pour
-  gagner quelques ms.
+- Le **balayage direct A↔B** (§7) supprime l'arrêt au neutre et le doigt reste tenu,
+  mais comme le neutre est sur le trajet, la latence *modélisée* d'un A↔B reste
+  proche de celle d'un passage par le neutre : le gain concret de temps est surtout
+  sur le **re-jeu de la même frette** (doigt déjà en place). Le reste est de la
+  fluidité/fiabilité (mouvement continu, jamais de neutre non tenu).
 - Un servo à engrenage ne peut pas presser **ses deux** frettes en même temps — ce
   qui est sans effet, une corde ne frettant qu'une note à la fois.
 - Pas adapté aux frettes trop étroites : y garder le doigt simple.
@@ -192,10 +206,10 @@ Pour un doigt à engrenage (`fretB ≥ 0`) :
 | Élément | Fichier |
 |---------|---------|
 | Champs `fretB` / `activeBUs` | `firmware/src/core/configuration/Profile.h` |
-| Résolution pure du côté (testée en natif) | `firmware/src/core/configuration/FingerTarget.h` |
+| Résolution pure du côté + temps de balayage (`fingerSweepMs`, testés natif) | `firmware/src/core/configuration/FingerTarget.h` |
 | Masque des frettes jouables (les deux côtés) | `firmware/src/core/configuration/Profile.cpp` |
-| Mapping frette→servo + `pressFret` | `firmware/src/platform/esp32/ServoBank.{h,cpp}` |
-| Séquence de jeu (appui du bon côté) | `firmware/src/main.cpp` (`tickString`) |
+| Mapping frette→servo + `pressFret` + `sweepMsToFret` | `firmware/src/platform/esp32/ServoBank.{h,cpp}` |
+| Séquence de jeu (appui du bon côté, balayage direct A↔B) | `firmware/src/main.cpp` (`tickString`) |
 | Règles de validation | `firmware/src/core/configuration/ProfileValidator.cpp` |
 | Round-trip JSON | `firmware/src/platform/esp32/ProfileStorage.cpp` |
 | Interface web (config + calibration) | `web-interface/js/wizard.js`, `web-interface/js/api.js` |

@@ -38,4 +38,22 @@ inline uint16_t fingerActiveUsForFret(const ServoConfig& s, int fret) {
     return s.activeUs;
 }
 
+// Estimated travel time (ms) to move a finger from the pulse `fromUs` to `toUs`,
+// scaled from the servo's calibrated press time (`travelMs` = time to travel a
+// rest->active press span). Used for a DIRECT geared sweep A<->B (skipping neutral):
+// that motion is longer than a single press, so the wait must scale with the real
+// pulse distance — an equal distance keeps the same time, a same-side re-press
+// returns 0. Falls back to travelMs when the press span is uncalibrated (0).
+inline uint16_t fingerSweepMs(const ServoConfig& s, uint16_t fromUs, uint16_t toUs) {
+    int refSpan = s.activeUs >= s.restUs ? static_cast<int>(s.activeUs) - static_cast<int>(s.restUs)
+                                         : static_cast<int>(s.restUs) - static_cast<int>(s.activeUs);
+    if (refSpan <= 0) return s.travelMs;  // uncalibrated press span: safe fallback
+    int dist = fromUs >= toUs ? static_cast<int>(fromUs) - static_cast<int>(toUs)
+                              : static_cast<int>(toUs) - static_cast<int>(fromUs);
+    long ms = static_cast<long>(s.travelMs) * dist / refSpan;
+    if (ms < 0) ms = 0;
+    if (ms > 4000) ms = 4000;  // safety bound against a mis-calibrated span
+    return static_cast<uint16_t>(ms);
+}
+
 }  // namespace gmb

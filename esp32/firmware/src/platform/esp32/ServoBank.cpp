@@ -111,6 +111,7 @@ bool ServoBank::writeMicros(int index, uint16_t us) {
     const ServoConfig& s = servos_[index];
     if (!s.enabled) return false;  // never drive a disabled servo
     us = clampPulse(s, us);
+    rt_[index].lastUs = us;  // logical pulse (pre-inversion), for sweep-time scaling
     // Apply inversion by mirroring within the calibrated pulse window.
     if (s.inverted) us = static_cast<uint16_t>(s.pulseMinUs + s.pulseMaxUs - us);
 #if defined(ARDUINO)
@@ -295,6 +296,12 @@ int ServoBank::fingerIndexForFret(int stringIndex, int fret) const {
             return static_cast<int>(i);
     }
     return -1;
+}
+
+uint16_t ServoBank::sweepMsToFret(int index, int fret) const {
+    if (index < 0 || index >= (int)servos_.size()) return 0;
+    uint16_t toUs = fingerActiveUsForFret(servos_[index], fret);
+    return fingerSweepMs(servos_[index], rt_[index].lastUs, toUs);
 }
 
 }  // namespace gmb

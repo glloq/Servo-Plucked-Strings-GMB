@@ -80,6 +80,21 @@ TEST(finger_active_pulse_picks_the_right_side) {
     CHECK_EQ((int)fingerActiveUsForFret(plain, 99), 1700);  // fallback = side A
 }
 
+// A direct A<->B sweep crosses the whole span, so its wait scales with the real
+// pulse distance from the calibrated press time (neutral->side = travelMs).
+TEST(finger_sweep_time_scales_with_distance) {
+    ServoConfig s;
+    s.function = "finger";
+    s.restUs = 1500; s.activeUs = 1900;   // side A: 400 µs from neutral
+    s.fretB = 2; s.activeBUs = 1100;       // side B: 400 µs from neutral
+    s.travelMs = 120;                      // calibrated press (neutral -> side)
+    CHECK_EQ((int)fingerSweepMs(s, 1900, 1900), 0);     // same side: no motion
+    CHECK_EQ((int)fingerSweepMs(s, 1900, 1100), 240);   // A->B = full span = 2x press
+    CHECK_EQ((int)fingerSweepMs(s, 1500, 1900), 120);   // neutral->side = one press
+    ServoConfig bad = s; bad.activeUs = 1500;            // press span 0 (uncalibrated)
+    CHECK_EQ((int)fingerSweepMs(bad, 1100, 1900), (int)bad.travelMs);  // fallback
+}
+
 // ---- Availability mask + routing -----------------------------------------
 
 // A geared finger contributes BOTH of its frets to the availability mask.
