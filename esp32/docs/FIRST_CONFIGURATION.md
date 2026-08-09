@@ -37,36 +37,49 @@ password, network name, optional static IP, mDNS name. If the connection fails
 several times, the system automatically reverts to access-point mode. A long
 press on the **BOOT** button forces the hotspot back on at any time.
 
-The wizard has **8 steps**: Instrument → Strings & tuning → **Frets** →
-**Plucking** → MIDI → Power → Test → Validation. The frets (frettes) and the
-plucking (grattage) of each string are configured on their **own steps**, so each
-can be equipped, calibrated and tested on its own.
+The wizard has **7 steps**: **Builder** → **Frets** → **Plucking** → MIDI →
+Power → Test → Validation. Step 1 (the Builder) makes the *mechanical* choices
+and generates the wiring; the frets (frettes) and the plucking (grattage) of each
+string are then calibrated and tested on their **own steps**.
 
 ---
 
-## 2. Step 1 — Instrument
+## 2. Step 1 — Instrument Builder
 
-Fill in: instrument name, description (optional), **instrument type** (ukulele,
-guitar, bass, mandolin, banjo…) and **number of strings** (1 to 6). Picking a
-type loads a proposed tuning **and** a full servo-per-fret wiring. This step
-also holds **Board & network**: the board model (**ESP32-S3-DevKitC-1**, the
-only supported board) and the network mode (access point / Wi-Fi client). These
-values set the note range announced to General-Midi-Boop (see
-[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3).
+The instrument **type is cosmetic** — an instrument is defined by its
+**mechanics**. This one adaptive screen makes those choices explicit and
+**generates the servo wiring** for you:
+
+* **Starting point** — pick a **preset** (ukulele, guitar, bass, mandolin, banjo)
+  to load a tuning + GM tags, or **Custom** for your own. The type only tags the
+  name / GM program.
+* **Strings & tuning** — **number of strings** (1–6), each string's
+  **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`),
+  plus a **tuning helper** (named tunings for the string count, or shift every
+  string ±1 semitone). A string is just an open pitch plus its top fret — no
+  vibrating length, transmission or steps/mm.
+* **Fretting mechanism** — **one servo per fret** (full chromatic) ·
+  **geared low neck** (pair the wide low frets on one antagonistic servo each,
+  narrow high frets stay single — halves the low-neck servo count) ·
+  **open-string-only** (no frets) · **custom** (keep the current hand-tuned
+  wiring). Each option shows its **live finger-servo count**.
+* **Sounding mechanism** — individual **pick** (a plectrum per string) vs
+  per-string **strum**, plus optional **strum-lift** and **per-string damper**.
+* **Wiring & capacity** — one PCA9685 board per string by default, with a
+  **capacity meter** (channels per board vs 16, boards vs 8, direct-GPIO vs 8).
+* **Generate wiring** — builds the servo list from the choices; a *pending* pill
+  appears when the committed wiring no longer matches. Auxiliary servos and any
+  string still classified *custom* are preserved.
+
+Advanced mode adds capo / transpose / GM tags and a **Board & network** card
+(board is fixed to **ESP32-S3-DevKitC-1**; network mode access point / Wi-Fi
+client). The tuning sets the note range announced to General-Midi-Boop (see
+[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3). The mechanical choice is **not stored**
+in the profile — the Builder re-derives it from the servo list on entry.
 
 ---
 
-## 3. Step 2 — Strings & tuning
-
-For each string, set its **open-string MIDI note** (fret 0) and its **highest
-reachable fret** (`maxFret`). That is the entire per-string configuration — a
-string is just an open pitch plus its top fret. There is no vibrating length,
-transmission or steps/mm. The finger servos (frets) and the plucker (plucking)
-are configured in the next two steps.
-
----
-
-## 4. Step 3 — Frets (frettes)
+## 3. Step 2 — Frets (frettes)
 
 This step configures the **finger servos only** — the part that presses the
 string against a fret. Each fret position has its **own dedicated finger servo**.
@@ -94,7 +107,7 @@ string**: that string's fret fingers on channels `0 … maxFret−1`.
 
 ---
 
-## 5. Step 4 — Plucking (grattage)
+## 4. Step 3 — Plucking (grattage)
 
 This step configures the **plucking mechanism only** — the part that sounds the
 string. For every string you can:
@@ -114,7 +127,7 @@ step flags a string that has none).
 
 ---
 
-## 6. Step 5 — MIDI
+## 5. Step 4 — MIDI
 
 Global MIDI channel, Omni, sustain pedal, velocity curve, and **string/fret
 selection**: `CC20` selects the string and `CC21` the fret before a `Note On`
@@ -124,7 +137,7 @@ identity/capabilities live on the **MIDI tab** (see
 
 ---
 
-## 7. Step 6 — Power
+## 6. Step 5 — Power
 
 The **current governor** limits PCA9685 in-rush current. Three combined
 mechanisms: idle fingers cut their PWM (`disableAtRest`), only **one finger
@@ -134,7 +147,7 @@ chord re-frets several strings at once.
 
 ---
 
-## 8. Step 7 — Test
+## 7. Step 6 — Test
 
 Full-instrument test bench. Arm the mechanics, then play **each string** (its
 open note and a fretted note) or run a **group test**: play every open string,
@@ -145,7 +158,7 @@ button cancels the sequence. Keep the **STOP** (panic) button within reach
 
 ---
 
-## 9. Step 8 — Validation
+## 8. Step 7 — Validation
 
 The interface shows **"No problems found — ready to save"** or the precise list
 of problems (pin conflicts, a PCA channel used twice, a string with no
@@ -155,7 +168,7 @@ General-Midi-Boop.
 
 ---
 
-## 10. GPIO pins (the Pins tab)
+## 9. GPIO pins (the Pins tab)
 
 Pin assignment is **not a wizard step** — it lives on the **GPIO Pins tab**.
 **"Assign automatically"** places only the board-level signals a PCA9685 needs:
@@ -166,7 +179,7 @@ See [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
 
 ---
 
-## 11. Connecting General-Midi-Boop (optional)
+## 10. Connecting General-Midi-Boop (optional)
 
 On the "MIDI > GMB identity and capabilities" page, apply the **General-Midi-Boop**
 preset (CC20 = string, CC21 = fret, hybrid mode). GMB then automatically
@@ -175,7 +188,7 @@ discovers the instrument (identity, capabilities, strings) via SysEx. See
 
 ---
 
-## 12. Save and get going
+## 11. Save and get going
 
 Save your configuration as a profile (at least 8 slots), export it as JSON to
 keep it, and set the startup profile. The Wi-Fi password is not included in

@@ -439,3 +439,74 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .fret-chip.mini { min-width: 14px; width: 14px; height: 14px; padding: 0; pointer-events: none; }
 .fret-legend { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
 .fret-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+
+/* ---- Instrument Builder (creation flow) --------------------------------- */
+.builder-section { margin-bottom: 0; }
+.note-box .btn { margin-left: 6px; }
+
+/* Preset & mechanical-choice cards (selectable). */
+.preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.preset-card {
+  font: inherit; display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+  padding: 9px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text); cursor: pointer; min-width: 92px;
+}
+.preset-card strong { font-size: 14px; }
+.preset-card .muted { font-size: 11px; }
+.preset-card:hover { border-color: var(--accent); }
+.preset-card.selected {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.radio-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(232px, 1fr)); gap: 10px; }
+.radio-card {
+  font: inherit; text-align: left; display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); cursor: pointer;
+}
+.radio-card:hover { border-color: var(--accent); }
+.radio-card.selected {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.rc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.rc-head strong { font-size: 14px; }
+.rc-badge {
+  font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); padding: 2px 8px; border-radius: 20px;
+}
+.rc-desc { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.builder-opt { margin-top: 8px; }
+
+/* Strings & tuning rows. */
+.string-rows { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.string-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+}
+.string-row .sr-idx { font-weight: 600; min-width: 66px; font-size: 13px; }
+.sr-cell { display: inline-flex; align-items: center; gap: 6px; }
+.sr-cell .muted { font-size: 11px; }
+.sr-cell input[type="number"] { width: 70px; }
+.sr-note { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 30px; }
+.string-row select { width: auto; min-width: 128px; margin-left: auto; }
+.tuning-helper { display: flex; flex-direction: column; gap: 6px; min-width: 240px; }
+
+/* Capacity meter. */
+.capacity-meter { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.cap-line { display: flex; align-items: center; gap: 10px; }
+.cap-label { font-size: 12px; color: var(--muted); min-width: 96px; }
+.cap-bar {
+  flex: 1; height: 10px; border-radius: 6px; background: var(--surface-2);
+  overflow: hidden; border: 1px solid var(--border);
+}
+.cap-bar span { display: block; height: 100%; background: var(--ok); }
+.cap-bar.over span { background: var(--error); }
+.cap-val { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 96px; text-align: right; }
+
+/* Generate summary + nested strum block + fret guard-rail pills. */
+.summary { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.summary strong { font-size: 14px; }
+.card.inset { background: var(--surface-2); box-shadow: none; margin-top: 10px; padding: 12px 14px; }
+.fret-warn { display: inline-flex; margin: 2px 0; }

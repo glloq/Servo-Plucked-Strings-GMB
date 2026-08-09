@@ -356,17 +356,13 @@ Intended for fine-tuning. It allows:
 
 # 10. First-configuration wizard
 
-The web wizard guides the user through **eight steps**, in Simplified or Advanced mode.
+The web wizard guides the user through **seven steps**, in Simplified or Advanced mode.
 
-## Step 1 — Instrument
+## Step 1 — Instrument Builder
 
-Instrument name and description, type, number of strings (1–6), tuning preset, maximum frets, capo/transpose, network mode. The board is fixed to ESP32-S3-DevKitC-1; the board-level servo pins (SDA/SCL/SERVO_OE) are assigned automatically when a PCA9685 is used.
+One adaptive screen driven by the **mechanical** choices (the instrument type is cosmetic). It captures the identity + a **preset** (tuning + GM tags), the **strings & tuning** (count 1–6, per-string open MIDI note + `maxFret`, a tuning helper), and — as first-class options — the **fretting mechanism** (one servo per fret · geared low neck · open-string-only · custom) and the **sounding mechanism** (individual pick vs per-string strum, + optional strum-lift / damper). Live finger-servo counts and a capacity meter (PCA channels/boards, direct-GPIO limit) guide the choice; **Generate wiring** builds the servo list (`GMB.buildInstrument`). The mechanical choice is not stored — it is derived from the servo list on entry. The board is fixed to ESP32-S3-DevKitC-1; board-level servo pins (SDA/SCL/SERVO_OE) are assigned automatically when a PCA9685 is used.
 
-## Step 2 — Strings & tuning
-
-Per string: enabled, open MIDI note, highest reachable fret (`maxFret`).
-
-## Step 3 — Frets (frettes)
+## Step 2 — Frets (frettes)
 
 The **finger servos only** — the part that presses the string against a fret. Per string:
 
@@ -376,7 +372,7 @@ The **finger servos only** — the part that presses the string against a fret. 
 
 A clickable **coverage strip** shows which frets are equipped, geared and calibrated. Clicking a fret opens its **inline guided calibration**: arm the instrument → adjust the contact / rest angle until the note frets cleanly (previewed live) → test rest/press → play the note → mark calibrated. A **test bench** sweeps every fret of a string, or of all strings, in one click.
 
-## Step 4 — Plucking (grattage)
+## Step 3 — Plucking (grattage)
 
 The **plucking mechanism only** — the part that sounds the string. Per string:
 
@@ -387,19 +383,19 @@ The **plucking mechanism only** — the part that sounds the string. Per string:
 
 Each actuator has test rest/strike and pluck-open buttons, and a **test bench** plucks every open string, sweeps every plucker, and tests the strum lifts / dampers.
 
-## Step 5 — MIDI
+## Step 4 — MIDI
 
 Global channel / Omni, transpose, chord-grouping window, velocity curve, saturation strategy, sustain, and the CC string/fret selectors (`CC20` / `CC21`).
 
-## Step 6 — Power
+## Step 5 — Power
 
 Servo-rail sizing and current management: `maxConcurrentMoves`, `staggerMs`, and per-servo `disableAtRest`.
 
-## Step 7 — Test
+## Step 6 — Test
 
 Full-instrument test bench: exercise each finger, each pluck/strum, each note and each string individually, or run a **group test** (play all open strings, sweep all fingers, sweep all pluckers, a scale, or everything end-to-end) through a cancellable sequencer with a live status line and a Stop button, plus the general stop (`/OE`).
 
-## Step 8 — Validation
+## Step 7 — Validation
 
 The interface shows:
 
@@ -553,7 +549,7 @@ This is only a mechanical construction aid (`fretPositionMm`). It is **not** use
 
 ## 14.3 Finger contact-angle calibration
 
-Each finger servo is calibrated for the pulse at which it frets its note cleanly, via the guided inline calibration on the Frets step (§10, step 3):
+Each finger servo is calibrated for the pulse at which it frets its note cleanly, via the guided inline calibration on the Frets step (§10, step 2):
 
 1. select the fret;
 2. press its finger servo;

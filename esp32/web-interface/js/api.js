@@ -226,17 +226,82 @@
     return frets;
   };
 
-  // Build one finger servo per fret (1..maxFret) plus a plucker for a string,
-  // wired one PCA9685 per string (pcaBoard = stringIndex).
-  GMB.defaultStringServos = function (stringIndex, maxFret) {
-    var out = [];
-    for (var f = 1; f <= maxFret; f++)
-      out.push(servo('finger', stringIndex,
-                     { pcaBoard: stringIndex, channel: f - 1, fret: f }));
-    out.push(servo('pluck', stringIndex,
-                   { pcaBoard: stringIndex, channel: maxFret, activeUs: 1700,
-                     travelMs: 90, settleMs: 20 }));
+  // ---------------------------------------------------------------------------
+  // Mechanical wiring generator (Instrument Builder).
+  //
+  // A string's servo layout is generated from a small mechanical SPEC rather than
+  // hard-coded, so the UI can offer real mechanical choices. Channels are assigned
+  // sequentially from 0 on the string's board, which reproduces the historical
+  // "one finger per fret + one plucker, one PCA per string" layout byte-for-byte
+  // when spec = { fretting:'chromatic', sounding:'pluck' } (see defaultStringServos).
+  //
+  //   spec = {
+  //     maxFret,                                    // highest fret on the string
+  //     fretting: 'chromatic'|'geared'|'open'|'custom',
+  //     gearThreshold,                              // geared: pair frets 1..threshold
+  //     sounding: 'pluck'|'strum',                  // per-string striker role
+  //     lift, damper,                               // optional strumLift / damper
+  //     board                                       // PCA board (default = stringIndex)
+  //   }
+  // 'open' equips no fingers (open string only); 'custom' generates nothing so the
+  // caller can keep hand-tuned wiring (see buildInstrument).
+  GMB.buildStringServos = function (stringIndex, spec) {
+    spec = spec || {};
+    var out = [], ch = 0;
+    var board = (spec.board === undefined || spec.board === null) ? stringIndex : spec.board;
+    var maxFret = spec.maxFret || 0;
+    function push(fn, opts) {
+      opts = opts || {};
+      opts.pcaBoard = board;
+      opts.channel = ch++;              // sequential — byte-compatible with the old layout
+      out.push(servo(fn, stringIndex, opts));
+    }
+    if (spec.fretting === 'chromatic') {
+      for (var f = 1; f <= maxFret; f++) push('finger', { fret: f });
+    } else if (spec.fretting === 'geared') {
+      var end = Math.min(spec.gearThreshold || 6, maxFret), a = 1;
+      var mid = 1500;                                   // centre of the default pulse window
+      while (a + 1 <= end) {                            // antagonistic pairs (1,2)(3,4)…
+        push('finger', { fret: a, fretB: a + 1, restUs: mid,
+          activeUs: mid + 400, activeBUs: mid - 400 });
+        a += 2;
+      }
+      for (; a <= maxFret; a++) push('finger', { fret: a });   // narrow high frets stay plain
+    }
+    // 'open' / 'custom' add no finger servos.
+
+    if (spec.fretting !== 'custom') {                  // every sounding string needs a striker
+      push(spec.sounding === 'strum' ? 'strum' : 'pluck',
+        { activeUs: 1700, travelMs: 90, settleMs: 20 });
+      if (spec.lift)   push('strumLift', { restUs: 1000, activeUs: 1600, engageDelayMs: 20 });
+      if (spec.damper) push('damper',    { restUs: 1000, activeUs: 1600 });
+    }
     return out;
+  };
+
+  // Build the whole servo list from a per-string spec function. A string whose
+  // fretting is 'custom' keeps its EXISTING servos untouched (so re-generating
+  // never destroys hand-tuned wiring); every other string is regenerated. Pure.
+  GMB.buildInstrument = function (specFor, strings, existing) {
+    var out = [];
+    for (var i = 0; i < strings.length; i++) {
+      var es = specFor(i) || {};
+      if (es.fretting === 'custom')
+        out = out.concat((existing || []).filter(function (s) { return s.stringIndex === i; }));
+      else out = out.concat(GMB.buildStringServos(i, es));
+    }
+    return out;
+  };
+
+  // Backward-compatible default wiring: one finger per fret + one plucker, one
+  // PCA9685 per string. Delegates to the mechanical generator; the output is
+  // deep-equal to the historical layout (fingers on channels 0..maxFret-1, plucker
+  // on channel maxFret, pcaBoard = stringIndex).
+  GMB.defaultStringServos = function (stringIndex, maxFret) {
+    return GMB.buildStringServos(stringIndex, {
+      maxFret: maxFret, fretting: 'chromatic', sounding: 'pluck',
+      lift: false, damper: false, board: stringIndex
+    });
   };
 
   function sampleProfile() {
