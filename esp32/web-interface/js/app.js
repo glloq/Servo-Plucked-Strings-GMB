@@ -237,7 +237,11 @@
         h('div#topbar-title.topbar-title', 'Dashboard'),
         h('div.topbar-right', [
           h('span#mock-badge.badge.mock', { style: 'display:none' }, 'DEMO / MOCK DATA'),
-          h('span#conn-badge.badge.ok', 'Local')
+          h('span#conn-badge.badge.ok', 'Local'),
+          h('button.icon-btn#settings-btn', {
+            title: 'Settings (network, Wi-Fi, hotspot)',
+            onclick: function () { if (GMB.openSettings) GMB.openSettings(); }
+          }, '⚙')
         ])
       ]),
       h('div#view.view'),

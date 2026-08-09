@@ -41,6 +41,10 @@ Jusqu'à **6 cordes** jouent en parallèle (accords).
 - **Sens de rotation** (`inverted`) — pour monter le servo dans n'importe quel sens ;
 - **Position de frette arbitraire** — on équipe uniquement les frettes voulues, les
   trous sont permis (ex. frettes 1, 3, 5, 12) ;
+- **Doigt à engrenage** (`fretB`) — **un servo pour deux frettes** d'une même corde
+  (deux doigts antagonistes, neutre = les deux levés), pour diviser par deux les
+  servos sur le bas du manche ; les frettes étroites gardent le doigt simple, les
+  deux se mélangent. Voir [`docs/GEARED_FINGERS.md`](docs/GEARED_FINGERS.md) ;
 - **Source** : canal d'un **PCA9685** *ou* **GPIO direct** de l'ESP32, mixables.
 
 ### Gestion intelligente du courant (limiter la surcharge PCA)
@@ -113,7 +117,7 @@ par frette (presser → ajuster l'angle de contact → tester la note → suivan
 
 | Contrôle | Commande | Ce qu'il garantit |
 |----------|----------|-------------------|
-| Tests natifs | `cd firmware/test && make` | logique cœur (MIDI/CC, allocation, FSM, config servo-frette, governor) |
+| Tests natifs | `cd firmware/test && make` | logique cœur (MIDI/CC, allocation, FSM, config servo-frette, doigts à engrenage, governor) |
 | Compile plateforme | `firmware/test/hostcheck/run.sh` | `main.cpp` + adaptateurs ESP32 compilent (stubs) |
 | Profils JSON | `firmware/test/profilecheck/run.sh` | les 5 profils chargent via le vrai parseur (round-trip) |
 | Interface web | ouvrir `web-interface/index.html` | wizard + assistant + sélection CC (backend simulé) |
@@ -143,7 +147,9 @@ esp32/
 | Guide | Contenu |
 |-------|---------|
 | [docs/CALIBRATION.md](docs/CALIBRATION.md) | Calibration servo-par-frette + assistant d'installation |
+| [docs/GEARED_FINGERS.md](docs/GEARED_FINGERS.md) | Doigts à engrenage (1 servo → 2 frettes) : étude, config, calibration |
 | [docs/PIN_CONFIGURATION.md](docs/PIN_CONFIGURATION.md) | Broches (I2C, /OE, servos directs) |
+| [docs/NETWORK_HOTSPOT.md](docs/NETWORK_HOTSPOT.md) | Hotspot bouton BOOT + portail captif (ouverture auto de la page) |
 | [docs/MIDI_PROTOCOL.md](docs/MIDI_PROTOCOL.md) | Notes, sélection CC corde/frette, SysEx |
 | [STRING_FRET_SELECTION.md](STRING_FRET_SELECTION.md) | Spécification de la sélection CC |
 | [docs/SAFETY.md](docs/SAFETY.md) | E-stop, /OE, gestion du courant |

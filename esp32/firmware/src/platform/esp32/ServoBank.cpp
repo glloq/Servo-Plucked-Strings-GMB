@@ -1,5 +1,6 @@
 #include "ServoBank.h"
 
+#include "../../core/configuration/FingerTarget.h"
 #include "../../core/configuration/ServoStroke.h"
 
 #if defined(ARDUINO)
@@ -110,6 +111,7 @@ bool ServoBank::writeMicros(int index, uint16_t us) {
     const ServoConfig& s = servos_[index];
     if (!s.enabled) return false;  // never drive a disabled servo
     us = clampPulse(s, us);
+    rt_[index].lastUs = us;  // logical pulse (pre-inversion), for sweep-time scaling
     // Apply inversion by mirroring within the calibrated pulse window.
     if (s.inverted) us = static_cast<uint16_t>(s.pulseMinUs + s.pulseMaxUs - us);
 #if defined(ARDUINO)
@@ -173,6 +175,22 @@ bool ServoBank::press(int index) {
     bool ok = writeMicros(index, servos_[index].activeUs);
     rt_[index].mode = Mode::Active;
     return ok;  // false => the servo could not be driven (attach/PCA failure)
+}
+
+bool ServoBank::pressFret(int index, int fret) {
+    if (index < 0 || index >= (int)servos_.size()) return false;
+    // A geared finger presses side B (activeBUs) for its second fret, side A
+    // (activeUs) otherwise — identical to press() for a plain single finger.
+    bool ok = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
+    rt_[index].mode = Mode::Active;
+    return ok;
+}
+
+bool ServoBank::holdMicros(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return false;
+    bool ok = writeMicros(index, us);  // clamped to the servo's pulse window
+    rt_[index].mode = Mode::Active;    // hold: no rest-time PWM cut during a test
+    return ok;
 }
 
 void ServoBank::release(int index) {
@@ -272,11 +290,18 @@ int ServoBank::fingerIndexForFret(int stringIndex, int fret) const {
     if (fret <= 0) return -1;  // open string: no finger
     for (size_t i = 0; i < servos_.size(); ++i) {
         const ServoConfig& s = servos_[i];
-        if (s.enabled && s.function == "finger" && s.stringIndex == stringIndex &&
-            s.fret == fret)
+        // Matches a plain finger on `fret` OR a geared finger whose side A or side B
+        // frets `fret` (fingerServesFret checks both).
+        if (s.enabled && s.stringIndex == stringIndex && fingerServesFret(s, fret))
             return static_cast<int>(i);
     }
     return -1;
+}
+
+uint16_t ServoBank::sweepMsToFret(int index, int fret) const {
+    if (index < 0 || index >= (int)servos_.size()) return 0;
+    uint16_t toUs = fingerActiveUsForFret(servos_[index], fret);
+    return fingerSweepMs(servos_[index], rt_[index].lastUs, toUs);
 }
 
 }  // namespace gmb

@@ -32,8 +32,11 @@ connection with the code implemented in `firmware/src/core/*`:
 | -------- | ----- | ----------------------------- |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | modules, data flow, capabilities snapshot, phases | §23, §24 |
 | [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) | configurable GPIO, board profiles, conflicts | §11 |
-| [`WEB_INTERFACE.md`](WEB_INTERFACE.md) | interface levels, wizard, pages, REST/WS API | §9, §10, §18–20 |
+| [`WEB_INTERFACE.md`](WEB_INTERFACE.md) | interface levels, wizard, pages, settings modal, REST/WS API | §9, §10, §18–20 |
+| [`WEB_AUDIT.md`](WEB_AUDIT.md) | audit of the settings & calibration UI (findings + fixes) | §9, §10 |
+| [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md) | captive portal + BOOT-button hotspot (auto-open config page) | §8 |
 | [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) | MIDI transport, string/fret selection, GMB SysEx | §8 + related specs |
 | [`CALIBRATION.md`](CALIBRATION.md) | steps/mm, homing, frets, servos | §12–15 |
+| [`GEARED_FINGERS.md`](GEARED_FINGERS.md) | geared finger (1 servo → 2 frets): study, config, calibration | §5.2, §15 |
 | [`SAFETY.md`](SAFETY.md) | safe states, panic, E-stop, power supply | §21, §22 |
 | [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md) | beginner's guide to the wizard | §26 |

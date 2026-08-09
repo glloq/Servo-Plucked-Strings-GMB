@@ -188,9 +188,46 @@ void WebApi::begin(const WebContext& ctx, uint16_t port) {
     server_->addHandler(&statusWs_);
     server_->addHandler(&midiWs_);
 
+    // ---- Captive portal ---------------------------------------------------
+    // The OS "is there internet?" probes must be answered with a REDIRECT (not the
+    // 204/success they expect) so the phone/laptop pops its "sign in" sheet and
+    // opens our page. Registered before the static handler so they take precedence.
+    // Gated on AP mode (like onNotFound below): in station mode the device is a
+    // normal host and must not hijack these paths to an unreachable AP address.
+    auto redirectToPortal = [this](AsyncWebServerRequest* req) {
+        if (ctx_.net && ctx_.net->accessPointActive())
+            req->redirect(captivePortalUrl().c_str());
+        else
+            req->send(404, "text/plain", "Not found");
+    };
+    for (const char* probe : {"/generate_204", "/gen_204", "/hotspot-detect.html",
+                              "/library/test/success.html", "/connecttest.txt",
+                              "/ncsi.txt", "/redirect", "/canonical.html"}) {
+        server_->on(probe, HTTP_GET, redirectToPortal);
+    }
+
     // Static UI from LittleFS (uploaded from web-interface/ via data/www).
     server_->serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
+
+    // Anything else: in AP mode send it to the portal (catches probes we did not
+    // name explicitly); otherwise a normal 404.
+    server_->onNotFound([this](AsyncWebServerRequest* req) {
+        if (ctx_.net && ctx_.net->accessPointActive()) {
+            req->redirect(captivePortalUrl().c_str());
+        } else {
+            req->send(404, "text/plain", "Not found");
+        }
+    });
     server_->begin();
+}
+
+std::string WebApi::captivePortalUrl() const {
+    // The ESP32 softAP always answers on 192.168.4.1 (no softAPConfig is set), so
+    // use the constant instead of reading Net's ip_ std::string from the async web
+    // task — that field is written by the main loop and a cross-task read could tear
+    // during an AP/station switch. (If you ever add softAPConfig, update this + the
+    // NETWORK_HOTSPOT.md note.)
+    return "http://192.168.4.1/";
 }
 
 bool WebApi::authOk(AsyncWebServerRequest* req) {
@@ -540,10 +577,13 @@ void WebApi::registerRoutes() {
                 return;
             }
             // Never drive a servo from the async task: enqueue for loop(), which
-            // also rejects an invalid / disabled index.
+            // also rejects an invalid / disabled index. Optional `us` drives the
+            // servo to an exact pulse and holds it (live calibration, incl. a geared
+            // finger's side-B press); absent/0 keeps the press/release semantics.
             int idx = body["index"] | -1;
             bool active = body["active"] | true;
-            uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active) : 0;
+            int us = body["us"] | 0;
+            uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active, us) : 0;
             bool queued = cmdId != 0;
             doc["ok"] = queued;
             doc["accepted"] = queued;
@@ -553,6 +593,19 @@ void WebApi::registerRoutes() {
         });
     testServo->setMethod(HTTP_POST);
     server_->addHandler(testServo);
+
+    // ---- POST /api/hotspot (switch to AP + captive portal now) ----
+    server_->on("/api/hotspot", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized";
+                            sendJson(req, d, 401); return; }
+        JsonDocument doc;
+        if (ctx_.onStartHotspot) ctx_.onStartHotspot();
+        doc["ok"] = true;
+        doc["note"] = "Switching to access point — rejoin the device's Wi-Fi network.";
+        // Serviced on the main loop; the station link (and this response's route home)
+        // may drop as the radio switches, which is expected.
+        sendJson(req, doc, 202);
+    });
 
     // (No stepper jog / endstop routes: servo-per-fret has no carriage or
     // HOME/LIMIT sensors. Per-fret finger calibration uses POST /api/test/servo.)

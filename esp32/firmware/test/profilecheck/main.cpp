@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../../src/core/configuration/Profile.h"
+#include "../../src/core/configuration/ProfileValidator.h"
 #include "../../src/platform/esp32/ProfileStorage.h"
 
 using namespace gmb;
@@ -37,12 +38,14 @@ static bool parse(const std::string& json, Profile& out) {
 int main(int argc, char** argv) {
     const char* files[] = {
         "instrument-profiles/ukulele-gcea.json",
+        "instrument-profiles/ukulele-gcea-geared.json",
         "instrument-profiles/guitar-standard.json",
         "instrument-profiles/bass-4string.json",
         "instrument-profiles/mandolin-gdae.json",
         "instrument-profiles/banjo-5string.json",
     };
     std::string root = argc > 1 ? argv[1] : ".";
+    int gearedFingersSeen = 0;  // geared (paired) fingers that survived a round trip
     for (const char* rel : files) {
         std::string path = root + "/" + rel;
         std::printf("%s\n", rel);
@@ -50,6 +53,9 @@ int main(int argc, char** argv) {
         CHECK(!json.empty(), "file is readable");
         Profile p;
         CHECK(parse(json, p), "loads through the firmware parser");
+        // A shipped profile must not just parse — it must be a valid, activatable
+        // instrument (pins, servo channels, finger frets incl. geared side B, …).
+        CHECK(ProfileValidator::isActivatable(p), "profile is activatable");
 
         // Re-serialise and re-parse: the enums must survive a full round trip.
         JsonDocument out;
@@ -71,10 +77,21 @@ int main(int argc, char** argv) {
               "power config round-trips");
         // Servo-per-fret: at least one finger servo carrying a real fret survives.
         int fingersWithFret = 0;
-        for (const auto& sv : p2.servos)
+        for (const auto& sv : p2.servos) {
             if (sv.enabled && sv.function == "finger" && sv.fret >= 1) ++fingersWithFret;
+            // Geared finger: its second fret AND its side-B pulse must round-trip,
+            // with the pulse still inside the servo's mechanical window.
+            if (sv.enabled && sv.function == "finger" && sv.fretB >= 1) {
+                ++gearedFingersSeen;
+                CHECK(sv.fretB != sv.fret, "geared finger keeps two distinct frets");
+                CHECK(sv.activeBUs >= sv.pulseMinUs && sv.activeBUs <= sv.pulseMaxUs,
+                      "geared finger side-B pulse round-trips in window");
+            }
+        }
         CHECK(fingersWithFret > 0, "finger servos with a fret round-trip");
     }
+    // The geared sample profile must actually exercise the paired-finger path.
+    CHECK(gearedFingersSeen > 0, "geared (paired) fingers round-trip through the parser");
 
     // An unknown enum string must be REJECTED, not silently defaulted.
     {

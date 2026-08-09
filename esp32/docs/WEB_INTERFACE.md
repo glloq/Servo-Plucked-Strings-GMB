@@ -52,6 +52,22 @@ chord **saturation strategy**, velocity curve…) and a **Playback timing** card
 (fixed note-execution delay, finger lead, strum lead) live on the **MIDI** page.
 
 The step-by-step detail is in [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
+
+**Geared (paired) fingers.** On the *Servos & frets* tab, a finger card offers a
+**"Geared (drives a 2nd fret)"** checkbox: one servo then presses two antagonistic
+frets through a gear (side A = `fret`, side B = `fretB`, neutral = both lifted). The
+card gains a second-fret picker and **Press A / Press B / Neutral** angle fields; the
+paired fret's own card shows *"driven by the geared servo on fret N"*. The install
+helper calibrates the three positions and previews each one live on the hardware.
+Full study and calibration procedure: [`GEARED_FINGERS.md`](GEARED_FINGERS.md).
+
+**Settings modal.** A gear button (⚙) in the top bar opens a consolidated
+**Settings** modal (device name / MIDI channel, network mode / SSIDs / hostname,
+write-only Wi-Fi passwords, and a **Start hotspot now** button). Network and Wi-Fi
+changes are saved with the profile and apply after a reboot; the hotspot button
+switches to the access point immediately. See
+[`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md). An audit of the settings & calibration
+UI is in [`WEB_AUDIT.md`](WEB_AUDIT.md).
 The computations for steps 4–7 are in [`CALIBRATION.md`](CALIBRATION.md).
 
 ---
@@ -179,8 +195,9 @@ option is set).
 | `POST` | `/api/pins/auto` | automatic assignment (`PinRequest`) → assignments |
 | `POST` | `/api/pins/validate` | pin validation → list of `PinError` |
 | `POST` | `/api/panic` | software panic (`SafetyManager::panic`) |
+| `POST` | `/api/hotspot` | switch to the access point + captive portal now (see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md)) |
 | `POST` | `/api/test/note` | play a test note (string, fret, note, velocity, channel) |
-| `POST` | `/api/test/servo` | pulse a servo to rest/active (armed only) |
+| `POST` | `/api/test/servo` | pulse a servo to rest/active, or to an exact `us` pulse and hold it (live calibration, incl. a geared finger's side B); armed only |
 | `POST` | `/api/test/jog` | nudge one axis by a signed mm delta (armed only) |
 | `POST` | `/api/test/endstop` | read a HOME/LIMIT sensor for one axis |
 | `POST` | `/api/sysex/request` | simulate a GMB SysEx request → decoded response |

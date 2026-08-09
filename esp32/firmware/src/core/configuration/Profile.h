@@ -93,6 +93,20 @@ struct ServoConfig {
     // need not be contiguous — a string may carry fingers on frets {1,2,3,5,7,12}.
     int8_t fret = -1;
 
+    // Geared / paired finger: ONE servo drives TWO antagonistic fingers through a
+    // gear (or rocker), so a single actuator covers TWO frets on the SAME string.
+    // Turning one way lowers side A while side B lifts, and vice-versa, so only one
+    // of the pair ever touches the string — which is exactly the one-finger-per-
+    // string invariant, so pairing two frets of a string adds NO play conflict.
+    // Wide (low) frets can be geared to halve the servo count; narrow (high) frets
+    // keep a plain single finger (fretB = -1). The two mechanisms mix per servo.
+    //   fret      : the fret pressed at activeUs   (side A)
+    //   fretB     : the fret pressed at activeBUs  (side B); -1 = plain single finger
+    //   restUs    : the NEUTRAL position — BOTH fingers lifted (open string / idle)
+    //   activeBUs : pulse that presses side B; used only when fretB >= 1
+    int8_t fretB = -1;
+    uint16_t activeBUs = 0;
+
     // Signal source.
     ServoSource source = ServoSource::Pca;
     uint8_t pcaBoard = 0;         // 0..7 : up to eight PCA9685 (0x40..0x47)

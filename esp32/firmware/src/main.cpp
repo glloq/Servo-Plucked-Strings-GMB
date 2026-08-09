@@ -72,6 +72,16 @@ std::vector<int> g_currentFinger;    // PCA/GPIO servo index currently pressed, 
 int8_t g_estopPin = -1;
 Debouncer g_estopDeb;  // debounced E-stop input (avoids a spurious trip)
 
+// BOOT button (GPIO0) forces the Wi-Fi hotspot (AP + captive portal) on a long
+// press, so a wrong station config can never lock the user out. GPIO0 is the
+// universal ESP32 dev-board BOOT button — held LOW while pressed (INPUT_PULLUP).
+// A ~2 s hold avoids accidental triggers; the switch is live (no reboot).
+constexpr uint8_t kBootButtonPin = 0;
+constexpr uint32_t kBootHoldMs = 2000;
+uint32_t g_bootDownAtMs = 0;
+bool g_bootWasDown = false;
+bool g_bootTriggered = false;
+
 // Pending test-note Note Offs (scheduled by /api/test/note).
 struct TestNoteOff { uint8_t channel; uint8_t note; uint32_t atMs; };
 std::vector<TestNoteOff> g_testOffs;
@@ -91,6 +101,8 @@ struct StringSched {
     uint32_t executeAtMs = 0;    // earliest time the note may sound (fixed delay)
     bool executeAnchored = false;
     bool fingerPressStarted = false;  // press begun (after a governor permit)
+    bool fingerSweep = false;         // direct A<->B sweep on one geared servo (no neutral)
+    uint16_t fingerMoveMs = 0;        // time budget for the current finger move (press/sweep)
     uint32_t liftStartMs = 0;
     bool liftStarted = false;
 };
@@ -106,6 +118,7 @@ struct AppCommand {
     uint16_t durationMs = 0;
     int16_t servoIndex = -1;
     bool servoActive = false;
+    uint16_t servoUs = 0;  // >0: drive the test servo to this exact pulse (live cal)
 };
 
 std::atomic<uint32_t> g_nextCmdId{1};
@@ -137,6 +150,7 @@ QueueHandle_t g_cmdQueue = nullptr;
 SemaphoreHandle_t g_stateMutex = nullptr;
 SemaphoreHandle_t g_storageMutex = nullptr;
 std::atomic<bool> g_panicRequested{false};
+std::atomic<bool> g_hotspotRequested{false};  // BOOT button / web -> force AP
 bool g_authConfiguredCache = false;
 
 uint32_t enqueueCommand(const AppCommand& in) {
@@ -380,10 +394,14 @@ bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,
 }
 
 // Web servo test: only when armed and only for a real, enabled servo. Used by the
-// installation/calibration wizard to press/release one finger at a time.
-bool doTestServo(int index, bool active) {
+// installation/calibration wizard to press/release one finger at a time. When `us`
+// is non-zero the servo is driven to that exact pulse and held, so the wizard can
+// preview any calibration angle live — including a geared finger's neutral / press-A
+// / press-B positions (the pulse is clamped to the servo's mechanical window).
+bool doTestServo(int index, bool active, uint16_t us) {
     if (!g_safety.actuatorsAllowed()) return false;
     if (!g_servos.commandable(index)) return false;
+    if (us > 0) return g_servos.holdMicros(index, us);
     if (active) g_servos.press(index); else g_servos.release(index);
     return true;
 }
@@ -405,6 +423,23 @@ bool servicePanic(uint32_t nowMs) {
     return true;
 }
 
+// Force the Wi-Fi hotspot (AP + captive portal) from a BOOT-button long-press or a
+// web "Start hotspot" request. Runs on the main loop (owns Net + WiFi). Switching
+// the radio is independent of the instrument state, so it works in any phase.
+void serviceHotspotRequests(uint32_t nowMs) {
+    bool down = digitalRead(kBootButtonPin) == LOW;  // active-low BOOT button
+    if (down && !g_bootWasDown) { g_bootDownAtMs = nowMs; g_bootTriggered = false; }
+    if (down && !g_bootTriggered && nowMs - g_bootDownAtMs >= kBootHoldMs) {
+        g_bootTriggered = true;
+        g_hotspotRequested.store(true);
+    }
+    g_bootWasDown = down;
+    if (g_hotspotRequested.exchange(false)) {
+        g_net.forceAccessPoint();
+        Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
+    }
+}
+
 void drainCommands(uint32_t nowMs) {
     if (!g_cmdQueue) return;
     static constexpr int kMaxCommandsPerTick = 2;
@@ -422,7 +457,7 @@ void drainCommands(uint32_t nowMs) {
                 ok = doTestNote(c->channel, c->note, c->velocity, c->durationMs, nowMs);
                 break;
             case CmdType::TestServo:
-                ok = doTestServo(c->servoIndex, c->servoActive);
+                ok = doTestServo(c->servoIndex, c->servoActive, c->servoUs);
                 break;
         }
         setCommandResult(c->id, ok ? 1 : 2);
@@ -483,9 +518,16 @@ void tickString(size_t i, uint32_t nowMs) {
         sch.liftStarted = false;
         sch.strikeIndex = -1;
         sch.commandId = tgt.commandId;
-        // Lift the currently-pressed finger and wait for it to travel up before
-        // pressing the new fret (never two fingers driving at once on a string).
-        sch.releaseWaitMs = releaseCurrentFinger(i);
+        // Direct sweep: when the target fret is driven by the SAME servo already
+        // pressed — a geared finger's other side, or a re-fret of the same fret —
+        // keep it engaged and sweep straight to the new side instead of lifting
+        // through neutral (no spurious release, the finger stays powered). Otherwise
+        // lift the current finger and wait for it to travel up before pressing the
+        // new fret (never two fingers driving at once on a string).
+        int prevFinger = i < g_currentFinger.size() ? g_currentFinger[i] : -1;
+        int targetFinger = g_servos.fingerIndexForFret(static_cast<int>(i), tgt.fret);
+        sch.fingerSweep = (prevFinger >= 0 && targetFinger == prevFinger);
+        sch.releaseWaitMs = sch.fingerSweep ? 0 : releaseCurrentFinger(i);
         sch.phase = StringSched::ReleasingFinger;
         sch.phaseStartMs = nowMs;
     }
@@ -525,7 +567,18 @@ void tickString(size_t i, uint32_t nowMs) {
             // chord's presses are staggered and the PCA in-rush stays bounded.
             if (!sch.fingerPressStarted) {
                 if (!g_governor.requestStart(nowMs)) break;  // wait for a permit
-                if (!g_servos.press(sch.fingerIndex)) {
+                // A direct sweep travels farther than a press from neutral (it crosses
+                // the whole A..B span), so budget the wait by the real pulse distance;
+                // a normal press from neutral uses the calibrated travelMs. Compute it
+                // BEFORE pressFret writes the new target (sweep time reads the current
+                // pulse).
+                sch.fingerMoveMs = sch.fingerSweep
+                    ? g_servos.sweepMsToFret(sch.fingerIndex, tgt.fret)
+                    : g_servos.travelMs(sch.fingerIndex);
+                // pressFret drives a geared finger toward the correct antagonistic
+                // side for tgt.fret (activeUs for side A, activeBUs for side B); for
+                // a plain single finger it is identical to press().
+                if (!g_servos.pressFret(sch.fingerIndex, tgt.fret)) {
                     faultRuntimeAxis(i, "finger servo write failed", nowMs);
                     break;
                 }
@@ -533,7 +586,7 @@ void tickString(size_t i, uint32_t nowMs) {
                 sch.fingerPressStarted = true;
                 sch.phaseStartMs = nowMs;
             }
-            if (nowMs - sch.phaseStartMs >= g_servos.travelMs(sch.fingerIndex)) {
+            if (nowMs - sch.phaseStartMs >= sch.fingerMoveMs) {
                 sc.fingerPressed();
                 sch.phase = StringSched::Settling;
                 sch.phaseStartMs = nowMs;
@@ -676,6 +729,7 @@ void setup() {
     prefs.end();
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
+    pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
 
     WebContext ctx;
     ctx.profile = &g_profile;
@@ -686,6 +740,7 @@ void setup() {
     ctx.safety = &g_safety;
     ctx.storage = &g_storage;
     ctx.onPanic = []() { g_panicRequested.store(true); };
+    ctx.onStartHotspot = []() { g_hotspotRequested.store(true); };
     ctx.onTestNote = [](uint8_t channel, uint8_t note, uint8_t vel,
                         uint16_t durationMs) -> uint32_t {
         AppCommand c{CmdType::TestNote};
@@ -693,10 +748,11 @@ void setup() {
         c.durationMs = durationMs;
         return enqueueCommand(c);
     };
-    ctx.onTestServo = [](int index, bool active) -> uint32_t {
+    ctx.onTestServo = [](int index, bool active, int us) -> uint32_t {
         AppCommand c{CmdType::TestServo};
         c.servoIndex = static_cast<int16_t>(index);
         c.servoActive = active;
+        c.servoUs = us > 0 ? static_cast<uint16_t>(us > 65535 ? 65535 : us) : 0;
         return enqueueCommand(c);
     };
     ctx.commandState = [](uint32_t id) -> std::string { return commandStateStr(id); };
@@ -772,6 +828,7 @@ void loop() {
         }
     }
     bool panicked = servicePanic(nowMs);
+    serviceHotspotRequests(nowMs);  // BOOT-button / web hotspot (independent of phase)
 
     if (!panicked) drainCommands(nowMs);
     servicePendingActivation(nowMs);

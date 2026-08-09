@@ -30,6 +30,9 @@ struct WebContext {
     SafetyManager* safety = nullptr;
     ProfileStorage* storage = nullptr;
     std::function<void()> onPanic;
+    // Switch to the access point + captive portal now (web "Start hotspot" button),
+    // mirroring the hardware BOOT-button hotspot. Serviced on the main loop.
+    std::function<void()> onStartHotspot;
     // The enqueue callbacks return the assigned command id (0 = queue full), so
     // the 202 response can carry it and GET /api/commands can report the outcome.
     std::function<uint32_t()> onReset;                     // recover from panic/E-stop
@@ -37,7 +40,7 @@ struct WebContext {
     std::function<int()> readyStrings;                     // axes homed & not faulted
     std::function<uint32_t(const Profile&)> onActivateProfile;  // validate + enqueue
     std::function<uint32_t(uint8_t, uint8_t, uint8_t, uint16_t)> onTestNote;  // ch,note,vel,ms
-    std::function<uint32_t(int, bool)> onTestServo;  // enqueue a servo pulse (index, active)
+    std::function<uint32_t(int, bool, int)> onTestServo;  // servo pulse (index, active, us>0=exact)
     std::function<std::string(uint32_t)> commandState;  // queued/succeeded/refused/unknown
     std::function<bool()> onFormatStorage;       // deliberate LittleFS reformat
     // Guard shared state during read-only handlers so a reload in loop() is never
@@ -83,6 +86,7 @@ private:
     void registerRoutes();
     void fillStatus(JsonDocument& doc);
     bool authOk(AsyncWebServerRequest* req);  // token gate for write routes
+    std::string captivePortalUrl() const;     // "http://<ap-ip>/" for redirects
     // Cached, serialized status DTO produced by loop() via refreshStatus(); read
     // by the async web task under the state lock so it never touches live state.
     std::string cachedStatus_ = "{}";

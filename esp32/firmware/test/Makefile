@@ -36,6 +36,7 @@ TEST_SRC := \
   test_servos.cpp \
   test_governor.cpp \
   test_fretservo.cpp \
+  test_geared.cpp \
   test_audit.cpp \
   test_debounce.cpp
 

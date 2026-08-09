@@ -7,6 +7,10 @@
 
 namespace gmb {
 
+namespace {
+constexpr uint16_t kDnsPort = 53;
+}  // namespace
+
 bool Net::begin(const NetworkConfig& cfg, const std::string& stationPassword,
                 const std::string& apPassword) {
     cfg_ = cfg;
@@ -37,6 +41,7 @@ void Net::startAccessPoint(bool fallback) {
         ip_ = WiFi.softAPIP().toString().c_str();
         apActive_ = true;
         connected_ = true;
+        startCaptivePortal();  // any joined client is taken straight to the page
     } else {
         ip_ = "";
         apActive_ = false;
@@ -50,11 +55,37 @@ void Net::startAccessPoint(bool fallback) {
     connecting_ = false;
 }
 
+void Net::startCaptivePortal() {
+#if defined(ARDUINO)
+    // Resolve every DNS query to the AP IP so any URL a joined phone/laptop opens
+    // (and every OS "is there internet?" probe) lands on this device; the web
+    // server then redirects them to the config page (see WebApi captive routes).
+    dns_.start(kDnsPort, "*", WiFi.softAPIP());
+    dnsActive_ = true;
+#endif
+}
+
+void Net::stopCaptivePortal() {
+#if defined(ARDUINO)
+    if (dnsActive_) dns_.stop();
+#endif
+    dnsActive_ = false;
+}
+
+void Net::forceAccessPoint() {
+#if defined(ARDUINO)
+    if (connecting_ || (!apActive_ && WiFi.status() == WL_CONNECTED)) WiFi.disconnect();
+#endif
+    apForced_ = true;          // stay in AP; tick() must not retry the station
+    startAccessPoint(false);   // brings up softAP + captive portal
+}
+
 void Net::beginStationAttempt(uint32_t nowMs) {
     attemptStartMs_ = nowMs;
     connecting_ = true;
     connected_ = false;
     apActive_ = false;
+    stopCaptivePortal();  // leaving AP: drop the wildcard DNS
 #if defined(ARDUINO)
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(cfg_.hostname.c_str());
@@ -90,10 +121,12 @@ bool Net::pollStation(uint32_t nowMs) {
 void Net::tick(uint32_t nowMs) {
 #if defined(ARDUINO)
     if (apActive_) {
+        if (dnsActive_) dns_.processNextRequest();  // captive portal
         // If the AP is only a FALLBACK (a station was configured but unreachable),
         // periodically retry the station so a transient router outage recovers.
-        // A primary AP-mode profile stays in AP and never retries.
-        if (apIsFallback_ && cfg_.mode == NetworkMode::Station &&
+        // A primary AP-mode profile — or a BOOT-button-forced hotspot — stays in AP
+        // and never retries.
+        if (!apForced_ && apIsFallback_ && cfg_.mode == NetworkMode::Station &&
             !cfg_.ssid.empty() && nowMs - lastStationRetryMs_ >= 60000) {
             lastStationRetryMs_ = nowMs;
             failures_ = 0;
@@ -104,6 +137,20 @@ void Net::tick(uint32_t nowMs) {
 
     if (connecting_) {
         pollStation(nowMs);
+        return;
+    }
+
+    // A BOOT-button / web-forced hotspot must NEVER fall back to the station — even
+    // if softAP failed to come up (transient heap/radio). Keep retrying the AP
+    // instead of attempting the (possibly wrong) station config. Throttled so a hard
+    // softAP failure can't hammer the radio every loop. (lastStationRetryMs_ doubles
+    // as the retry clock here; the station-retry branch above is gated off by
+    // apForced_, so there is no conflict.)
+    if (apForced_) {
+        if (nowMs - lastStationRetryMs_ >= 2000) {
+            lastStationRetryMs_ = nowMs;
+            startAccessPoint(false);
+        }
         return;
     }
 

@@ -118,22 +118,43 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
             // not exceed its string's maxFret, and must be unique per (string, fret)
             // so two servos never claim the same finger position.
             if (s.function == "finger") {
-                if (s.fret < 1 || s.fret > (int)kMaxFret) {
-                    err(tag + ".fret",
-                        "A finger servo needs a fret in 1.." + std::to_string(kMaxFret) +
-                            " (fret 0 is the open string and has no servo)");
-                } else {
+                // Validate one fret position of a finger (side A `fret`, or a geared
+                // servo's side B `fretB`): real fret, reachable, and unique across
+                // ALL finger positions so two servos never claim the same finger.
+                auto checkFingerFret = [&](int fret, const std::string& field) {
+                    if (fret < 1 || fret > (int)kMaxFret) {
+                        err(tag + "." + field,
+                            "A finger servo needs a fret in 1.." + std::to_string(kMaxFret) +
+                                " (fret 0 is the open string and has no servo)");
+                        return;
+                    }
                     if (s.stringIndex >= 0 && s.stringIndex < (int)p.strings.size() &&
-                        s.fret > (int)p.strings[s.stringIndex].maxFret)
-                        warn(tag + ".fret",
+                        fret > (int)p.strings[s.stringIndex].maxFret)
+                        warn(tag + "." + field,
                              "Finger fret exceeds the string's maxFret and is unreachable");
-                    std::pair<int, int> key{s.stringIndex, s.fret};
+                    std::pair<int, int> key{s.stringIndex, fret};
                     for (auto& u : usedFingerFrets)
                         if (u == key)
-                            err(tag + ".fret",
+                            err(tag + "." + field,
                                 "String " + std::to_string(s.stringIndex) + " fret " +
-                                    std::to_string(s.fret) + " already has a finger servo");
+                                    std::to_string(fret) + " already has a finger servo");
                     usedFingerFrets.push_back(key);
+                };
+                checkFingerFret(s.fret, "fret");
+
+                // Geared / paired finger: this ONE servo also drives a SECOND fret
+                // (side B) on the same string through a gear. The two frets must be
+                // distinct and real, and side B needs its own in-window active pulse
+                // (restUs stays the neutral, both-lifted position).
+                if (s.fretB >= 0) {
+                    if (s.fretB == s.fret)
+                        err(tag + ".fretB",
+                            "A geared finger's two frets must differ (side A == side B)");
+                    else
+                        checkFingerFret(s.fretB, "fretB");
+                    if (s.activeBUs < s.pulseMinUs || s.activeBUs > s.pulseMaxUs)
+                        err(tag + ".activeBUs",
+                            "Side-B active pulse is outside the servo's min/max range");
                 }
             }
 
