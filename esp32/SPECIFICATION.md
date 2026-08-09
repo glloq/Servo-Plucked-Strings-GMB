@@ -1,11 +1,4 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Spécification héritée du projet
-> pas-à-pas d'origine. Dans cette version, le moteur pas-à-pas est remplacé par un
-> servo dédié à **chaque frette** ; les passages « stepper / homing / position mm /
-> fin de course » **ne s'appliquent pas**. La réception MIDI (sélection CC
-> corde/frette) et le grattage restent valables. Voir [`README.md`](README.md),
-> [`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/PIN_CONFIGURATION.md`](docs/PIN_CONFIGURATION.md).
-
-# Specification — Stepper-Plucked-Strings-GMB
+# Specification — Servo-Plucked-Strings-GMB
 
 **Version:** 1.0
 **Status:** initial specification
@@ -19,59 +12,49 @@
 
 # 1. Project purpose
 
-Stepper-Plucked-Strings-GMB is a modular MIDI controller intended for plucked or strummed string instruments.
+Servo-Plucked-Strings-GMB is a modular MIDI controller for plucked or strummed string instruments.
 
-The system must move a single mechanical finger along each string in order to select the note to play.
-
-Each string has its own axis:
-
-```text
-String 1 → stepper motor 1 → movable finger 1
-String 2 → stepper motor 2 → movable finger 2
-String 3 → stepper motor 3 → movable finger 3
-...
-String 6 → stepper motor 6 → movable finger 6
-```
+To select a note the system does not move a finger along the string: **each fret position on a string has its own dedicated finger servo**. Pressing the servo of the target fret stops the string at that fret; fret 0 is the open string and has no servo.
 
 For each string:
 
 ```text
-1 stepper motor
-1 linear axis
-1 carriage
-1 movable finger
-1 finger pressing mechanism
-1 pluck mechanism
-1 reference sensor
+one finger servo per equipped fret   (fret 0 = open, no servo)
+one pluck servo (individual plectrum)   OR   one strum servo
+optional strum lift, optional damper
 ```
 
-The stepper motor handles exclusively the longitudinal movement of the finger.
+Fret positions need not be contiguous — a string may carry fingers only on the frets actually equipped (for example 1, 3, 5, 12). A single actuator may drive two frets of the same string through a gear (a *geared finger*). Only one finger is ever pressed on a string at a time.
 
-Pressing, plucking and damping may be handled by servomotors or other auxiliary actuators, but they do not replace the stepper motor used to select the note.
+Note pitch is purely electrical:
+
+```text
+note = openNote + fret + capo + transpose
+```
+
+There is no carriage, no homing and no millimetre positioning.
 
 ---
 
 # 2. Position within the GMB family
 
-The project must remain specialized in order to avoid an overly complex universal firmware.
-
-The note-selection technologies will be split across separate projects:
+The project stays specialized to avoid an overly complex universal firmware. The note-selection technologies are split across separate projects:
 
 ```text
 Stepper-Plucked-Strings-GMB
-└── a stepper motor moves a single finger per string
+└── a stepper motor moves a single finger along each string
 
 Servo-Plucked-Strings-GMB
-└── several fixed servomotors actuate different positions
+└── one dedicated finger servo per fret position
 
 Solenoid-Plucked-Strings-GMB
-└── several fixed solenoids actuate different positions
+└── one fixed solenoid per fret position
 ```
 
 This specification concerns only:
 
 ```text
-Stepper-Plucked-Strings-GMB
+Servo-Plucked-Strings-GMB
 ```
 
 A common base may later be extracted for:
@@ -82,7 +65,7 @@ A common base may later be extracted for:
 * profile management;
 * diagnostics.
 
-The mechanical logic of each project must nonetheless remain independent.
+The mechanical logic of each project nonetheless remains independent.
 
 ---
 
@@ -106,8 +89,6 @@ The project must not impose:
 * a specific tuning;
 * a fixed number of strings;
 * a fixed number of frets;
-* a single vibrating length;
-* a single transmission model;
 * a single type of servomotor;
 * a fixed GPIO wiring.
 
@@ -115,18 +96,16 @@ The project must not impose:
 
 # 4. Excluded functions
 
-This version must not handle:
+This project must not handle:
 
 * bowed string instruments;
-* linear bows;
-* bow wheels;
-* DC friction motors;
-* BLDC motors;
+* linear bows and bow wheels;
+* DC friction or BLDC bowing motors;
 * bow speed regulation;
-* a matrix of fixed servomotor-driven fingers;
-* a matrix of fixed solenoid-driven fingers;
-* multiple movable fingers on the same string;
-* a stepper motor shared between several strings.
+* note selection by a finger moved along the string on a carriage (that is the **Stepper-Plucked-Strings-GMB** project);
+* note selection by a matrix of fixed solenoids (that is the **Solenoid-Plucked-Strings-GMB** project).
+
+A matrix of fixed servomotor-driven fingers is exactly what this project *is*, so it is not an exclusion.
 
 ---
 
@@ -134,82 +113,54 @@ This version must not handle:
 
 ## 5.1 String channel
 
-Each string constitutes an independent channel.
+Each string is an independent channel: an array of fixed finger servos, one per equipped fret, plus one plucker (or strummer).
 
 ```text
-Stepper motor
-        ↓
-Mechanical transmission
-        ↓
-Longitudinal carriage
-        ↓
-Single finger
-        ↓
-Position on the string
+                    one string
+   nut  [finger f1][finger f2] … [finger fN]  bridge
+    ╞═════●═════════●═════════════●════════════╡  ← the string
+    0     1         2             N   (fret positions, gaps allowed)
+    └────── pluck / strum servo sets it in vibration ──────┘
 ```
 
-The transmission may use:
-
-* GT2 belt;
-* trapezoidal lead screw;
-* ball screw;
-* rack and pinion;
-* cable;
-* experimental mechanism.
-
-The firmware must use a physical unit that is independent of the transmission type:
-
-```text
-position in millimeters
-        ↓
-conversion
-        ↓
-position in motor steps
-```
+Pressing the finger of fret F stops the string at fret F; releasing every finger leaves the open string (fret 0). At most one finger presses a given string at a time.
 
 ## 5.2 Finger pressing
 
-Once the carriage is positioned, the finger must be able to:
+Each equipped fret has a dedicated finger servo that can:
 
-* descend onto the string;
-* hold the string;
-* lift back up;
-* stay raised during movements;
-* stay raised for an open string.
+* press the string onto the fret (active pulse);
+* lift clear of the string (rest pulse);
+* stay lifted for the open string and while idle.
 
-The reference mechanism uses one servomotor per string.
+To play a new fret the firmware releases the currently pressed finger, then presses the target finger — never two fingers of one string at once. An idle finger cuts its PWM (`disableAtRest`) so it draws almost no current.
+
+A **geared finger** lets one servo drive two frets of the same string: two antagonistic fingers on a gear, neutral = both lifted, so only one ever touches the string. Wide (low) frets can be geared to halve the servo count; narrow (high) frets keep a plain single finger. The two mix per servo. See [`docs/GEARED_FINGERS.md`](docs/GEARED_FINGERS.md).
 
 ## 5.3 Setting the string in vibration
 
-Two modes must be provided.
+Two modes are provided, mixable across strings on the same instrument.
 
 ### Individual pluck
 
-Each string has its own pluck actuator.
+Each string has its own pluck (plectrum) servo:
 
 ```text
 1 pluck servo per string
 ```
 
-This mode allows:
-
-* simultaneous chords;
-* repeated notes;
-* individual tremolo;
-* individual velocity control;
-* precise triggering of each string.
+This allows simultaneous chords, repeated notes, per-string tremolo, per-string velocity and precise triggering.
 
 ### Per-string strum
 
-Each string may use its own strum servo instead of an individual pluck.
+A string may instead use a strum servo:
 
-It must allow:
-
-* upward strum;
-* downward strum;
-* adjustable speed;
-* return to rest position;
+* up-stroke and down-stroke;
+* adjustable stroke;
+* return to rest;
 * synchronization with the fingers.
+
+An optional per-string **strum lift** lowers the strummer onto the string for a stroke and raises it afterwards (rest = raised).
 
 The same instrument may combine strings that pluck with strings that strum.
 
@@ -217,109 +168,83 @@ The same instrument may combine strings that pluck with strings that strum.
 
 # 6. Target capacity
 
-| Resource                | Minimum |   Maximum |
-| ----------------------- | ------: | --------: |
-| Strings                 |       1 |         6 |
-| Stepper motors          |       1 |         6 |
-| Movable fingers         |       1 |         6 |
-| Reference sensors       |       1 |         6 |
-| Opposite endstops       |       0 |         6 |
-| Pressing servos         |       1 |         6 |
-| Pluck servos            |       0 |         6 |
-| Auxiliary servos        |       0 |         4 |
-| Total servo outputs     |       1 |        16 |
-| Auxiliary power outputs |       0 |         8 |
-| Saved profiles          |       1 | 8 minimum |
+| Resource                            |     Minimum |               Maximum |
+| ----------------------------------- | ----------: | --------------------: |
+| Strings                             |           1 |                     6 |
+| Finger servos per string            | 0 (open only) | 1 per equipped fret (to fret 24) |
+| Pluck **or** strum servo            |           0 |          1 per string |
+| Strum-lift / damper                 |           0 |     1 per string each |
+| PCA9685 boards (I²C 0x40–0x47)      |           0 |                     8 |
+| Channels per PCA9685                |           — |                    16 |
+| Direct-GPIO servos (LEDC)           |           0 |                     8 |
+| Shared damper / auxiliary servos    |           0 |                 8 aux |
+| Saved profiles                      | 8 (minimum) |                     — |
 
-The following relationship must be preserved:
+The system must guarantee at all times:
 
 ```text
-number of active strings
-=
-number of active stepper axes
-=
-number of movable fingers
+at most one finger pressed per string
 ```
+
+Releasing the old finger before pressing the new one keeps the peak current bounded and never frets a string in two places at once.
+
+Recommended wiring: **one PCA9685 per string** — its per-fret fingers and its plucker fit within the 16 channels; more strings simply add boards. The mapping stays free per servo, and any servo may run on a direct GPIO instead.
 
 ---
 
 # 7. Electronic architecture
 
 ```text
-                         Wi-Fi
-                           │
-               MIDI + Web configuration
-                           │
-                           ▼
-                       ESP32-S3
-                           │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
- STEP/DIR command         I²C              Sensors
-        │                  │                  │
- 1 to 6 drivers         PCA9685          HOME / LIMIT
-        │                  │
- 1 to 6 motors      1 to 16 servos
+                        Wi-Fi
+                          │
+             MIDI (UDP 5006) + Web configuration
+                          │
+                          ▼
+                      ESP32-S3
+             ┌────────────┴─────────────┐
+             │                          │
+          I²C bus                 direct GPIO (LEDC)
+             │                          │
+   PCA9685 ×1..8 (0x40–0x47)     up to 8 servos
+   16 channels each                     │
+             └────────────┬─────────────┘
+                          ▼
+        servos (finger per fret + pluck / strum / damper)
+        /OE (PCA) + detach (direct) = hardware safety
 ```
 
 ## 7.1 Main controller
 
-The reference platform must use an ESP32-S3.
-
-The controller must handle:
+The reference platform is an ESP32-S3. The controller handles:
 
 * reception of MIDI commands over Wi-Fi;
 * hosting of the Web interface;
 * note allocation;
-* trajectory generation;
-* state machine management;
-* control of the PCA9685;
-* sensor monitoring;
+* per-string state machines and the servo scheduler;
+* control of the PCA9685 and the direct-GPIO servos;
+* the current-draw governor;
 * profile storage;
 * diagnostics;
 * safety.
 
-The ESP32-S3 has a GPIO matrix that allows routing many peripheral signals to different GPIOs. This flexibility makes it possible to use board profiles and a configurable pin assignment.
-
-## 7.2 Stepper drivers
-
-The reference driver must be the TMC2209 or a STEP/DIR-compatible driver.
-
-Each axis must have:
-
-```text
-STEP
-DIR
-ENABLE
-HOME
-LIMIT optional
-DIAG optional
-UART optional
-```
-
-The first prototype board must accept pluggable driver modules.
-
-This makes the following easier:
-
-* replacing a driver;
-* testing with several models;
-* maintenance;
-* adapting the motor current;
-* prototyping before creating an integrated PCB.
+The ESP32-S3 GPIO matrix allows routing peripheral signals to different GPIOs, which makes board profiles and a configurable pin assignment possible.
 
 ## 7.3 Servomotors
 
-A PCA9685 must provide up to 16 servo outputs.
+A servo's PWM signal comes from a **PCA9685 channel** or a **direct ESP32 GPIO** (LEDC), mixable per servo, so the instrument works with or without a PCA9685.
 
-Recommended allocation:
+* Up to **8 PCA9685** on the I²C bus (addresses 0x40–0x47), 16 channels each.
+* Up to **8 direct-GPIO** servos (the ESP32-S3 has 8 LEDC channels).
 
-| Channels | Use                                          |
-| -------- | -------------------------------------------- |
-| 0 to 5   | finger pressing                              |
-| 6 to 11  | individual pluck                             |
-| 12 to 15 | dampers or auxiliary functions               |
+Recommended allocation on a per-string PCA9685:
 
-The `OE` output of the PCA9685 must be connected to a safety pin in order to immediately neutralize the servos.
+| Channels          | Use                                    |
+| ----------------- | -------------------------------------- |
+| finger per fret   | one channel per equipped fret          |
+| pluck / strum     | one channel for the string's plucker   |
+| remaining         | optional strum lift / damper           |
+
+The PCA9685 `OE` line is tied to a safety pin (active-low) so every PCA servo is neutralised instantly (§21). Direct-GPIO servos are detached on stop.
 
 ---
 
@@ -327,9 +252,7 @@ The `OE` output of the PCA9685 must be connected to a safety pin in order to imm
 
 ## 8.1 Initial version: Wi-Fi
 
-The first version must operate exclusively over Wi-Fi for external communications.
-
-Two network modes must be offered.
+The first version operates exclusively over Wi-Fi for external communications. Two network modes are offered.
 
 ### Access point mode
 
@@ -337,19 +260,17 @@ The ESP32 creates its own Wi-Fi network.
 
 ```text
 Default SSID:
-Stepper-Plucked-Strings-GMB
+Servo-Plucked-Strings-GMB
 
 Configuration address:
 displayed local address or captive portal
 ```
 
-This mode must allow an initial configuration without a router.
+This mode allows an initial configuration without a router.
 
 ### Wi-Fi client mode
 
-The ESP32 joins the user's local network.
-
-The system must store:
+The ESP32 joins the user's local network. The system stores:
 
 * SSID;
 * password;
@@ -358,20 +279,13 @@ The system must store:
 * mDNS name;
 * reconnection parameters.
 
-If the connection fails several times, the system must automatically fall back to access point mode.
+If the connection fails several times, the system automatically falls back to access point mode.
 
 ## 8.2 Initial MIDI transport
 
-The transport layer must be separated from the internal MIDI engine.
+The transport layer is separated from the internal MIDI engine. The first version receives MIDI as raw MIDI byte packets over **Wi-Fi UDP on port 5006**: notes, the CC string/fret selectors (`CC20` = string, `CC21` = fret), and GMB SysEx (header `F0 7D 00`). `CC120` (All Sound Off) and `CC123` (All Notes Off) trigger a panic (§21).
 
-Wi-Fi inputs may include:
-
-* binary WebSocket;
-* RTP-MIDI;
-* configurable UDP protocol;
-* test commands from the Web interface.
-
-All transports must produce a common internal event:
+Every transport produces the same internal event:
 
 ```cpp
 struct MidiEvent {
@@ -386,7 +300,7 @@ struct MidiEvent {
 
 ## 8.3 Future extensions
 
-The architecture must make it possible to add later:
+The architecture makes it possible to add later:
 
 ```text
 BLE MIDI
@@ -400,10 +314,10 @@ Adding a new transport must not modify:
 
 * the string controller;
 * the note allocator;
-* motion management;
+* the servo scheduler;
 * mechanical profiles.
 
-GPIO19 and GPIO20 must remain reserved by default in order to preserve the ability to later use the native USB of the ESP32-S3. These pins are used by the component's native USB-JTAG/USB interface.
+GPIO19 and GPIO20 remain reserved by default to preserve the ability to later use the native USB of the ESP32-S3 (its USB-JTAG / USB interface).
 
 ---
 
@@ -411,23 +325,13 @@ GPIO19 and GPIO20 must remain reserved by default in order to preserve the abili
 
 ## 9.1 Objective
 
-The interface must allow a beginner to configure the instrument without modifying the source code.
-
-It must work from:
-
-* computer;
-* tablet;
-* phone.
-
-No dedicated application must be required.
+The interface must let a beginner configure the instrument without modifying the source code. It must work from a computer, tablet or phone, with no dedicated application.
 
 ## 9.2 Two interface levels
 
 ### Simplified mode
 
-Intended for beginners.
-
-It must offer:
+Intended for beginners. It offers:
 
 * step-by-step wizard;
 * recommended values;
@@ -439,156 +343,63 @@ It must offer:
 
 ### Advanced mode
 
-Intended for fine-tuning.
-
-It must allow:
+Intended for fine-tuning. It allows:
 
 * manual GPIO assignment;
-* speed adjustment;
-* acceleration adjustment;
-* delay adjustment;
+* servo timing adjustment (travel / settle / delays);
 * modification of velocity curves;
 * access to diagnostics;
-* editing of detailed parameters;
+* editing of detailed servo parameters;
 * JSON import and export.
 
 ---
 
 # 10. First-configuration wizard
 
-The interface must guide the user in the following order.
+The web wizard guides the user through **eight steps**, in Simplified or Advanced mode.
 
-## Step 1 — Identification
+## Step 1 — Instrument
 
-* instrument name;
-* optional description;
-* number of strings;
-* instrument type;
-* proposed tuning;
-* maximum number of frets.
+Instrument name and description, type, number of strings (1–6), tuning preset, maximum frets, capo/transpose, network mode. The board is fixed to ESP32-S3-DevKitC-1; the board-level servo pins (SDA/SCL/SERVO_OE) are assigned automatically when a PCA9685 is used.
 
-## Step 2 — Board selection
+## Step 2 — Strings & tuning
 
-The user selects:
+Per string: enabled, open MIDI note, highest reachable fret (`maxFret`).
 
-* ESP32 board model;
-* revision;
-* Flash capacity;
-* presence of PSRAM;
-* module variant.
+## Step 3 — Servos & frets
 
-The board profile automatically determines:
+Per string, place the actuators:
 
-* the available GPIOs;
-* the reserved GPIOs;
-* the recommended GPIOs;
-* the GPIOs to use with caution;
-* the functions present on the board.
+* one **finger servo per fret** to equip (frets may be non-contiguous);
+* one **pluck** or **strum** servo; optional **strum lift** and **damper**;
+* optional **geared finger** — one servo for two frets (`fretB` / `activeBUs`);
+* per servo: **source** (a PCA9685 channel on board 0–7, or a direct GPIO), rest/active pulses, inversion.
 
-The initial profile must support:
+## Step 4 — Install helper
 
-```text
-ESP32-S3-DevKitC-1
-```
+A guided, fret-by-fret assistant to set each finger's contact angle: select the fret → press the finger → adjust the active pulse until the note frets cleanly → test the note → next.
 
-The DevKitC-1 board exposes most of the module's GPIOs, but some variants use GPIO35, GPIO36 and GPIO37 for the internal Flash or PSRAM. These pins must therefore not be offered without checking the selected variant.
+## Step 5 — MIDI
 
-## Step 3 — Automatic assignment
+Global channel / Omni, transpose, chord-grouping window, velocity curve, saturation strategy, sustain, and the CC string/fret selectors (`CC20` / `CC21`).
 
-The following button must be offered:
+## Step 6 — Power
 
-```text
-Automatically assign the pins
-```
+Servo-rail sizing and current management: `maxConcurrentMoves`, `staggerMs`, and per-servo `disableAtRest`.
 
-The system chooses a conflict-free configuration based on:
+## Step 7 — Test
 
-* the number of strings;
-* the enabled interfaces;
-* the selected board;
-* future USB usage;
-* the need to preserve the diagnostic port;
-* the I²C peripherals;
-* the number of sensors.
+Exercise each finger, each pluck/strum, each note, each string, a chord, and the general stop (`/OE`).
 
-## Step 4 — Mechanical configuration
+## Step 8 — Validation
 
-For each string:
-
-* open MIDI note;
-* maximum number of frets;
-* vibrating length;
-* transmission type;
-* motor steps per revolution;
-* microstepping;
-* travel per revolution;
-* direction inversion;
-* maximum speed;
-* maximum acceleration;
-* rest position.
-
-## Step 5 — Homing
-
-For each axis:
-
-* sensor enabled;
-* sensor GPIO;
-* NO or NC contact;
-* active level;
-* homing direction;
-* fast speed;
-* slow speed;
-* back-off distance;
-* offset after origin;
-* timeout;
-* maximum search limit.
-
-## Step 6 — Servo calibration
-
-For each servo:
-
-* PCA9685 channel;
-* rest position;
-* active position;
-* minimum and maximum limits;
-* inverted direction;
-* travel time;
-* settling time;
-* deactivation at rest.
-
-## Step 7 — Note calibration
-
-Two methods must be offered:
-
-```text
-Automatic fret calculation
-Manual calibration of each position
-```
-
-## Step 8 — Test
-
-The user must be able to test:
-
-* each motor;
-* each sensor;
-* each finger;
-* each pick;
-* each note;
-* each string;
-* a chord;
-* the general stop.
-
-## Step 9 — Validation
-
-The interface displays:
+The interface shows:
 
 ```text
 Valid configuration
 ```
 
-or a precise list of the problems.
-
-No actuator must be activated in normal mode as long as critical errors are not corrected.
+or a precise list of the problems. No actuator is armed while critical errors remain.
 
 ---
 
@@ -596,9 +407,7 @@ No actuator must be activated in normal mode as long as critical errors are not 
 
 ## 11.1 Principle
 
-The firmware must not use a single global list identical for all boards.
-
-Each board must have a profile:
+The firmware must not use a single global list identical for all boards. Each board has a profile:
 
 ```cpp
 struct BoardProfile {
@@ -608,7 +417,7 @@ struct BoardProfile {
 };
 ```
 
-Each GPIO must be described by capabilities:
+Each GPIO is described by capabilities:
 
 ```cpp
 struct PinCapability {
@@ -640,93 +449,71 @@ Red     → reserved or incompatible
 Gray    → already in use
 ```
 
-By default, a beginner must see only the recommended GPIOs.
-
-The yellow GPIOs must be accessible only in advanced mode, with an explanation.
-
-The red GPIOs must not be selectable.
+By default a beginner sees only the recommended GPIOs. Yellow GPIOs are accessible only in advanced mode, with an explanation. Red GPIOs are not selectable.
 
 ## 11.3 List filtered according to use
 
-When configuring a `STEP` signal, the list must offer only the GPIOs that are:
+Servo-per-fret needs only a few board-level signals; every finger and plucker rides the PCA9685 bus or a direct GPIO.
 
-* capable of operating as an output;
-* suitable for fast signals;
-* not reserved;
-* not assigned;
-* compatible with the step generator.
+For `SDA` and `SCL`, the list offers only I²C-capable GPIOs (a recommended default pair 40 / 41), none already in use.
 
-For `HOME` or `LIMIT`, the list must offer only the GPIOs that are:
+For `SERVO_OE` (the PCA safety line) and a **direct-GPIO servo**, the list offers usable output GPIOs that are not reserved and not already assigned.
 
-* capable of operating as an input;
-* compatible with interrupts;
-* having a suitable bias or using an external resistor;
-* not assigned.
-
-For `SDA` and `SCL`, the list must offer:
-
-* the GPIOs usable by I²C;
-* a recommended default pair;
-* no pin already in use.
-
-For a future USB interface, GPIO19 and GPIO20 must be automatically reserved.
+For a future USB interface, GPIO19 and GPIO20 are automatically reserved.
 
 ## 11.4 ESP32-S3 restrictions
 
 The pin manager must be aware of at least the following restrictions:
 
 * GPIO0, GPIO3, GPIO45 and GPIO46 are strapping pins;
-* GPIO19 and GPIO20 are used by the native USB-JTAG/USB;
-* GPIO26 to GPIO32 are normally tied to the Flash or the PSRAM;
+* GPIO19 and GPIO20 are used by the native USB-JTAG / USB;
+* GPIO26 to GPIO32 are tied to the on-chip Flash / PSRAM;
 * GPIO33 to GPIO37 may also be used by the memory on some variants;
 * GPIO48 drives the RGB LED on the DevKitC-1;
 * GPIO43 and GPIO44 are tied to the main UART port of the DevKitC-1.
 
-These pins are not necessarily unusable in all cases, but they must be classified according to the exact board profile.
+These pins are classified according to the exact board profile.
 
 ## 11.5 Recommended profile for ESP32-S3-DevKitC-1
 
-Initial example of automatic assignment:
+Automatic assignment places only the board-level servo signals:
 
-| Function              | Proposed GPIOs         |
-| --------------------- | ---------------------- |
-| STEP 1 to 6           | 4, 5, 6, 7, 15, 16     |
-| DIR 1 to 6            | 17, 18, 8, 9, 10, 11   |
-| HOME 1 to 6           | 12, 13, 14, 21, 38, 39 |
-| I²C SDA               | 40                     |
-| I²C SCL               | 41                     |
-| Global ENABLE         | 42                     |
-| PCA9685 safety output | 47                     |
+| Function             | Proposed GPIO |
+| -------------------- | ------------- |
+| I²C SDA (PCA9685)    | 40            |
+| I²C SCL (PCA9685)    | 41            |
+| PCA9685 /OE (safety) | 47            |
 
-This assignment constitutes an initial software profile and not a universal rule.
+Direct-GPIO servos, when used, are picked from a suggested free-pin list:
 
-It must be replaceable from the interface.
+```text
+SERVO: 4, 5, 6, 7, 15, 16, 17, 18
+```
 
 Pins kept reserved by default:
 
-| GPIO       | Reservation                           |
-| ---------- | ------------------------------------- |
-| 19, 20     | future USB                            |
-| 43, 44     | programming and diagnostic UART       |
-| 0          | boot/BOOT                             |
-| 3, 45, 46  | strapping                             |
-| 48         | onboard LED                           |
-| 35, 36, 37 | dependency on the Flash/PSRAM variant |
+| GPIO            | Reservation                       |
+| --------------- | --------------------------------- |
+| 19, 20          | future native USB                 |
+| 43, 44          | programming / diagnostic UART     |
+| 0               | BOOT / strapping                  |
+| 3, 45, 46       | strapping                         |
+| 48              | on-board RGB LED                  |
+| 26–32, 35–37    | on-chip Flash / PSRAM             |
+
+GPIO33 and GPIO34 are usable with caution (memory-dependent on some variants). This is an initial software profile, replaceable from the interface.
 
 ## 11.6 Conflict detection
 
-The validator must prevent:
+The validator prevents:
 
 * two signals using the same GPIO;
-* an input assigned to an unavailable pin;
-* a STEP signal on an incompatible pin;
-* the use of a reserved GPIO;
+* a signal on a pin that cannot support it (e.g. I²C on a non-I²C pin);
+* the use of a reserved / strapping / Flash-PSRAM / on-board-LED GPIO;
 * the use of GPIO19 or GPIO20 when USB is reserved;
-* the selection of a Flash/PSRAM pin;
-* the simultaneous use of an onboard LED and the same GPIO;
-* the unintentional replacement of the diagnostic port.
+* the unintentional loss of the diagnostic UART.
 
-Each error must explain:
+Each error explains:
 
 ```text
 why the pin is incompatible
@@ -736,266 +523,105 @@ which function already uses the pin
 
 ---
 
-# 12. Stepper motor configuration
-
-Each axis must have the following parameters:
-
-```text
-axis enabled
-GPIO STEP
-GPIO DIR
-GPIO ENABLE or ENABLE group
-GPIO HOME
-GPIO LIMIT optional
-GPIO DIAG optional
-inverted motor direction
-inverted ENABLE level
-motor steps per revolution
-microstepping
-mechanical travel per revolution
-steps per millimeter
-maximum speed
-maximum acceleration
-fast homing speed
-slow homing speed
-back-off distance
-reference offset
-minimum position
-maximum position
-deactivation delay
-indicative motor current
-```
-
-## 12.1 Assisted calculation
-
-The interface must automatically compute the steps per millimeter.
-
-### Belt
-
-```text
-stepsPerMm =
-stepsPerRevolution × microsteps
-────────────────────────────
-pulleyTeeth × beltPitch
-```
-
-### Screw
-
-```text
-stepsPerMm =
-stepsPerRevolution × microsteps
-────────────────────────────
-leadPerRevolution
-```
-
-The user must be able to select:
-
-```text
-GT2 belt
-Screw
-Custom value
-```
-
----
-
-# 13. Homing
-
-Homing must be non-blocking and independent for each string.
-
-```text
-CHECK_SENSOR
-      ↓
-SEEK_FAST
-      ↓
-SENSOR_DETECTED
-      ↓
-BACKOFF
-      ↓
-SEEK_SLOW
-      ↓
-SET_ZERO
-      ↓
-MOVE_TO_OFFSET
-      ↓
-READY
-```
-
-## 13.1 Parallel homing
-
-The motors may perform their homing simultaneously.
-
-An option must allow:
-
-```text
-Simultaneous homing
-Sequential homing
-Homing by groups
-```
-
-The sequential mode may be used when the power supply is limited.
-
-## 13.2 Detected faults
-
-* sensor active at startup;
-* sensor impossible to release;
-* sensor never reached;
-* unstable sensor;
-* timeout;
-* maximum distance exceeded;
-* inconsistent activation of HOME and LIMIT.
-
-A faulty axis must be disabled without causing unexpected movement on the other axes.
-
----
-
 # 14. Note configuration
 
 ## 14.1 Tuning
 
-Each string has:
+Each string has an open MIDI note and a highest reachable fret. **Which** frets actually carry a finger servo is derived from the servo list and need not be contiguous. The system offers predefined tunings — guitar, bass, ukulele, mandolin, banjo, custom — that remain fully modifiable. A fretted note is:
 
 ```text
-open MIDI note
-maximum fret included
-position of each fret
+note = openNote + fret + capo + transpose
 ```
 
-The system must offer predefined tunings:
+## 14.2 Optional mechanical spacing aid
 
-* guitar;
-* bass;
-* ukulele;
-* mandolin;
-* banjo;
-* custom configuration.
-
-The predefined tunings must remain fully modifiable.
-
-## 14.2 Theoretical calculation
-
-The theoretical position of a fret is:
+For laying out the fingers physically, the equal-tempered position of a fret along the string is:
 
 ```text
-position =
-vibrating length × (1 - 2^(-fret / 12))
+position = scaleLengthMm × (1 − 2^(−fret / 12))
 ```
 
-## 14.3 Manual calibration
+This is only a mechanical construction aid (`fretPositionMm`). It is **not** used at runtime: note selection is which fret's servo is pressed, and pitch is `openNote + fret + capo + transpose`.
 
-For each fret, the user must be able to:
+## 14.3 Finger contact-angle calibration
+
+Each finger servo is calibrated for the pulse at which it frets its note cleanly, via the guided Install helper (§10, step 4):
 
 1. select the fret;
-2. move the motor with buttons;
-3. test the note;
-4. adjust the position;
-5. save the exact position.
+2. press its finger servo;
+3. adjust the active pulse (`activeUs`, or `activeBUs` for a geared side B);
+4. test the note;
+5. save the calibrated pulse.
 
-The calibrated table must take priority over the theoretical position.
-
-## 14.4 Compensation
-
-The system must allow:
-
-* individual correction of a fret;
-* correction according to the direction of movement;
-* compensation for mechanical backlash;
-* global string offset;
-* forward and backward software limit.
+For a geared finger both sides (`activeUs` / `activeBUs`) are calibrated around the neutral rest (`restUs`).
 
 ---
 
 # 15. Servo configuration
 
-Each servo must use pulses calibrated in microseconds.
-
-Parameters:
+Each servo is calibrated in microsecond pulses. Parameters (see `ServoConfig`):
 
 ```text
-servo enabled
-PCA9685 channel
-function
-minimum pulse
-maximum pulse
-rest position
-active position
-position A
-position B
-inverted direction
-travel time
-settling time
-deactivation at rest
+enabled
+function                 finger / pluck / strum / strumLift / damper / sharedDamper / aux
+stringIndex              owning string, or -1 for a shared/global servo
+fret                     finger role: the fret this finger presses (-1 otherwise)
+fretB, activeBUs         geared finger: second fret and its press pulse
+source                   pca | gpio
+pcaBoard (0–7), channel (0–15)   source = pca
+gpio                     source = gpio
+pulseMinUs, pulseMaxUs
+restUs                   rest / neutral position
+activeUs                 pressed / stroke position
+inverted
+travelMs, settleMs
+disableAtRest
+alternateDirection, activeAltUs   alternating down/up strokes
+strokeMs                 time the stroke stays engaged
+minStrikeUs              guaranteed minimum strike depth
+engageDelayMs            strum-lift pause before the stroke fires
 ```
 
 ## 15.1 Finger
 
-The finger servo must have:
+Raised = `restUs`, pressed = `activeUs`; `travelMs` / `settleMs` time the motion; `disableAtRest` cuts PWM when lifted. A geared finger adds a second fret at `activeBUs` (`fretB`), with `restUs` as the both-lifted neutral.
 
-```text
-raised position
-pressed position
-delay after press
-delay after release
-```
+## 15.2 Pluck / strum
 
-## 15.2 Individual pick
-
-The pick must have:
-
-```text
-left position
-right position
-rest position
-automatic alternation
-minimum travel
-maximum travel
-movement speed or delay
-```
+`restUs` ↔ `activeUs` define the stroke; `strokeMs` sets how long it stays engaged (independent of the return timing); `alternateDirection` / `activeAltUs` alternate down- and up-strokes; `minStrikeUs` guarantees a minimum strike so a low-velocity note still catches the string; a strum lift uses `engageDelayMs` to pause once lowered, before the stroke fires.
 
 ## 15.3 Open string
 
-For an open string:
-
-```text
-finger raised
-motor possibly moved to a safety position
-plucking allowed directly
-```
-
-An advanced option may allow using the finger on fret zero for a specific mechanism.
+For the open string (fret 0) there is no finger servo: every finger stays lifted and the string is plucked directly. An advanced option may fit a fret-0 finger for a specific mechanism.
 
 ---
 
 # 16. State machines
 
-Each string must use an independent state machine.
+Each string runs an independent, non-blocking state machine (`StringState`):
 
 ```text
-DISABLED
-HOMING
-IDLE
-RELEASING_FINGER
-MOVING
-PRESSING_FINGER
-SETTLING
-READY_TO_PLUCK
-PLUCKING
-SUSTAINING
-DAMPING
-CANCELLING
-FAULT
+Disabled
+Idle
+ReleasingFinger
+Moving            re-fretting: select the target fret's finger (not a carriage)
+PressingFinger
+Settling
+ReadyToPluck
+Plucking
+Sustaining
+Damping
+Cancelling
+Fault
 ```
 
-No blocking `delay()` must be used during play.
+There is **no** homing state. No blocking `delay()` is used during play. The play sequence for a note is: release the current finger → press the target-fret finger → settle → pluck.
 
-Each command must have an identifier.
-
-If a command is cancelled or replaced, all deferred actions associated with its old identifier must be ignored.
-
-This prevents:
+Every command carries an identifier. If a command is cancelled or replaced, all deferred actions tagged with the old identifier are ignored. This prevents:
 
 * a pluck after a Note Off;
 * a delayed press;
-* the execution of an old position;
+* the execution of a stale position;
 * an attack after a panic.
 
 ---
@@ -1004,33 +630,29 @@ This prevents:
 
 ## 17.1 Principle
 
-A note must be assigned to a string that is:
+A note is assigned to a string that is:
 
 * capable of playing the note;
-* initialized;
+* enabled;
 * fault-free;
 * available;
 * requiring the shortest preparation time.
 
 ## 17.2 Chords
 
-Notes received within a configurable window must be grouped.
-
-Initial value:
+Notes received within a configurable window are grouped. Initial value:
 
 ```text
 3 ms
 ```
 
-The allocator must look for a global assignment.
-
-Order of priorities:
+The allocator looks for a global assignment. Order of priorities:
 
 1. play as many notes as possible;
 2. respect the mechanical limits;
 3. minimize the time before plucking;
 4. minimize movements;
-5. keep fingers that are already well positioned;
+5. keep fingers already well positioned;
 6. limit direction changes.
 
 ## 17.3 Saturation strategies
@@ -1046,13 +668,13 @@ replace the oldest note
 monophonic mode
 ```
 
-The choice must be accessible in the Web interface.
+The choice is accessible in the Web interface.
 
 ---
 
 # 18. MIDI parameters
 
-The interface must allow:
+The interface allows:
 
 * global MIDI channel;
 * Omni mode;
@@ -1070,8 +692,8 @@ The interface must allow:
 
 Velocity may act on:
 
-* pick travel;
-* pick speed;
+* strike depth (`minStrikeUs` … `activeUs`);
+* stroke duration (`strokeMs`);
 * attack delay;
 * pluck profile.
 
@@ -1080,7 +702,7 @@ Curves offered:
 ```text
 linear
 soft
-strong
+hard
 exponential
 custom
 ```
@@ -1089,7 +711,7 @@ custom
 
 # 19. Web dashboard
 
-The main page must display:
+The main page displays:
 
 ```text
 general status
@@ -1107,16 +729,10 @@ STOP button
 For each string:
 
 ```text
-status
-current note
+state
 current fret
-motor position
-target position
-remaining distance
-HOME status
-LIMIT status
-finger status
-pick status
+finger (up / down)
+plectrum (rest / strike)
 last fault
 ```
 
@@ -1124,9 +740,7 @@ last fault
 
 # 20. Saving configurations
 
-The system must store at least eight profiles.
-
-Functions:
+The system stores at least eight profiles. Functions:
 
 * create;
 * copy;
@@ -1137,28 +751,28 @@ Functions:
 * restore;
 * set the startup profile.
 
-The exchange format must be JSON.
-
-Simplified example:
+The exchange format is JSON. Simplified example:
 
 ```json
 {
-  "project": "Stepper-Plucked-Strings-GMB",
+  "project": "Servo-Plucked-Strings-GMB",
   "profileVersion": 1,
-  "instrument": {
-    "name": "Ukulele 4 strings",
-    "stringCount": 4
-  },
+  "instrument": { "name": "Ukulele GCEA", "stringCount": 4, "type": "ukulele" },
   "board": {
     "profile": "esp32-s3-devkitc-1",
     "reserveUsb": true,
     "automaticPinAssignment": true
   },
-  "network": {
-    "mode": "station",
-    "hostname": "gmb-ukulele"
-  },
-  "strings": []
+  "network": { "mode": "accessPoint", "apSsid": "Servo-Plucked-Strings-GMB" },
+  "strings": [
+    { "enabled": true, "openNote": 67, "maxFret": 12 }
+  ],
+  "servos": [
+    { "enabled": true, "function": "finger", "stringIndex": 0, "fret": 1,
+      "source": "pca", "pcaBoard": 0, "channel": 0, "restUs": 1000, "activeUs": 1800 },
+    { "enabled": true, "function": "pluck", "stringIndex": 0,
+      "source": "gpio", "gpio": 4, "restUs": 1500, "activeUs": 1900 }
+  ]
 }
 ```
 
@@ -1173,33 +787,33 @@ The Wi-Fi password must not appear in ordinary exports, except with an explicit 
 At power-on:
 
 ```text
-drivers disabled
-servos neutralized
+/OE held high — all PCA servos off
+direct-GPIO servos detached
 auxiliary outputs cut
 MIDI queues empty
 profile checked
 GPIOs validated
 ```
 
+The `/OE` line is pulled low (servos live) only once the instrument is armed.
+
 ## 21.2 Emergency stop
 
-A hardware stop must be able to:
+A hardware stop (optional debounced E-stop input) must be able to:
 
-* disable the drivers;
-* disable the PCA9685 via `OE`;
+* pull the PCA9685 `/OE` high (all PCA servos off);
+* detach the direct-GPIO servos;
 * neutralize the auxiliary outputs;
 * keep the ESP32 powered.
 
 ## 21.3 Software panic
 
-The panic must:
+A panic — raised by `CC120` / `CC123`, the E-stop, or an internal fault — must:
 
 * flush the MIDI queue;
-* cancel all movements;
-* cancel all plucks;
-* raise the fingers;
-* neutralize the servos;
-* disable the motors;
+* cancel all pending moves and plucks;
+* release (lift) the fingers;
+* pull `/OE` high and detach the direct servos;
 * record the cause.
 
 ## 21.4 Loss of Wi-Fi
@@ -1210,15 +824,15 @@ Configurable behavior:
 finish active notes then stop
 stop immediately
 continue commands already queued
-return to standby without disabling the motors
+return to standby without disarming
 ```
 
 Default behavior:
 
 ```text
 cancellation of pending commands
-controlled release
-return to the READY state
+controlled release of the fingers
+stay armed and return to the READY state
 ```
 
 ---
@@ -1228,24 +842,21 @@ return to the READY state
 Recommended rails:
 
 ```text
-24 V        stepper motors
-5 to 7.4 V  servomotors
-5 V         logic
-3.3 V       ESP32-S3
+5–6 V   servo rail (separate, sized to the servo count)
+3.3 V   ESP32-S3 logic
 ```
 
 Requirements:
 
-* separate servo power supply;
-* motor fuse;
-* servo fuse;
+* a **separate** servo supply sized for the peak servo current;
+* servo-rail fuse;
 * reverse-polarity protection;
-* TVS on the motor rail;
-* capacitors near the drivers;
-* reserve capacitor near the PCA9685;
-* structured common ground;
+* a reserve capacitor near each PCA9685;
+* a structured common ground;
 * lockable connectors;
-* no servo powered by the ESP32 regulator.
+* **no servo powered by the ESP32 regulator**.
+
+There is no 24 V motor rail.
 
 ---
 
@@ -1253,51 +864,23 @@ Requirements:
 
 ```text
 firmware/
-├── application/
-│   ├── Application
-│   ├── Scheduler
-│   └── EventBus
-├── board/
-│   ├── BoardProfile
-│   ├── PinManager
-│   └── PinValidator
-├── communication/
-│   ├── WifiManager
-│   ├── MidiTransport
-│   ├── WebSocketMidi
-│   └── FutureTransports
-├── midi/
-│   ├── MidiParser
-│   ├── MidiRouter
-│   └── MidiEventQueue
-├── instrument/
-│   ├── InstrumentController
-│   ├── StringController
-│   └── NoteAllocator
-├── motion/
-│   ├── StepperAxis
-│   ├── MotionPlanner
-│   └── HomingController
-├── actuators/
-│   ├── ServoManager
-│   ├── FingerActuator
-│   ├── PluckActuator
-│   └── DamperActuator
-├── configuration/
-│   ├── Profile
-│   ├── ProfileValidator
-│   └── ProfileStorage
-├── safety/
-│   ├── SafetyManager
-│   └── FaultManager
-├── diagnostics/
-│   ├── Logger
-│   └── DiagnosticService
-└── web/
-    ├── WebServer
-    ├── RestApi
-    └── WebSocketStatus
+├── src/
+│   ├── main.cpp                 hardware integration + servo-per-fret scheduler
+│   ├── core/                    pure C++17 (host-testable, no Arduino/ESP-IDF)
+│   │   ├── midi/                MidiParser, MidiEvent, StringFretSelector, Velocity
+│   │   ├── instrument/          InstrumentController, StringController,
+│   │   │                        NoteAllocator, ServoActivationGovernor
+│   │   ├── configuration/       Profile (with ServoConfig), StringConfig,
+│   │   │                        ProfileValidator, FingerTarget, ServoStroke
+│   │   ├── gmb/                 GmbSysEx, Capabilities (SysEx service)
+│   │   ├── safety/              SafetyManager
+│   │   ├── board/               BoardProfile, PinManager
+│   │   └── util/                Debounce
+│   └── platform/esp32/          MidiWifi, ServoBank, WebApi, ProfileStorage, Net
+└── test/                        native tests (14 files, 146 TEST() cases)
 ```
+
+There is no `core/motion/` and no stepper subsystem (no StepperAxis / MotionPlanner / HomingController): the only servo driver is `platform/esp32/ServoBank`, which drives both PCA9685 and direct-GPIO servos.
 
 ---
 
@@ -1308,29 +891,25 @@ firmware/
 * ESP32-S3;
 * Wi-Fi;
 * minimal Web interface;
-* one stepper motor;
-* one HOME sensor;
-* one finger servo;
-* one pluck servo;
+* one finger servo (one fret) plus one pluck servo;
 * Wi-Fi MIDI test;
-* complete state machine;
+* complete per-string state machine;
 * panic.
 
 ## Phase 2 — Intuitive configuration
 
 * configuration wizard;
 * board profile;
-* automatic GPIO assignment;
+* automatic SDA/SCL/OE assignment;
 * conflict validation;
-* motor calibration;
-* servo calibration;
+* servo / finger calibration (install helper);
 * JSON import/export.
 
 ## Phase 3 — Multi-string
 
-* four then six axes;
-* PCA9685;
-* parallel homing;
+* four then six strings;
+* several PCA9685 (and/or direct-GPIO servos);
+* current governor;
 * note allocation;
 * chords;
 * per-string diagnostics.
@@ -1341,7 +920,8 @@ firmware/
 * damping;
 * sustain pedal;
 * velocity curves;
-* saturation strategies.
+* saturation strategies;
+* geared fingers.
 
 ## Phase 5 — Dedicated hardware
 
@@ -1349,7 +929,7 @@ firmware/
 * PCB;
 * protections;
 * connectors;
-* hardware stop;
+* hardware `/OE` stop;
 * electrical validation;
 * wiring documentation.
 
@@ -1364,26 +944,25 @@ firmware/
 
 # 25. Acceptance criteria
 
-The project will be considered functional when:
+The project is considered functional when:
 
 1. one to six strings can be configured;
-2. each string uses a stepper motor and a single movable finger;
-3. the GPIOs can be assigned automatically;
-4. the interface offers only GPIOs compatible with the function;
+2. each string selects notes by pressing a dedicated finger servo per fret, with at most one finger pressed at a time;
+3. servos can be driven on a PCA9685 and/or a direct GPIO, mixably;
+4. the board-level pins (SDA/SCL/OE) can be assigned automatically and the interface offers only GPIOs compatible with the function;
 5. pin conflicts are blocked;
-6. a beginner can complete the configuration with the wizard;
+6. a beginner can complete the configuration with the wizard and the install helper;
 7. the system works in access point mode without a router;
 8. the system can join an existing Wi-Fi network;
-9. MIDI commands are received over Wi-Fi;
-10. the axes perform reliable homing;
-11. open strings are played without finger pressing;
-12. a Note Off cancels an attack being prepared;
-13. no delayed pluck is executed after a cancellation;
-14. six axes can be controlled simultaneously;
-15. profiles can be saved, exported and restored;
-16. the panic neutralizes all actuators;
-17. loss of Wi-Fi produces a controlled stop;
-18. the architecture allows the future addition of BLE MIDI and wired MIDI.
+9. MIDI commands are received over Wi-Fi (UDP 5006), including CC20/CC21 string/fret selection;
+10. open strings are played with every finger lifted;
+11. a Note Off cancels an attack being prepared;
+12. no delayed pluck is executed after a cancellation;
+13. six strings can be played simultaneously (chords);
+14. profiles can be saved, exported and restored;
+15. a panic or E-stop neutralizes all servos (`/OE` high + direct servos detached);
+16. loss of Wi-Fi produces a controlled release while the instrument stays armed;
+17. the architecture allows the future addition of BLE MIDI and wired MIDI.
 
 ---
 
@@ -1414,7 +993,7 @@ example instrument profiles
 # 27. Recommended repository organization
 
 ```text
-Stepper-Plucked-Strings-GMB/
+Servo-Plucked-Strings-GMB/
 ├── firmware/
 ├── web-interface/
 ├── hardware/
@@ -1424,7 +1003,6 @@ Stepper-Plucked-Strings-GMB/
 ├── board-profiles/
 ├── instrument-profiles/
 ├── mechanics/
-├── tests/
 ├── docs/
 │   ├── SPEC_INDEX.md
 │   ├── ARCHITECTURE.md
@@ -1441,25 +1019,27 @@ Stepper-Plucked-Strings-GMB/
 # 28. Initial decisions adopted
 
 ```text
-Name: Stepper-Plucked-Strings-GMB
-
-Project developed from scratch
+Name: Servo-Plucked-Strings-GMB
 
 Plucked or strummed string instruments only
 
 1 to 6 strings
 
-1 stepper motor per string
+One dedicated finger servo per equipped fret (fret 0 = open, no servo)
 
-1 single movable finger per string
+One pluck or strum servo per string; optional strum lift / damper
 
-ESP32-S3
+Optional geared finger (one servo → two frets)
 
-TMC2209 or compatible STEP/DIR driver
+At most one finger pressed per string at a time
 
-PCA9685 for the servos
+ESP32-S3-DevKitC-1
 
-Wi-Fi in the first version
+Servos on PCA9685 (up to 8, 0x40–0x47) and/or direct GPIO (LEDC, up to 8)
+
+No stepper motor, no TMC2209, no homing
+
+Wi-Fi in the first version (MIDI over UDP 5006)
 
 Mandatory local Web interface
 

@@ -87,7 +87,7 @@ void InstrumentController::prepareString(int stringIndex, int fret, uint32_t exp
         allocator_.runtime()[stringIndex].currentFret = fret;
     }
     StringTarget& t = targets_[stringIndex];
-    t.active = true;  // drive the carriage/finger now; the pluck stays disarmed
+    t.active = true;  // drive the finger now; the pluck stays disarmed
     t.fret = fret;
     t.commandId = id;
     t.velocity = 0;

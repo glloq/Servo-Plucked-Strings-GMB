@@ -31,7 +31,7 @@ void sendJson(AsyncWebServerRequest* req, JsonDocument& doc, int code = 200) {
 }
 
 // RAII guard for the shared-state lock supplied by the main loop. Held only while
-// a read-only handler samples g_profile / instrument / steppers / sysex so a
+// a read-only handler samples g_profile / instrument / servos / sysex so a
 // reload in loop() is never observed half-applied.
 struct WebStateLock {
     const WebContext& ctx;
@@ -121,7 +121,7 @@ void WebApi::fillStatus(JsonDocument& doc) {
     int total = ctx_.instrument ? static_cast<int>(ctx_.instrument->stringCount()) : 0;
     bool armed = ctx_.safety && ctx_.safety->actuatorsAllowed();
     doc["stringsTotal"] = total;
-    // Actually-homed, non-faulted axes (not just "armed => all") so a degraded
+    // Actually-ready, non-faulted strings (not just "armed => all") so a degraded
     // run reports the true count.
     doc["stringsReady"] = ctx_.readyStrings ? ctx_.readyStrings() : (armed ? total : 0);
     doc["notesPlaying"] = ctx_.instrument ? ctx_.instrument->soundingCount() : 0;
@@ -258,7 +258,7 @@ void WebApi::registerRoutes() {
         sendJson(req, doc);
     });
 
-    // ---- POST /api/reset (recover from panic / E-stop, then re-home) ----
+    // ---- POST /api/reset (recover from panic / E-stop, then re-arm) ----
     server_->on("/api/reset", HTTP_POST, [this](AsyncWebServerRequest* req) {
         if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized";
                             sendJson(req, d, 401); return; }
@@ -296,7 +296,7 @@ void WebApi::registerRoutes() {
 
     // ---- POST /api/pins/auto (auto-assign GPIO for the wizard's draft) ----
     // Reads the wizard's request body so the assignment matches the DRAFT being
-    // edited (string count, USB reservation, PCA/OE, LIMIT switches), not the
+    // edited (string count, USB reservation, PCA /OE, ESTOP pin), not the
     // currently-active profile.
     auto* pinsAuto = new AsyncCallbackJsonWebHandler(
         "/api/pins/auto", [this](AsyncWebServerRequest* req, JsonVariant& body) {
@@ -427,8 +427,8 @@ void WebApi::registerRoutes() {
                 sendJson(req, doc, 422);  // real error, not masked as success
                 return;
             }
-            // Validated above; the actual activation runs in loop() (motor stop,
-            // reconfigure, re-home). Report ACCEPTED, not "done".
+            // Validated above; the actual activation runs in loop() (servos
+            // neutralised, reconfigure, re-arm). Report ACCEPTED, not "done".
             uint32_t cmdId = ctx_.onActivateProfile ? ctx_.onActivateProfile(p) : 0;
             bool queued = cmdId != 0;
             doc["ok"] = queued;
@@ -510,7 +510,7 @@ void WebApi::registerRoutes() {
     server_->addHandler(loadProfile);
 
     // ---- POST /api/profiles/read (read a slot WITHOUT activating it) ----
-    // Used by copy / rename / set-startup so an admin action never moves a motor.
+    // Used by copy / rename / set-startup so an admin action never moves a servo.
     auto* readProfile = new AsyncCallbackJsonWebHandler(
         "/api/profiles/read", [this](AsyncWebServerRequest* req, JsonVariant& body) {
             int slot = body["slot"] | -1;

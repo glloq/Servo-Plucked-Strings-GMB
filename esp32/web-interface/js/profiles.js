@@ -85,7 +85,7 @@
     return free ? free.slot : -1;
   }
 
-  // Read a slot's profile WITHOUT activating it (no homing / motor movement),
+  // Read a slot's profile WITHOUT activating it (no servo movement),
   // so copy / rename / set-startup are safe administrative actions.
   function fetchSlotProfile(slot) {
     return GMB.api.readProfileSlot(slot);

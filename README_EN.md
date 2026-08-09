@@ -20,7 +20,7 @@ The repository is organized **per hardware platform**, each in its own folder:
 | Platform | Folder | Status | MIDI |
 |----------|--------|--------|------|
 | **Arduino / PCA9685** | [`arduino/`](arduino/) | ✅ Working | Native USB (MIDIUSB) |
-| **ESP32** | [`esp32/`](esp32/) | 🚧 Planned | BLE-MIDI / Wi-Fi (planned) |
+| **ESP32 (servo-per-fret)** | [`esp32/`](esp32/) | ✅ Working | Wi-Fi MIDI (UDP) + CC string/fret + SysEx |
 
 👉 **Start here: [`arduino/README.md`](arduino/README.md)** — install,
 configure, calibrate and use the Arduino version.
@@ -65,7 +65,13 @@ Plucking servo with alternating movement (oscillation around center):
 │   │   └── src/                #    Modules (config, core, string, midi, utils)
 │   └── docs/                   #    Detailed docs + LIMITS + AUDIT
 │
-├── esp32/                      # 🚧 ESP32 version (planned)
+├── esp32/                      # ✅ ESP32 version (servo-per-fret, Wi-Fi MIDI)
+│   ├── firmware/               #    ESP32-S3 firmware + native tests
+│   ├── web-interface/          #    browser configurator
+│   ├── instrument-profiles/    #    example instrument profiles
+│   ├── board-profiles/         #    board GPIO capability maps
+│   ├── hardware/  mechanics/   #    reference build docs
+│   ├── docs/                   #    detailed docs
 │   └── README.md
 │
 ├── img/                        # Shared schematics
@@ -98,7 +104,7 @@ Full details in [`arduino/README.md`](arduino/README.md).
 | [arduino/docs/STRUCTURE_PROJET.md](arduino/docs/STRUCTURE_PROJET.md) | Code organization — French |
 | [arduino/docs/GUIDE_MIDIUSB.md](arduino/docs/GUIDE_MIDIUSB.md) | Complete MIDIUSB guide — French |
 | [arduino/CHANGELOG.md](arduino/CHANGELOG.md) | Change history |
-| [esp32/README.md](esp32/README.md) | ESP32 roadmap |
+| [esp32/README.md](esp32/README.md) | ESP32 servo-per-fret firmware guide |
 
 ## 🤝 Contributing
 

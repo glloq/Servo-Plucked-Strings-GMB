@@ -1,17 +1,11 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
-# Architecture — Stepper-Plucked-Strings-GMB
+# Architecture — Servo-Plucked-Strings-GMB
 
 > Reference document: [`SPEC_INDEX.md`](SPEC_INDEX.md) (source: `SPECIFICATION.md` §23, §24).
 > Related documents: [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) · [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) · [`WEB_INTERFACE.md`](WEB_INTERFACE.md) · [`CALIBRATION.md`](CALIBRATION.md) · [`SAFETY.md`](SAFETY.md)
 
 This document describes the software organization of the firmware, how the
 modules from the specification (§23) map to the code actually implemented
-in `firmware/src/core/*`, the end-to-end data flow, the generation of the
+in `firmware/src/`, the end-to-end data flow, the generation of the
 capabilities snapshot, the "pure core + platform adapters + native tests"
 strategy, and the development phases (§24).
 
@@ -31,88 +25,59 @@ Consequences:
 
 * **Pure core** (`firmware/src/core/`) — business logic testable on a PC: board
   profiles, pin management, string/fret selection, note allocation, per-string
-  state machine, motor geometry, homing, GMB capabilities/SysEx, safety. No
-  direct hardware access.
+  state machine, servo/stroke shaping, current governor, GMB capabilities/SysEx,
+  safety. No direct hardware access.
 * **Platform adapters** (`firmware/src/platform/esp32/`) — concrete
-  implementations that connect the core to the ESP32-S3 hardware:
-  `StepperBank` generates the steps via the **FastAccelStepper hardware engine**
-  (RMT/MCPWM + timer), thus **outside `loop()`** — the core's `MotionPlanner`
-  remains the reference trapezoidal model tested on a PC; `ServoBank` drives the
-  PCA9685 **and** the servos on direct GPIO (14-bit LEDC); `Net` (non-blocking
-  Wi-Fi), `WebApi` (REST + WebSocket), `MidiWifi` (transport), `ProfileStorage`
-  (LittleFS + NVS for secrets). These layers consume the core without modifying
-  it.
-* **Native tests** (`firmware/test/`) — 86 unit tests compiled and run
-  with `g++ -std=c++17` via `firmware/test/Makefile`, covering the 8 modules of
-  the core (`test_board`, `test_selector`, `test_allocator`, `test_motion`,
-  `test_string_fsm`, `test_profile`, `test_sysex`, + `test_main`).
+  implementations that connect the core to the ESP32-S3 hardware: `ServoBank`
+  drives every actuator directly — **PCA9685** channels and/or **direct ESP32
+  GPIO** (14-bit LEDC), mixable per servo; **there is no stepper engine**. `Net`
+  (non-blocking Wi-Fi AP/station), `WebApi` (REST configuration API), `MidiWifi`
+  (MIDI over Wi-Fi UDP), `ProfileStorage` (LittleFS + NVS for secrets). These
+  layers consume the core without modifying it.
+* **Native tests** (`firmware/test/`) — **146 `TEST()` cases across 14 test
+  files**, compiled and run with `g++ -std=c++17` via `firmware/test/Makefile`
+  and driven by the `test_main` runner: `test_board`, `test_selector`,
+  `test_allocator`, `test_profile`, `test_sysex`, `test_geared`, `test_fretservo`,
+  `test_governor`, `test_servos`, `test_audit`, `test_debounce`, `test_midiparser`,
+  `test_integration`, `test_string_fsm`.
 
 ```bash
 cd firmware/test && make        # compile the core + the tests, then run them
 ```
 
 This separation guarantees that a new MIDI transport or a new board does not
-affect the string controller, the allocator, the motion management, or the
-mechanical profiles (specification §8.3).
+affect the string controller, the allocator, the servo control, or the
+instrument/servo profiles (specification §8.3).
 
 ---
 
 ## 2. Target tree (§23) and correspondence with the code
 
-Specification §23 describes the complete **target** tree. The table below
-places that tree side by side with the modules **actually implemented** in
-`firmware/src/core/`.
+Specification §23 describes the complete **target** tree. The firmware
+implements it as a **pure `core/`** (host-tested) plus **ESP32
+`platform/esp32/`** adapters:
 
 ```text
-firmware/                        Specification §23             Implemented (core/)
-├── application/
-│   ├── Application              orchestration                 (adapter, upcoming)
-│   ├── Scheduler                non-blocking scheduling        (adapter, upcoming)
-│   └── EventBus                 event bus                      (adapter, upcoming)
-├── board/
-│   ├── BoardProfile             board profiles                core/board/BoardProfile.{h,cpp}
-│   ├── PinManager               pin assignment                core/board/PinManager.{h,cpp}
-│   └── PinValidator             conflict validation           PinManager::validate() (merged)
-├── communication/
-│   ├── WifiManager              Wi-Fi AP/station              (adapter, upcoming)
-│   ├── MidiTransport            MIDI transport                (adapter, upcoming)
-│   ├── WebSocketMidi            MIDI over WebSocket           (adapter, upcoming)
-│   └── FutureTransports         BLE/USB/DIN…                  MidiSource enum (core/midi)
-├── midi/
-│   ├── MidiParser               parsing bytes → MidiEvent     core/midi/MidiEvent.h
-│   ├── MidiRouter               routing                       (adapter, upcoming)
-│   └── MidiEventQueue           event queue                   (adapter, upcoming)
-│   └── (string/fret selection)  CC20/CC21 tablature           core/midi/StringFretSelector.{h,cpp}
-├── instrument/
-│   ├── InstrumentController     instrument orchestration      (adapter, upcoming)
-│   ├── StringController         per-string state machine      core/instrument/StringController.{h,cpp}
-│   └── NoteAllocator            note allocation               core/instrument/NoteAllocator.{h,cpp}
-├── motion/
-│   ├── StepperAxis              geometry/conversion mm↔steps  core/motion/StepperAxis.{h,cpp}
-│   ├── MotionPlanner            trapezoidal profile (accel)   core/motion/MotionPlanner.{h,cpp}
-│   └── HomingController         non-blocking homing           core/motion/HomingController.{h,cpp}
-├── actuators/
-│   ├── ServoManager             PCA9685                       ServoConfig (core/configuration)
-│   ├── FingerActuator           finger servo                  ServoConfig function="finger"
-│   ├── PluckActuator            pluck servo                   ServoConfig function="pluck"
-│   └── DamperActuator           damper                        ServoConfig function="damper"
-├── configuration/
-│   ├── Profile                  profile (source of truth)     core/configuration/Profile.{h,cpp}
-│   ├── ProfileValidator         validation                    core/configuration/ProfileValidator.{h,cpp}
-│   └── ProfileStorage           NVS persistence               (adapter, upcoming)
-├── safety/
-│   ├── SafetyManager            safe states / panic / E-stop  core/safety/SafetyManager.{h,cpp}
-│   └── FaultManager             fault log                     SafetyManager::faults() (merged)
-├── diagnostics/
-│   ├── Logger                   logging                       (adapter, upcoming)
-│   └── DiagnosticService        diagnostics                   (adapter, upcoming)
-├── gmb/                         (GMB SysEx protocol, §below)
-│   ├── Capabilities             capabilities snapshot         core/gmb/Capabilities.{h,cpp}
-│   └── GmbSysEx                 SysEx encoder/decoder         core/gmb/GmbSysEx.{h,cpp}
-└── web/
-    ├── WebServer                HTTP server                   (adapter, upcoming)
-    ├── RestApi                  REST API                      (adapter, cf. WEB_INTERFACE.md)
-    └── WebSocketStatus          real-time status              (adapter, upcoming)
+firmware/src/
+├── main.cpp                    hardware integration + servo-per-fret scheduler
+├── core/                       pure C++17, host-tested (no Arduino / ESP-IDF)
+│   ├── Types.{h,cpp}           shared enums / structs
+│   ├── midi/                   MidiEvent, MidiParser, StringFretSelector
+│   │                           (CC20/CC21 tablature), Velocity
+│   ├── instrument/             StringController (per-string FSM), NoteAllocator,
+│   │                           InstrumentController, ServoActivationGovernor
+│   ├── configuration/          Profile (source of truth), ProfileValidator,
+│   │                           StringConfig, ServoStroke, FingerTarget
+│   ├── gmb/                    Capabilities snapshot, GmbSysEx (+ Service)
+│   ├── board/                  BoardProfile, PinManager (assignment + validation)
+│   ├── safety/                 SafetyManager (safe states / panic / faults)
+│   └── util/                   Debounce
+└── platform/esp32/             hardware adapters
+    ├── MidiWifi                MIDI over Wi-Fi (UDP transport)
+    ├── ServoBank               PCA9685 channels + direct-GPIO servos (14-bit LEDC)
+    ├── WebApi                  REST configuration / wizard backend
+    ├── ProfileStorage          LittleFS + NVS persistence (secrets in NVS)
+    └── Net                     non-blocking Wi-Fi (AP / station)
 ```
 
 Correspondence notes:
@@ -121,10 +86,11 @@ Correspondence notes:
   and assignment share the same `BoardProfile`.
 * `FaultManager` (§23) is merged into `SafetyManager` (`recordFault()` /
   `faults()`).
-* The `gmb/` module does not appear explicitly in the §23 tree: it realizes
-  the [`SYSEX_CAPABILITIES.md`](SPEC_INDEX.md) specification.
-* Entries marked "adapter, upcoming" are platform layers or modules from later
-  phases that will consume the core.
+* The `gmb/` module realizes the
+  [`SYSEX_CAPABILITIES.md`](../SYSEX_CAPABILITIES.md) specification.
+* `main.cpp` integrates the core with the platform adapters and runs the
+  non-blocking servo-per-fret scheduler (release the current finger → press the
+  target-fret finger → settle → pluck).
 
 ---
 
@@ -134,7 +100,7 @@ A MIDI transport produces a single internal `MidiEvent` (specification §8.2),
 and everything else in the firmware never depends on how the bytes arrived.
 
 ```text
-Transport (WebSocket / RTP-MIDI / UDP / Web test / future BLE/USB/DIN)
+Transport (Wi-Fi UDP / Web test / future BLE / USB / DIN)
         │  decoding
         ▼
 MidiEvent { timestampUs, source, type, channel, data1, data2 }
@@ -157,17 +123,23 @@ NoteAllocator               (chooses the best string, groups chords,
         │  Allocation { stringIndex, fret }
         ▼
 StringController[c]          (non-blocking state machine, 1 per string)
-   DISABLED → HOMING → IDLE → RELEASING_FINGER → MOVING →
+   DISABLED → IDLE → RELEASING_FINGER → MOVING →
    PRESSING_FINGER → SETTLING → READY_TO_PLUCK → PLUCKING →
    SUSTAINING → DAMPING (→ IDLE)     |  CANCELLING  |  FAULT
-        │                                   │
-        ▼                                   ▼
-StepperAxis / HomingController        ServoManager (PCA9685)
-   (mm ↔ steps, fret positions)          finger / pluck / damper
+        │
+        ▼
+ServoBank                   (release the current finger → press the target-fret
+   finger → settle → pluck; finger / pluck / damper on PCA9685 channels or
+   direct GPIO, one finger per string at a time)
 ```
 
 Key points of the flow:
 
+* **No carriage, no homing.** Each fret has its own finger servo, so there is no
+  origin search: the `MOVING` state is retained only as the (now instantaneous)
+  step where the scheduler selects the target fret's finger before pressing it,
+  which keeps the note lifecycle and command-id guards identical to the stepper
+  design.
 * **Common event.** `MidiEvent` (see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md))
   handles the MIDI subtleties (`isNoteOff()` treats a Note On with velocity 0 as
   a Note Off in running status).
@@ -177,7 +149,7 @@ Key points of the flow:
   [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md).
 * **Command identifier.** Each `noteOn(fret)` returns a fresh `commandId`;
   any deferred action tagged with an old id is ignored. This prevents a
-  pluck after a Note Off, a delayed press, the execution of a stale position,
+  pluck after a Note Off, a delayed press, the execution of a stale target,
   or an attack after a panic (specification §16).
 * **Reliable Note Off.** The actual assignment of a Note On is memorized
   (`ActiveNote`) to release the correct string, even in a chord or with repeated
@@ -227,18 +199,20 @@ in [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md#3-protocole-sysex-gmb).
 
 | Field | Type | Role |
 | ----- | ---- | ---- |
-| `instrument` | `InstrumentInfo` | name, type, GM program, number of strings, capo, transposition |
-| `boardIdentifier` / `reserveUsb` / `pins` | — | board, USB reservation, GPIO assignment |
-| `network` | `NetworkConfig` | AP/station mode, SSID, hostname, static IP |
-| `midi` | `MidiConfig` | channel, Omni, transposition, chord window, velocity curve, pedal |
+| `instrument` | `InstrumentInfo` | name, type, GM program, string count, capo, transpose |
+| `boardIdentifier` / `reserveUsb` / `automaticPinAssignment` / `pins` | — | board id, USB reservation, auto-assign flag, GPIO assignment |
+| `network` | `NetworkConfig` | AP/station mode, SSID, hostname, `apSsid`, static IP |
+| `midi` | `MidiConfig` | channel, Omni, transpose, chord window, velocity curve, sustain pedal, timing leads |
 | `selector` | `SelectorConfig` | string/fret selection (CC20/CC21, mode, timeout, FIFO…) |
-| `strings` | `vector<AxisConfig>` | geometry/motor per string |
-| `homing` | `vector<HomingConfig>` | homing per axis |
-| `servos` | `vector<ServoConfig>` | servos (finger/pluck/damper/aux) |
+| `power` | `PowerConfig` | current governor (`maxConcurrentMoves`, `staggerMs`) |
+| `strings` | `vector<StringConfig>` | per string: `{ enabled, openNote, maxFret }` |
+| `servos` | `vector<ServoConfig>` | finger / pluck / strumLift / damper / aux servos (PCA channel or direct GPIO) |
 | `capabilitiesRevision` | `uint32_t` | revision counter (Block 8 notification) |
 
 `Profile::instrumentView()` derives from it an `InstrumentView` shared by the
-string/fret selector and the capabilities generator.
+string/fret selector and the capabilities generator; `availableFretMask()`
+reports which frets carry a finger servo (the servo list is the source of truth
+for which frets exist).
 
 ---
 
@@ -246,24 +220,24 @@ string/fret selector and the capabilities generator.
 
 | Phase | Objective | Key deliverables |
 | ----- | ----- | -------------- |
-| **1 — Single-string prototype** | ESP32-S3, Wi-Fi, minimal UI, 1 motor, 1 HOME sensor, 1 finger servo, 1 pluck servo, Wi-Fi MIDI test, complete state machine, panic | state machine, homing, panic |
-| **2 — Intuitive configuration** | wizard, board profile, automatic GPIO assignment, conflict validation, motor/servo calibration, JSON import/export | `BoardProfile`, `PinManager`, `Profile`, wizard |
-| **3 — Multi-string** | 4 then 6 axes, PCA9685, parallel homing, note allocation, chords, per-string diagnostics | `NoteAllocator`, parallel homing |
+| **1 — Single-string prototype** | ESP32-S3, Wi-Fi, minimal UI, one string wired **servo-per-fret** (finger servos + a plucker), Wi-Fi MIDI test, complete state machine, panic | state machine, servo control, panic |
+| **2 — Intuitive configuration** | wizard, board profile, automatic GPIO assignment, conflict validation, servo calibration, JSON import/export | `BoardProfile`, `PinManager`, `Profile`, wizard |
+| **3 — Multi-string** | 4 then 6 strings, PCA9685, note allocation, chords, current governor, per-string diagnostics | `NoteAllocator`, `ServoActivationGovernor` |
 | **4 — Advanced playing** | tremolo, damping, sustain pedal, velocity curves, saturation strategies | curves |
 | **5 — Dedicated hardware** | schematic, PCB, protections, connectors, hardware shutdown, electrical validation, wiring documentation | `hardware/` |
 | **6 — Future communications** | BLE MIDI, USB MIDI, MIDI DIN, wired links | new transports reusing `MidiEvent` |
 
-The current state of the repository covers the **algorithmic core** of phases 1
-to 3 (`core/*` modules + 86 native tests). The platform adapters and the Web
-interface constitute the remaining layers.
+The current state of the repository covers the algorithmic **core** of phases 1
+to 3 (`core/*` modules + 146 native tests) together with the ESP32 platform
+adapters (`platform/esp32/*`) and the Web interface.
 
 ---
 
 ## 7. Transport independence
 
 Adding a transport (BLE, USB, DIN, serial, CAN/RS485) must modify neither the
-string controller, nor the allocator, nor the motion management, nor the
-mechanical profiles (§8.3). All transports:
+string controller, nor the allocator, nor the servo control, nor the
+instrument/servo profiles (§8.3). All transports:
 
 1. decode the bytes into `MidiEvent`;
 2. forward complete MIDI bytes to the router;

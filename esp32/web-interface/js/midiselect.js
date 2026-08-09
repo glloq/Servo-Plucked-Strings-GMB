@@ -59,8 +59,6 @@
       h('div.form-grid', [
         GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 500 }),
           'Fixed delay from Note On to the note actually sounding, giving the finger a constant window to reach the fret.'),
-        GMB.field('Finger lead (ms)', GMB.input(p.midi, 'fingerLeadMs', { type: 'number', min: 0, max: 500 }),
-          'Start the finger descent this long before the carriage is estimated to arrive (0 = press only on arrival). Tune to avoid dragging.'),
         GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs', { type: 'number', min: 0, max: 500 }),
           'Start lowering the strum lift this long before the string is ready, so it is engaged when the strike time comes.')
       ])
@@ -150,7 +148,7 @@
           { value: 'hybrid', label: 'Hybrid' }], onChange: function () { GMB.render(); } })),
       GMB.field('Per-MIDI-channel selection', GMB.input(sfs, 'perMidiChannel', { type: 'checkbox' })),
       GMB.field('Selection timeout (ms, 5–2000)', GMB.input(sfs, 'selectionTimeoutMs', { type: 'number', min: 5, max: 2000 })),
-      GMB.field('Prepare motor on complete selection', GMB.input(sfs, 'prepareOnCompleteSelection', { type: 'checkbox' })),
+      GMB.field('Prepare finger on complete selection', GMB.input(sfs, 'prepareOnCompleteSelection', { type: 'checkbox' })),
       GMB.field('Queue depth (≥16)', GMB.input(sfs, 'queueDepth', { type: 'number', min: 16, max: 128 }))
     ];
     var stringFields = [

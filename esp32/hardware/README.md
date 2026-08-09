@@ -1,16 +1,13 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
 # Hardware — reference electronics
 
-Reference electronics for **Stepper-Plucked-Strings-GMB**, the ESP32-S3 MIDI
-machine that drives one stepper-positioned finger per string on plucked- or
-strummed-string instruments (1–6 strings). This document describes the reference
-architecture of SPECIFICATION.md §7; the wiring guide, bill of materials and
-Phase 5 CAD deliverables live alongside it.
+Reference electronics for the **ESP32 servo-per-fret** version of
+Servo-Plucked-Strings-GMB: an ESP32-S3 MIDI instrument where **every fret
+position has its own servo** and a per-string plucker sets the string vibrating
+(1–6 strings). There is **no stepper motor, no carriage and no homing** — those
+belong to the separate reference project
+[`Stepper-Plucked-Strings-GMB`](https://github.com/glloq/Stepper-Plucked-Strings-GMB).
+This document covers the electronics of SPECIFICATION.md §7; the wiring guide,
+bill of materials and CAD deliverables live alongside it.
 
 ## Directory
 
@@ -21,9 +18,9 @@ hardware/
 ├── wiring/
 │   └── WIRING.md      ← connection guide, pinout, power rails (§7 / §22)
 ├── schematics/
-│   └── README.md      ← Phase 5 placeholder (§24)
+│   └── README.md      ← schematic placeholder
 └── pcb/
-    └── README.md      ← Phase 5 placeholder (§24)
+    └── README.md      ← PCB placeholder
 ```
 
 ## Block diagram (§7)
@@ -36,91 +33,83 @@ hardware/
                            ▼
                        ESP32-S3
                            │
-        ┌──────────────────┼──────────────────┐
-        │                  │                  │
-   STEP / DIR / EN        I²C              Sensors
-        │                  │                  │
-   1–6 TMC2209          PCA9685          HOME / LIMIT
-        │                  │
-   1–6 steppers      1–16 servos
+              ┌────────────┴────────────┐
+              │                         │
+             I²C                   free GPIO (LEDC)
+              │                         │
+       1–8 × PCA9685             direct-GPIO servos
+       (0x40 … 0x47)             (up to 8, optional)
+              │
+      finger + pluck servos
 ```
+
+Every servo picks its own source, so an instrument can be built **with a
+PCA9685, without one (direct GPIO), or with a mix of both**.
 
 ## Major blocks
 
 ### Main controller — ESP32-S3 (§7.1)
 
 The reference controller is an **ESP32-S3-DevKitC-1**. It handles Wi-Fi MIDI
-transport, hosts the web configurator, allocates notes, plans motion, runs the
-per-string state machines, drives the PCA9685, monitors the sensors, stores
-profiles, and enforces safety. Its GPIO matrix lets peripheral signals be routed
-to many pins, which is what makes the configurable board profiles and pin
-assignment possible (`board-profiles/esp32-s3-devkitc-1.json`).
+transport, hosts the web configurator, allocates notes, sequences the per-string
+release → press → settle → pluck motions, drives the servos (over the PCA9685 or
+directly), stores profiles, and enforces safety. Its flexible GPIO matrix is what
+makes the configurable board profiles and pin assignment possible
+(`board-profiles/esp32-s3-devkitc-1.json`).
 
-### Stepper drivers — 1–6 × TMC2209 (§7.2)
+### Servo drive — PCA9685 and/or direct GPIO (§7.3)
 
-One STEP/DIR-compatible driver per string; the reference is the **TMC2209**.
-Each axis exposes STEP, DIR, ENABLE and HOME, with optional LIMIT, DIAG and UART.
-The first prototype board must accept **pluggable driver modules** so a driver
-can be swapped, different models tried, motor current tuned, and maintenance
-done before an integrated PCB exists.
+Fingers and pluckers are hobby servos. Each servo is driven from **one of two
+sources**, chosen per servo in the web interface:
 
-Per-axis signals:
+* **PCA9685** — a 16-channel PWM/servo expander on I²C. Up to **eight boards**
+  at addresses **0x40 … 0x47** (128 channels). The recommended wiring is **one
+  PCA9685 per string**: a string's fret fingers plus its plucker fit on ≤ 16
+  channels, and spreading strings across boards spreads the current draw.
+* **Direct GPIO** — the servo hangs off a free ESP32-S3 output pin driven by the
+  LEDC peripheral (50 Hz PWM). Up to **eight** direct servos (the S3 has 8 LEDC
+  channels). Handy with no PCA, or for a handful of servos.
 
-```text
-STEP        (fast output from ESP32-S3)
-DIR         (output)
-ENABLE      (shared global ENABLE line, GPIO42 by default)
-HOME        (reference sensor input, interrupt-capable)
-LIMIT       (optional opposite end-stop)
-DIAG        (optional TMC2209 stall/diag)
-UART        (optional TMC2209 configuration)
-```
+The two mix freely on the same instrument.
 
-### Servo expander — PCA9685 (§7.3)
+### Safety line — PCA9685 `/OE` (§21)
 
-A single **PCA9685** provides up to 16 servo channels over I²C. Recommended
-channel map:
-
-| Channels | Use |
-| -------- | --- |
-| 0–5 | finger press (one per string) |
-| 6–11 | individual pluck (one per string) |
-| 12–15 | dampers or auxiliary functions |
-
-The PCA9685 `/OE` (output-enable) pin must be tied to a **safety GPIO**
-(`SERVO_OE`, GPIO47 by default) so all servos can be neutralised instantly on
-panic or emergency stop (§21).
-
-### Sensors — HOME / LIMIT (§7.2, §13)
-
-Each axis has a HOME reference sensor (mechanical, optical or Hall). LIMIT
-opposite end-stops are optional (0–6). HOME/LIMIT inputs must land on
-interrupt-capable GPIO with an appropriate pull (internal or external); the
-homing state machine normalises the active level via `sensorActiveHigh`.
+The PCA9685 `/OE` (output-enable, active-low) pins are tied together to a single
+**safety GPIO** (`SERVO_OE`, GPIO47 by default) so every PCA servo can be
+neutralised instantly on panic or emergency stop. Direct-GPIO servos are detached
+(PWM released) on stop. The firmware holds `/OE` high (outputs off) at boot and
+until the configuration is validated and the instrument is armed (§21.1–21.3).
 
 ## Power (summary, §22)
 
-Four rails, servos on a **separate** supply from the ESP32 regulator:
+Two rails; servos on a **separate** supply from the ESP32 regulator:
 
 | Rail | Feeds |
 | ---- | ----- |
-| 24 V | stepper motors (via the drivers) |
-| 5–7.4 V | servomotors |
-| 5 V | logic |
-| 3.3 V | ESP32-S3 |
+| 5–6 V | servomotors (PCA9685 `V+` and/or direct servos), sized to the servo count |
+| 3.3 V | ESP32-S3 logic (on-board regulator) |
 
-Fusing, reverse-polarity protection, a TVS on the motor rail, driver decoupling
-and a PCA9685 bulk capacitor are required — see `wiring/WIRING.md` §Power.
+Fusing on the servo rail, reverse-polarity protection, and a bulk reservoir
+capacitor across each PCA9685 `V+` are required — see `wiring/WIRING.md` §Power.
+A servo-per-fret instrument has **many** servos (see Capacity), so size the 5–6 V
+supply for the worst-case simultaneous inrush; the firmware's current management
+(idle-PWM cut-off, one finger per string at a time, staggered starts) keeps that
+peak bounded.
 
 ## Capacity (§6)
 
 | Resource | Min | Max |
 | -------- | :-: | :-: |
-| Strings / steppers / fingers / HOME sensors | 1 | 6 |
-| Opposite LIMIT switches | 0 | 6 |
-| Finger servos | 1 | 6 |
-| Pluck servos | 0 | 6 |
-| Auxiliary servos | 0 | 4 |
-| Total servo outputs | 1 | 16 |
+| Strings | 1 | 6 |
+| Finger servos per string | 0 | one per fret (frets need not be contiguous) |
+| Pluck / strum servos per string | 1 | 1 |
+| Optional per-string strumLift / damper | 0 | 1 each |
+| PCA9685 boards | 0 | 8 (0x40 … 0x47) |
+| Direct-GPIO servos | 0 | 8 (LEDC channels) |
 
-Invariant: **active strings = active stepper axes = movable fingers**.
+A single **geared** finger servo can drive **two** frets of the same string, to
+halve the servo count on the wide low frets (see
+[`../docs/GEARED_FINGERS.md`](../docs/GEARED_FINGERS.md)).
+
+Invariant: **one finger pressed per string at a time** — the firmware releases
+the current finger before pressing the next, so a string never fights itself.

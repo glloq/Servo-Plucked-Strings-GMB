@@ -2,10 +2,9 @@
  * dashboard.js — main dashboard (spec section 19).
  *
  * Shows the general state, Wi-Fi, MIDI source, active profile, strings-ready
- * count, notes playing, active faults, temperatures/voltages and a big STOP
- * (panic) button; plus a per-string table (state, note, fret, motor position,
- * target, distance, HOME/LIMIT, finger, plectrum, last fault). Live values
- * come from the /ws/status WebSocket (mock pump when standalone).
+ * count, notes playing, active faults and a big STOP (panic) button; plus a
+ * per-string table (state, note, fret, finger, plectrum, last fault). Live
+ * values come from the /ws/status WebSocket (mock pump when standalone).
  */
 (function (global) {
   'use strict';
@@ -18,31 +17,29 @@
 
     var summary = h('div.grid.dash-summary');
     var faultsBox = h('div#dash-faults');
-    var envBox = h('div.grid.dash-env');
     var table = h('div.table-wrap', h('table.string-table', [buildHead(), h('tbody#dash-tbody')]));
 
     host.appendChild(h('div.card.panic-card', [
       h('div', [h('h2', 'Emergency stop'),
-        h('p.muted', 'Disables drivers, neutralises servos (PCA9685 /OE), flushes the MIDI queue.')]),
+        h('p.muted', 'Neutralises the servos (PCA9685 /OE) and flushes the MIDI queue.')]),
       h('div.panic-actions', [
         h('button.btn.danger.panic-big', { onclick: GMB.doPanic }, 'STOP'),
         h('button.btn', {
-          title: 'Recover from a panic / E-stop and re-home (refused while E-stop or a LIMIT is active)',
+          title: 'Recover from a panic / E-stop and re-arm (refused while the E-stop is active or the config is invalid)',
           onclick: function () {
             GMB.api.resetSystem().then(function (res) {
               if (res && res.ok === false) {
-                GMB.toast('Reset refused: ' + (res.error || 'E-stop/LIMIT active or invalid config') + '.', 'warn');
+                GMB.toast('Reset refused: ' + (res.error || 'E-stop active or invalid config') + '.', 'warn');
               } else {
-                GMB.toast('Reset accepted — re-homing.', 'ok');
+                GMB.toast('Reset accepted — re-arming.', 'ok');
               }
             }).catch(function (e) { GMB.toast('Reset failed: ' + (e && e.message || e), 'error'); });
           }
-        }, 'Reset & re-home')
+        }, 'Reset & re-arm')
       ])
     ]));
     host.appendChild(h('div.card', [h('h2', 'General state'), summary]));
     host.appendChild(h('div.card', [h('h2', 'Active faults'), faultsBox]));
-    host.appendChild(h('div.card', [h('h2', 'Power & temperature'), envBox]));
     host.appendChild(h('div.card', [h('div.card-head', [h('h2', 'Strings'),
       h('span.muted', 'live per-string state')]), table]));
 
@@ -58,7 +55,7 @@
       state: '—', wifi: { mode: p.network.mode, ssid: ssid, ip: '—', rssi: 0, connected: false },
       midiSource: '—', activeProfile: p.instrument.name,
       stringsReady: 0, stringsTotal: p.instrument.stringCount, notesPlaying: 0,
-      faults: [], temperatures: [], voltages: [],
+      faults: [],
       capabilitiesRevision: p.capabilitiesRevision,
       strings: p.strings.map(function (s, i) {
         return { index: i, state: '—', note: null, fret: null,
@@ -106,16 +103,6 @@
       });
     }
 
-    var env = document.querySelector('.dash-env');
-    env.innerHTML = '';
-    (st.temperatures || []).forEach(function (t) {
-      env.appendChild(h('div.stat', [h('div.stat-label', t.name), h('div.stat-value', t.c + ' °C')]));
-    });
-    (st.voltages || []).forEach(function (v) {
-      env.appendChild(h('div.stat', [h('div.stat-label', v.name), h('div.stat-value', v.v + ' V')]));
-    });
-    if (!env.children.length) env.appendChild(h('div.muted', 'No sensors reported.'));
-
     var tb = document.getElementById('dash-tbody');
     tb.innerHTML = '';
     (st.strings || []).forEach(function (s) {
@@ -136,7 +123,7 @@
   function stateClass(s) {
     var u = String(s).toUpperCase();
     if (u === 'READY' || u === 'IDLE') return 'ok';
-    if (u === 'READYDEGRADED') return 'warn';  // playing, but some axes disabled
+    if (u === 'READYDEGRADED') return 'warn';  // playing, but some strings disabled
     if (u === 'FAULT' || u === 'DISABLED' || u === 'PANIC' || u === 'EMERGENCYSTOP')
       return 'error';
     if (s === '—') return 'muted';

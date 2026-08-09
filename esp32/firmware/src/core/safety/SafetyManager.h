@@ -8,7 +8,7 @@
 namespace gmb {
 
 enum class SafetyState : uint8_t {
-    PowerOnSafe,   // drivers off, servos neutralised, queues empty
+    PowerOnSafe,   // servo outputs disabled (/OE high), servos neutralised, queues empty
     Armed,         // normal operation
     Panic,         // software panic latched
     EmergencyStop, // hardware E-stop asserted

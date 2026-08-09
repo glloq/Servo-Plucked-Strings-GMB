@@ -1,8 +1,7 @@
-# Schematics — Phase 5 deliverable
+# Schematics — placeholder
 
-The electronic schematic is a **Phase 5 (dedicated hardware)** deliverable of the
-SPECIFICATION.md (§24, §26). It is not yet drawn; this directory is a
-placeholder.
+The electronic schematic is a **dedicated-hardware** deliverable. It is not yet
+drawn; this directory is a placeholder.
 
 Until then, the reference wiring is fully described in text:
 
@@ -13,17 +12,18 @@ Until then, the reference wiring is fully described in text:
 
 ## Planned contents
 
-When produced, the schematic set will capture:
+When produced, the schematic set will capture the **servo-per-fret** electronics:
 
-* **ESP32-S3-DevKitC-1** connections with the GPIO assignment of §11.5.
-* **TMC2209** driver sockets (1–6, pluggable): STEP/DIR/EN, HOME, optional
-  LIMIT/DIAG/UART, motor phases, `VM`/`VIO` supplies, current-set network.
-* **PCA9685** servo expander: I²C (SDA/SCL) with pull-ups, `V+` servo rail with
-  bulk capacitor, all 16 channel headers, and the `/OE` safety line to GPIO47.
-* **Sensor front-end**: HOME/LIMIT inputs with pull configuration.
-* **Power tree** (§22): 24 V motor, 5–7.4 V servo (separate), 5 V logic, 3.3 V —
-  with fuses (motor + servo), reverse-polarity protection, TVS on the motor
-  rail, driver decoupling and PCA9685 reservoir cap.
-* **Safety / E-stop** path: hardware disable of drivers and PCA9685 `/OE`
-  (§21.2), ESP32 kept powered.
+* **ESP32-S3-DevKitC-1** connections with the GPIO assignment of §11.5 (I²C
+  SDA/SCL, PCA9685 `/OE`, and any direct-GPIO servo pins).
+* **PCA9685** servo expanders (1–8, addresses 0x40…0x47): shared I²C with
+  pull-ups, `V+` servo rail with a bulk capacitor per board, the 16 channel
+  headers, and the chained `/OE` safety line to GPIO47.
+* **Direct-GPIO servo** headers: a few free output pins driven by LEDC (optional,
+  for PCA-less or small builds).
+* **Power tree** (§22): a single 5–6 V servo rail (separate from logic) and 3.3 V
+  logic, with a servo-rail fuse, reverse-polarity protection and PCA9685 reservoir
+  caps.
+* **Safety / E-stop** path: hardware forcing of the PCA9685 `/OE` high (§21.2),
+  ESP32 kept powered.
 * Net labels and connector pinouts matching `../BOM.md` and `../wiring/WIRING.md`.

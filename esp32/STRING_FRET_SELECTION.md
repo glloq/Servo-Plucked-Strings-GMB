@@ -1,15 +1,8 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Spécification héritée du projet
-> pas-à-pas d'origine. Dans cette version, le moteur pas-à-pas est remplacé par un
-> servo dédié à **chaque frette** ; les passages « stepper / homing / position mm /
-> fin de course » **ne s'appliquent pas**. La réception MIDI (sélection CC
-> corde/frette) et le grattage restent valables. Voir [`README.md`](README.md),
-> [`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/PIN_CONFIGURATION.md`](docs/PIN_CONFIGURATION.md).
-
 # Explicit string and fret selection via MIDI CC
 
 ## 1. Objective
 
-Stepper-Plucked-Strings-GMB must be able to receive an explicit indication of the string and fret to use before a note is triggered.
+Servo-Plucked-Strings-GMB must be able to receive an explicit indication of the string and fret to use before a note is triggered.
 
 This function allows the main control system, in particular General-Midi-Boop, to directly transmit a tablature position:
 
@@ -247,7 +240,7 @@ The value must then be:
 * validated;
 * clamped to the allowed range;
 * converted to the internal index;
-* associated with a stepper axis.
+* associated with a physical string.
 
 Example with numbering starting from 1:
 
@@ -323,10 +316,10 @@ Example for an instrument with four strings:
 The user must be able to manually select:
 
 ```text
-CC value 1 → axis 3
-CC value 2 → axis 1
-CC value 3 → axis 4
-CC value 4 → axis 2
+CC value 1 → string 3
+CC value 2 → string 1
+CC value 3 → string 4
+CC value 4 → string 2
 ```
 
 A visual diagram must display the correspondence between:
@@ -334,7 +327,7 @@ A visual diagram must display the correspondence between:
 * MIDI number;
 * musical string;
 * physical string;
-* stepper axis;
+* string;
 * open-string note.
 
 ---
@@ -460,7 +453,7 @@ Recommended value:
 2. associate the note with this selection ;
 3. validate the note/string/fret consistency ;
 4. remove the selection from the queue ;
-5. prepare the motor ;
+5. prepare the finger (press the target fret) ;
 6. schedule the press and the pluck.
 ```
 
@@ -483,7 +476,7 @@ complete selection
         ↓
 finger release
         ↓
-motor movement
+finger press
         ↓
 Note On received
         ↓
@@ -493,7 +486,7 @@ press and pluck when the position is ready
 This behavior must be configurable:
 
 ```text
-Prepare the motor upon reception of the selection
+Prepare the finger (press the target fret) upon reception of the selection
 ```
 
 Default value:
@@ -504,10 +497,10 @@ enabled
 
 The `Note On` keeps its role as the musical trigger.
 
-If the motor has not yet reached the fret at the time of the `Note On`:
+If the finger has not yet settled on the fret at the time of the `Note On`:
 
 * the pluck must be put on hold;
-* the stepper motor must finish its movement;
+* the finger must finish pressing;
 * the finger must be pressed;
 * the pluck must then be executed;
 * no anticipated pluck must be produced.
@@ -614,7 +607,7 @@ Examples of invalid values:
 
 * nonexistent string;
 * fret exceeding the string's capacity;
-* disabled axis;
+* disabled string;
 * faulted string;
 * uncalibrated fret;
 * expired selection;
@@ -716,7 +709,7 @@ The test must display each step:
 string CC received
 fret CC received
 selection validated
-axis moving
+finger pressing
 position reached
 finger pressed
 string plucked
@@ -777,7 +770,7 @@ The system must verify:
 * absence of conflict with another configured function;
 * string range compatible with the number of strings;
 * fret range compatible with the profile;
-* complete correspondence between values and axes;
+* complete correspondence between values and strings;
 * sufficient queue depth;
 * nonzero validity delay.
 
