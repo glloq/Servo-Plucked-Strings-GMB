@@ -7,7 +7,7 @@ phone, tablet or desktop, with no app to install and no source code to edit.
 It implements the interface described in the project specs:
 
 - `SPECIFICATION.md` — dashboard (§19), setup wizard (§10), configurable
-  GPIO management (§11), motor/servo/note config (§12–15), MIDI parameters
+  GPIO management (§11), servo & note config (§14–15), MIDI parameters
   (§18), profile storage (§20), safety/panic (§21).
 - `STRING_FRET_SELECTION.md` — explicit string/fret selection over MIDI CC,
   the General-Midi-Boop preset, the MIDI monitor and the integrated test tool.
@@ -72,7 +72,7 @@ web-interface/
 │   ├── app.js            shell, routing, DOM helpers, draft-profile state, mode toggle
 │   ├── dashboard.js      dashboard (§19)
 │   ├── pins.js           GPIO assignment grid (§11)
-│   ├── wizard.js         9-step setup wizard (§10)
+│   ├── wizard.js         8-step servo-per-fret setup wizard (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
 │   ├── midiselect.js     MIDI page: string/fret selection (§14) + params (§18) + test tool (§16)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
@@ -83,47 +83,47 @@ web-interface/
 ## Simplified vs Advanced mode
 
 A toggle in the sidebar switches between **Simplified** (beginner: recommended
-values, hidden fine-tuning, only recommended GPIOs) and **Advanced** (manual
-GPIO assignment including caution pins, detailed motor/servo/homing parameters,
-SysEx block toggles, raw byte views), per SPECIFICATION.md §9.2.
+values, hidden fine-tuning, only recommended GPIOs, servo wiring auto-assigned)
+and **Advanced** (manual GPIO assignment including caution pins, per-servo wiring
+— PCA9685 channel or direct GPIO — plus pulse/travel/settle parameters, strum-lift
+/ damper / auxiliary actuators, SysEx block toggles, raw byte views), per
+SPECIFICATION.md §9.2.
 
-## Per-string servos, endstops & fret editor (wizard steps 5–7)
+## Servos & frets, and the install helper (wizard steps 3–4)
 
-The setup wizard configures a full instrument (1–6 strings) with a stepper plus
-servos per string, **with or without a PCA9685**:
+The setup wizard configures a full **servo-per-fret** instrument (1–6 strings):
+each fret position has its **own finger servo** plus a **pluck/strum** servo per
+string, **with or without a PCA9685**:
 
-- **Servos per string (step 6).** For each string, add the servos it uses —
-  **finger**, **strum**, an optional **strum lift** (raises/lowers the strum
-  servo per stroke), **damper** and an optional **pluck**. Each servo picks its
-  signal **source**:
-  - **PCA9685** — choose `pcaBoard` (0–3, i.e. up to four boards / 64 channels)
-    and `channel` (0–15). A compact channel-availability map flags duplicate
-    `board+channel` in red.
+- **Servos & frets (step 3).** Per string (string-tab strip), add **one finger
+  servo per fret** (1..`maxFret`; frets need not be contiguous — gaps are allowed)
+  and a **pluck/strum** servo; a finger can be **geared** (one servo drives two
+  frets: side A = `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted).
+  Optional per-string **strum lift** (lowers the plucker onto the string for a
+  stroke, then raises it) and **damper**, plus global **auxiliary** actuators, are
+  available in Advanced mode. Each servo picks its signal **source**:
+  - **PCA9685** — choose `pcaBoard` (**0–7**, i.e. up to **8 boards / 128
+    channels**, addresses 0x40–0x47) and `channel` (0–15). A compact
+    channel-availability map flags a duplicate `board+channel` in red.
   - **Direct GPIO** — choose a free ESP32 pin, filtered with the same
     green/yellow/red capability rules as the pin grid (reserved/USB pins hidden,
-    caution pins Advanced-only, pins already used by a stepper signal or another
-    servo excluded).
+    caution pins Advanced-only, pins already used by a board signal or another
+    servo excluded). At most **8 direct-GPIO servos** (one LEDC channel each).
 
   The system works with **no PCA at all** (every servo on a direct GPIO) or any
-  mix. Per-string servos get their `stringIndex` set automatically; Advanced mode
-  also exposes **shared/auxiliary** servos (`stringIndex = -1`, e.g.
-  `sharedDamper`/`aux`). Each servo carries its calibration (rest/active µs,
-  pulse min/max, inverted, travelMs, settleMs, disableAtRest) and **Test
-  rest/active** buttons (`POST /api/test/servo`).
+  mix. Per-string servos get their `stringIndex` set automatically; global
+  auxiliary servos use `stringIndex = -1`. Each servo carries its calibration
+  (rest/active µs, pulse min/max, inverted, travelMs, settleMs, disableAtRest) and
+  **Test rest/active** buttons (`POST /api/test/servo`).
 
-- **Endstops per string (step 5).** Each string's HOME switch GPIO
-  (input+interrupt capable) plus the full homing sub-object
-  (`sensorActiveHigh/direction/fast+slow speed/backoff/offset/timeout/maxSearch`),
-  and an optional **LIMIT** switch GPIO (Advanced). A **Test endstop** button
-  shows a live HIGH/LOW readout (`POST /api/test/endstop`).
-
-- **Fret positions per string (step 7).** A per-string table with one row per
-  fret (0..`maxFret`) editing `calibratedFretMm[]`: **Fill automatically
-  (theoretical)** fills every fret from `scaleLength·(1−2^(−fret/12))`, per-fret
-  **+/−** nudge buttons and a direct numeric field, **Go to this fret**
-  (jog/test — updates the displayed motor position), and **Capture
-  position** (records the live motor position). A calibrated value always
-  overrides theory in the firmware.
+- **Install helper (step 4).** A guided, per-fret contact-angle calibration. **Arm
+  the instrument**, pick a fret on the clickable strip, then adjust its **contact
+  angle** with the slider until the finger cleanly frets the string — each move is
+  previewed live on the servo. Test **rest / press**, **play the note**
+  (`POST /api/test/note`), then save & move on. A geared finger calibrates three
+  positions — **neutral / press A / press B** — each driven to its exact `us` pulse
+  and held (`POST /api/test/servo` with `us`). The strip colours each fret
+  no-servo / to-do / calibrated so nothing is missed.
 
 ## Backend endpoints
 
@@ -132,24 +132,33 @@ REST (all JSON):
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | GET  | `/api/status` | dashboard live state (§19) |
+| GET  | `/api/commands?id=N` | poll the outcome of a `202`-accepted command |
+| GET  | `/api/capabilities` | computed GMB capabilities snapshot (§17) |
+| GET  | `/api/board/{id}` | board pin capabilities (e.g. `esp32-s3-devkitc-1`) |
+| POST | `/api/pins/auto` | auto-assign the board pins (SDA / SCL / SERVO_OE) |
+| POST | `/api/pins/validate` | validate the full profile, returns issues + suggestions |
 | GET  | `/api/profile` | active working profile |
 | PUT  | `/api/profile` | validate + atomically activate a profile; returns new `capabilitiesRevision` |
 | GET  | `/api/profiles` | list of saved profile slots |
-| POST | `/api/profiles` | `{action, payload}` — create / copy / rename / delete / setStartup |
-| GET  | `/api/board/{id}` | board pin capabilities (e.g. `esp32-s3-devkitc-1`) |
-| POST | `/api/pins/auto` | automatic conflict-free pin assignment |
-| POST | `/api/pins/validate` | validate assignments, returns per-signal errors + suggestions |
+| POST | `/api/profiles` | save the profile to a numbered slot (`{slot, profile, startup}`) |
+| POST | `/api/profiles/load` | activate a stored slot |
+| POST | `/api/profiles/read` | read a slot **without** activating it (copy / rename / set-startup) |
+| POST | `/api/profiles/delete` | delete a slot |
+| POST | `/api/reset` | recover from panic / E-stop and re-arm |
 | POST | `/api/panic` | software panic / STOP (§21.3) |
 | POST | `/api/test/note` | integrated note/string/fret test; returns a step trace (§16) |
-| POST | `/api/test/servo` | drive one servo to `rest`/`active` (armed only) |
-| POST | `/api/test/jog` | nudge one axis by a signed mm delta (armed only) |
-| POST | `/api/test/endstop` | live HOME/LIMIT switch readout for one axis (`{ok, home:bool, limit:bool}`) |
+| POST | `/api/test/servo` | drive one servo to `rest`/`active`, or an exact `us` pulse and hold (armed only) |
+| POST | `/api/hotspot` | switch to the access point + captive portal now |
+| POST | `/api/wifi` | store Wi-Fi credentials in NVS (never exported) |
+| POST | `/api/auth` | set the admin token (first-run bootstrap allowed) |
+| POST | `/api/storage/format` | deliberate LittleFS reformat |
 | POST | `/api/sysex/request` | run a SysEx request, returns sent + received + decoded (§18) |
-| GET  | `/api/capabilities` | computed GMB capabilities snapshot (§17) |
 
-`POST /api/test/servo` body: `{ index, active }` → `{ ok, accepted, commandId, note }` (202 queued / 503 queue full / 409 not armed).
-`POST /api/test/jog` body: `{ axis, deltaMm }` → `{ ok, accepted, commandId, note }` (202 queued / 409 not armed / 503 queue full; clamped to travel and ±25 mm).
-`POST /api/test/endstop` body: `{ axis }` → `{ ok, home:<bool>, limit:<bool> }`.
+`POST /api/test/servo` body: `{ index, active, us? }` → `{ ok, accepted, commandId, note }`
+(202 queued / 503 queue full / 409 not armed). A non-zero `us` drives the servo to
+that exact pulse and holds it (live per-fret calibration, incl. a geared finger's
+side B). There are **no** stepper `jog` / `endstop` routes — servo-per-fret has no
+carriage or HOME/LIMIT sensors.
 
 WebSocket:
 
@@ -162,11 +171,13 @@ WebSocket:
 
 Import/export use the project profile schema (`project`, `profileVersion`,
 `capabilitiesRevision`, `instrument`, `board`, `pins`, `network`, `midi`,
-`stringFretSelection`, `strings`, `servos`). Field names match the firmware core
-(`firmware/src/core/…`). Each entry in `servos` carries
-`source` (`"pca"`/`"gpio"`), `stringIndex`, `pcaBoard`, `channel` and `gpio`
-alongside its µs calibration; each string in `strings` carries a `homing`
-sub-object and an optional `calibratedFretMm[]` table.
+`stringFretSelection`, `power`, `strings`, `servos`). Field names match the
+firmware core (`firmware/src/core/…`). Each entry in `servos` carries
+`function`, `source` (`"pca"`/`"gpio"`), `stringIndex`, `fret` (and `fretB` /
+`activeBUs` for a geared finger), `pcaBoard`, `channel` and `gpio` alongside its
+µs calibration; each string in `strings` carries only `{enabled, openNote,
+maxFret}` — there is no homing sub-object and no `calibratedFretMm` table.
+The default `project` and AP SSID are both `Servo-Plucked-Strings-GMB`.
 **The Wi-Fi password is never included in exports.**
 
 ## Notes

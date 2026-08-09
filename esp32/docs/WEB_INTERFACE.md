@@ -1,10 +1,4 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
-# Web Interface — Stepper-Plucked-Strings-GMB
+# Web Interface — Servo-Plucked-Strings-GMB
 
 > Sources: `SPECIFICATION.md` §9, §10, §18, §19, §20 · `STRING_FRET_SELECTION.md` §14–16 · `SYSEX_CAPABILITIES.md` §17–18.
 > Related documents: [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) · [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) · [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
@@ -22,34 +16,40 @@ required.
 Step-by-step wizard, recommended values, automatic pin assignment, wiring
 diagrams, test buttons, automatic validation, understandable error messages. By
 default it shows only the **green** GPIOs (see
-[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)).
+[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)), and it hides each servo's wiring
+(auto-assigned) and fine timing.
 
 ### Advanced mode (fine-tuning)
 
 Manual GPIO assignment (including the **yellow** pins, with an explanation),
-adjustment of speeds/accelerations/delays, velocity curves, diagnostics, editing
-of detailed parameters, JSON import/export.
+per-servo **wiring** (a PCA9685 channel **or** a direct ESP32 GPIO), the pulse
+window / travel / settle timing, optional **strum-lift / damper / auxiliary**
+actuators, SysEx block toggles, raw byte views, JSON import/export.
 
 ---
 
-## 2. First-configuration wizard — 9 steps (§10)
+## 2. First-configuration wizard — 8 steps (§10)
 
 | Step | Title | Content |
 | ----- | ----- | ------- |
-| 1 | **Identification** | name, description, number of strings, instrument type, proposed tuning, max frets (applied to all strings), **capo** |
-| 2 | **Board selection** | ESP32 model → available/reserved/recommended GPIOs (`esp32-s3-devkitc-1` profile); plus a **Network** panel: Wi-Fi mode (AP/station), SSID, hostname, AP name |
-| 3 | **Automatic assignment** | "Assign pins automatically" button (number of strings, interfaces, board, future USB, diagnostic port, I²C, sensors) |
-| 4 | **Mechanical configuration** | per string: axis enabled, vibrating length, transmission, motor wiring polarity (invert direction), **max speed & acceleration** (now in the simplified view), and Advanced geometry; a **jog ±1/±5 mm** control to check the motor direction live; **Copy mechanics to all strings** |
-| 5 | **Homing** | per axis: HOME GPIO, active level, homing search direction, **zero offset / rest position (FDC)**; Advanced adds speeds, back-off, timeout, LIMIT GPIO & level; **Home all axes now** and **Copy homing to all** |
-| 6 | **Servo calibration** | per servo: source/channel, rest, active, travel/settle, disable at rest; **strum/stroke motion** for strike roles — alternate stroke direction (+ up-stroke pulse), stroke time, minimum strike depth; **engage delay** for a strum lift; a **Test strike** pulse |
-| 7 | **Note calibration** | per string a **Fret offset from FDC** (nut position) that shifts every fret; automatic fret computation **or** manual calibration — move the axis and **Capture position** records the live motor position; an **Abs (FDC)** column; **Copy scale + calibration to all** |
-| 8 | **Test** | test each motor, sensor, finger, pick, note, string, a chord, the emergency stop |
-| 9 | **Validation** | "Valid configuration" or a precise list of problems; no actuator is enabled until the critical errors are fixed |
+| 1 | **Instrument** | name, description, number of strings (1–6), instrument type (loads a tuning + a full servo-per-fret wiring), **capo**; Advanced adds GM program / GMB type id / transpose. A **Board & network** card lives here too: reserve native USB, Wi-Fi mode (access point / client), AP SSID, station SSID, hostname |
+| 2 | **Strings & tuning** | per string: enabled, open note (MIDI), highest fret; an **Auto-wire fingers 1–N** button (one PCA9685 for the string) |
+| 3 | **Servos & frets** | per string (string-tab strip): the **plucker** servo (strike angle), then **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle, a **Geared** toggle (one servo → two frets), and a per-row **Details** editor (reverse direction; in Advanced: source PCA channel or direct GPIO, pulse min/max, travel, settle, cut PWM at rest). Advanced also shows the PCA channel map and the optional **strum-lift / damper / auxiliary** actuators |
+| 4 | **Install helper** | guided per-fret calibration: **arm the instrument**, pick a fret on the strip, adjust its contact angle until it cleanly frets the string (previewed live on the servo), test rest/press, **play the note**, save & move on. A geared finger calibrates three positions: **neutral / press A / press B** |
+| 5 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On, with a link to the full MIDI tab |
+| 6 | **Power** | current management: max servos moving at once, stagger between starts, fixed note-execution delay, strum lead |
+| 7 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); STOP (panic) |
+| 8 | **Validation** | "No problems found" or a precise list of problems; the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
 
-The per-string steps (4–7) show **one string at a time** via a string-tab strip,
-so a 6-string instrument stays navigable. General MIDI parameters (sustain CC,
-chord **saturation strategy**, velocity curve…) and a **Playback timing** card
-(fixed note-execution delay, finger lead, strum lead) live on the **MIDI** page.
+**Board** selection and **Network** settings are part of **step 1 (Instrument)**,
+and the **automatic pin assignment** is a button on the **GPIO Pins** tab — neither
+is a separate wizard step.
+
+The per-string steps (**Servos & frets** and **Install helper**) show **one string
+at a time** via a string-tab strip, so a 6-string instrument stays navigable. The
+**Simplified / Advanced** toggle hides the fine tuning (pulse window, travel/settle,
+per-servo wiring) in Simplified mode. General MIDI parameters (sustain, chord
+**saturation strategy**, velocity curve…) live on the **MIDI** page.
 
 The step-by-step detail is in [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
 
@@ -68,7 +68,8 @@ changes are saved with the profile and apply after a reboot; the hotspot button
 switches to the access point immediately. See
 [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md). An audit of the settings & calibration
 UI is in [`WEB_AUDIT.md`](WEB_AUDIT.md).
-The computations for steps 4–7 are in [`CALIBRATION.md`](CALIBRATION.md).
+The per-fret contact-angle calibration performed by the Install helper is detailed
+in [`CALIBRATION.md`](CALIBRATION.md).
 
 ---
 
@@ -81,12 +82,13 @@ Main page — overall status:
 ```text
 overall state · Wi-Fi connection · MIDI source · active profile ·
 strings-ready count · notes playing · active faults ·
-temperatures · voltages · STOP button
+capabilities revision · STOP button
 ```
 
-Per string: status (state machine), current note, current fret, motor position,
-target position, remaining distance, HOME state, LIMIT state, finger state, pick
-state, last fault.
+Per string: status (state machine), open note, current note, current fret, finger
+state (**up / down**), plectrum state (**strike / rest**), last fault. There is no
+carriage position, HOME/LIMIT or temperature/voltage readout — the servo-per-fret
+firmware emits none.
 
 ### 3.2 MIDI page — string/fret selection (STRING_FRET_SELECTION §14–16)
 
@@ -119,8 +121,8 @@ the log.
 
 **Built-in test tool (§16)** — choose string, fret, MIDI note, velocity,
 channel; automatically sends string CC → fret CC → Note On → Note Off after a
-chosen duration, and displays each step (CC received, selection validated, axis
-moving, position reached, finger pressed, string plucked).
+chosen duration, and displays each step (CC received, selection validated, finger
+pressed, string plucked).
 
 ### 3.3 MIDI page — GMB identity and capabilities (SysEx §17–18)
 
@@ -153,21 +155,27 @@ Global channel, Omni mode, per-string channel, general/per-string transposition,
 note range, velocity curve (linear / soft / hard / exponential / custom), Note
 Off behavior, sustain pedal, chord grouping delay (default 3 ms), saturation
 strategy (see `NoteAllocator`, [`ARCHITECTURE.md`](ARCHITECTURE.md)). Velocity can
-act on the pick travel/speed, the attack delay, the plucking profile.
+act on the plectrum travel/speed, the attack delay, the plucking profile.
 
 ### 3.5 Profiles (§20)
 
-At least **8 profiles**. Functions: create, copy, rename, delete, export, import,
-restore, set the startup profile. **JSON** exchange format:
+Up to **8 profile slots**. Functions: create, copy, rename, delete, export, import,
+restore, set the startup slot. **JSON** exchange format:
 
 ```json
 {
-  "project": "Stepper-Plucked-Strings-GMB",
+  "project": "Servo-Plucked-Strings-GMB",
   "profileVersion": 1,
-  "instrument": { "name": "Ukulele 4 strings", "stringCount": 4 },
-  "board": { "profile": "esp32-s3-devkitc-1", "reserveUsb": true, "automaticPinAssignment": true },
-  "network": { "mode": "station", "hostname": "gmb-ukulele" },
-  "strings": []
+  "capabilitiesRevision": 1,
+  "instrument": { "name": "Ukulele GCEA", "stringCount": 4, "type": "ukulele" },
+  "board": { "profile": "esp32-s3-devkitc-1", "reserveUsb": true },
+  "network": { "mode": "accessPoint", "apSsid": "Servo-Plucked-Strings-GMB", "hostname": "gmb-ukulele" },
+  "power": { "maxConcurrentMoves": 3, "staggerMs": 8 },
+  "strings": [ { "enabled": true, "openNote": 67, "maxFret": 12 } ],
+  "servos": [
+    { "function": "finger", "stringIndex": 0, "fret": 1,
+      "source": "pca", "pcaBoard": 0, "channel": 0, "restUs": 1000, "activeUs": 1800 }
+  ]
 }
 ```
 
@@ -176,38 +184,47 @@ option is set).
 
 ---
 
-## 4. REST / WebSocket API (`web/` adapter)
+## 4. REST / WebSocket API (`platform/esp32/WebApi.cpp`)
 
-> API assumed for the Web layer (module §23 `web/RestApi`, `web/WebSocketStatus`,
-> `communication/WebSocketMidi`). It exposes the `Profile` / `PinManager` /
-> `SafetyManager` / `GmbSysEx` core described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Implemented by the Web layer (`platform/esp32/WebApi.cpp`; the static UI is served
+> from LittleFS). It exposes the `Profile` / `PinManager` / `SafetyManager` /
+> `GmbSysEx` core described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### 4.1 REST endpoints
 
 | Method | Endpoint | Role |
 | ------- | -------- | ---- |
 | `GET` | `/api/status` | overall status + per string (dashboard §19) |
+| `GET` | `/api/commands?id=N` | poll the outcome of a `202`-accepted command (queued / succeeded / refused / unknown) |
+| `GET` | `/api/capabilities` | current capabilities snapshot (read-only) |
+| `GET` | `/api/board/{id}` | board profile + GPIO capabilities (colors, filtering) |
+| `POST` | `/api/pins/auto` | auto-assign the board pins (SDA / SCL / SERVO_OE) for the draft |
+| `POST` | `/api/pins/validate` | validate the full profile → list of issues |
 | `GET` | `/api/profile` | active profile (JSON) |
 | `PUT` | `/api/profile` | replace the profile (draft → validation → activation) |
-| `GET` | `/api/profiles` | list of saved profiles |
-| `POST` | `/api/profiles` | create / copy / import a profile |
-| `GET` | `/api/board/{id}` | board profile + GPIO capabilities (colors, filtering) |
-| `POST` | `/api/pins/auto` | automatic assignment (`PinRequest`) → assignments |
-| `POST` | `/api/pins/validate` | pin validation → list of `PinError` |
+| `GET` | `/api/profiles` | list of saved profile slots |
+| `POST` | `/api/profiles` | save the profile to a numbered slot (`{slot, profile, startup}`) |
+| `POST` | `/api/profiles/load` | activate a stored slot |
+| `POST` | `/api/profiles/read` | read a slot **without** activating it (copy / rename / set-startup) |
+| `POST` | `/api/profiles/delete` | delete a slot |
+| `POST` | `/api/reset` | recover from panic / E-stop and re-arm |
 | `POST` | `/api/panic` | software panic (`SafetyManager::panic`) |
+| `POST` | `/api/test/note` | play a test note (channel, note, velocity, durationMs); armed only |
+| `POST` | `/api/test/servo` | drive a servo to rest/active, or to an exact `us` pulse and hold it (live calibration, incl. a geared finger's side B); armed only |
 | `POST` | `/api/hotspot` | switch to the access point + captive portal now (see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md)) |
-| `POST` | `/api/test/note` | play a test note (string, fret, note, velocity, channel) |
-| `POST` | `/api/test/servo` | pulse a servo to rest/active, or to an exact `us` pulse and hold it (live calibration, incl. a geared finger's side B); armed only |
-| `POST` | `/api/test/jog` | nudge one axis by a signed mm delta (armed only) |
-| `POST` | `/api/test/endstop` | read a HOME/LIMIT sensor for one axis |
-| `POST` | `/api/sysex/request` | simulate a GMB SysEx request → decoded response |
-| `GET` | `/api/capabilities` | current capabilities snapshot (read-only) |
+| `POST` | `/api/wifi` | store Wi-Fi credentials in NVS (never exported) |
+| `POST` | `/api/auth` | set the admin token (first-run bootstrap allowed) |
+| `POST` | `/api/storage/format` | deliberate LittleFS reformat |
+| `POST` | `/api/sysex/request` | run a GMB SysEx buffer → decoded response |
+
+There are **no** stepper `jog` / `endstop` routes: servo-per-fret has no carriage
+or HOME/LIMIT sensors. Per-fret finger calibration uses `POST /api/test/servo`.
 
 ### 4.2 WebSocket
 
 | Channel | Role |
 | ----- | ---- |
-| `WS /ws/midi` | inbound/outbound MIDI stream (MIDI monitor §15, binary WebSocket transport) |
+| `WS /ws/midi` | inbound/outbound MIDI stream (MIDI monitor §15) |
 | `WS /ws/status` | real-time dashboard and per-string status (§19) |
 
 Notes:
