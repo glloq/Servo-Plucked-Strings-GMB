@@ -1,10 +1,4 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
-# MIDI Protocol — Stepper-Plucked-Strings-GMB
+# MIDI Protocol — Servo-Plucked-Strings-GMB
 
 > Sources: `SPECIFICATION.md` §8 · `STRING_FRET_SELECTION.md` (full) · `SYSEX_CAPABILITIES.md` (full).
 > Code: `firmware/src/core/midi/{MidiEvent.h, StringFretSelector.*}`, `core/gmb/{GmbSysEx.*, Capabilities.*}`.
@@ -186,11 +180,11 @@ struct NoteResolution {
 ### 2.9 Early preparation
 
 If `prepareOnCompleteSelection` (enabled by default), as soon as a string/fret
-pair is complete, the controller can start the mechanical preparation (finger
-release, motor movement) **without waiting for the Note On**. The Note On retains
-its role as the musical trigger. If the motor has not reached the fret at the
-moment of the Note On: the pluck is queued, the motor finishes, the finger
-presses, then the pluck executes — **no early plucking**.
+pair is complete, the controller can start the mechanical preparation (release
+the current finger, then press the target fret) **without waiting for the Note
+On**. The Note On retains its role as the musical trigger. If the finger has not
+yet settled on the fret at the moment of the Note On: the pluck is queued, the
+finger finishes settling, then the pluck executes — **no early plucking**.
 
 ### 2.10 Note / string / fret consistency (`NotePositionPolicy`)
 
@@ -438,7 +432,7 @@ F7
 | 2 | `kCapabilitiesChanged` | general capabilities changed |
 | 3 | `kStringConfigChanged` | string configuration changed |
 | 4 | `kCcMappingChanged` | CC mapping changed |
-| 5 | `kRestartRequired` | restart or new homing required |
+| 5 | `kRestartRequired` | restart / reconfiguration required |
 | 6 | reserved | — |
 
 The notification does not carry all the capabilities: it prompts GMB to restart

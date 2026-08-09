@@ -1,9 +1,3 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
 # Opening and compiling the project in the Arduino IDE
 
 The firmware can be built **either with PlatformIO or with the Arduino IDE** —
@@ -96,7 +90,7 @@ The interface is served from LittleFS (`/www`). It is uploaded separately:
 ## 8. First startup
 
 At power-on, the ESP32 creates the Wi-Fi access point
-**`Stepper-Plucked-Strings-GMB`**. Connect to it and open
+**`Servo-Plucked-Strings-GMB`**. Connect to it and open
 `http://192.168.4.1` to launch the configuration wizard
 (see [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md)).
 

@@ -1,17 +1,11 @@
-> ⚙️ **Version servo-par-frette (ESP32).** Ce firmware remplace le moteur pas-à-pas
-> par un servo dédié à **chaque frette** : les passages « stepper / homing / position
-> en mm / fin de course » ci-dessous **ne s'appliquent pas** à cette version. Modèle et
-> réglages : [`../README.md`](../README.md), [`CALIBRATION.md`](CALIBRATION.md),
-> [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md), [`SAFETY.md`](SAFETY.md).
-
 # Specification — pointer
 
-The authoritative **specification** for Stepper-Plucked-Strings-GMB is located
+The authoritative **specification** for Servo-Plucked-Strings-GMB is located
 at the root of the repository:
 
 - 📄 [`../SPECIFICATION.md`](../SPECIFICATION.md) — main
-  specification (architecture, GPIO, homing, notes, servos, state machines,
-  allocation, MIDI, safety, phases, deliverables).
+  specification (architecture, GPIO, servo-per-fret config, notes, state
+  machines, allocation, MIDI, safety, phases, deliverables).
 
 This file is a simple pointer: the content is **not** duplicated here in order
 to keep a single source of truth.
@@ -36,7 +30,7 @@ connection with the code implemented in `firmware/src/core/*`:
 | [`WEB_AUDIT.md`](WEB_AUDIT.md) | audit of the settings & calibration UI (findings + fixes) | §9, §10 |
 | [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md) | captive portal + BOOT-button hotspot (auto-open config page) | §8 |
 | [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) | MIDI transport, string/fret selection, GMB SysEx | §8 + related specs |
-| [`CALIBRATION.md`](CALIBRATION.md) | steps/mm, homing, frets, servos | §12–15 |
+| [`CALIBRATION.md`](CALIBRATION.md) | servo-per-fret model, finger & geared calibration, install helper, current management | §14–15 |
 | [`GEARED_FINGERS.md`](GEARED_FINGERS.md) | geared finger (1 servo → 2 frets): study, config, calibration | §5.2, §15 |
 | [`SAFETY.md`](SAFETY.md) | safe states, panic, E-stop, power supply | §21, §22 |
 | [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md) | beginner's guide to the wizard | §26 |
