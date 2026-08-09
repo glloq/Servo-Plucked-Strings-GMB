@@ -57,6 +57,17 @@
     return null;
   }
   function servoIndexOf(sv) { return GMB.state.profile.servos.indexOf(sv); }
+  // First per-string servo of a given role (strumLift / damper / ...), or null.
+  function perStringServo(strIdx, fn) {
+    var list = GMB.state.profile.servos;
+    for (var i = 0; i < list.length; i++)
+      if (list[i].function === fn && list[i].stringIndex === strIdx) return list[i];
+    return null;
+  }
+  // Global auxiliary actuators (stringIndex -1), in profile order.
+  function auxServos() {
+    return GMB.state.profile.servos.filter(function (s) { return s.function === 'aux'; });
+  }
 
   // Lowest free PCA channel on a board (0..15), or -1 if the board is full.
   function freeChannel(board) {
@@ -118,6 +129,27 @@
     GMB.state.profile.servos.push(
       GMB.servoDefaults('pluck', strIdx,
         { pcaBoard: board, channel: ch < 0 ? 0 : ch, activeUs: 1700, travelMs: 90, settleMs: 20 }));
+    GMB.markDirty();
+  }
+
+  // Pick a free PCA slot, preferring `preferBoard` (a string's own board), then
+  // scanning the other boards. Falls back to board 0 / channel 0 when everything is
+  // full — the user can re-wire or switch the new servo to a direct GPIO afterwards.
+  function pickPcaSlot(preferBoard) {
+    var b = preferBoard >= 0 ? preferBoard : 0;
+    var ch = freeChannel(b);
+    if (ch < 0) for (b = 0; b < 8; b++) { ch = freeChannel(b); if (ch >= 0) break; }
+    if (ch < 0) { b = preferBoard >= 0 ? preferBoard : 0; ch = 0; }
+    return { board: b, channel: ch };
+  }
+
+  // Add an optional actuator (strumLift / damper / aux) on a sensible default PCA
+  // slot; the user can switch it to a direct GPIO or re-wire it in the editor.
+  function addRoleServo(fn, strIdx) {
+    var slot = pickPcaSlot(strIdx);
+    var opts = { pcaBoard: slot.board, channel: slot.channel };
+    if (fn === 'strumLift') { opts.restUs = 1000; opts.activeUs = 1600; opts.engageDelayMs = 20; }
+    GMB.state.profile.servos.push(GMB.servoDefaults(fn, strIdx, opts));
     GMB.markDirty();
   }
 
@@ -289,6 +321,70 @@
 
   // ---- Step 3: Servos & frets ----------------------------------------------
 
+  // ---- direct-GPIO pin picker (same rules as the GPIO Pins tab) -------------
+
+  // Board capability model. The ESP32-S3-DevKitC-1 is the only supported board and
+  // GMB.mockBoard() is a faithful mirror of the firmware BoardProfile, so it is used
+  // synchronously as the pin source; on a real device we also fetch the active board
+  // profile once (/api/board) and re-render when it arrives, in case it ever differs.
+  var boardModel = null, boardTried = false;
+  function boardPins() {
+    if (boardModel && boardModel.pins) return boardModel.pins;
+    var fb = (GMB.mockBoard && GMB.mockBoard()) || { pins: [] };
+    if (!boardTried) {
+      boardTried = true;
+      var id = (GMB.state.profile.board && GMB.state.profile.board.profile) || fb.identifier;
+      GMB.api.getBoard(id).then(function (b) {
+        if (b && b.pins) { boardModel = b; if (GMB.state.current === 'wizard') drawStep(); }
+      }).catch(function () {});
+    }
+    return fb.pins || [];
+  }
+
+  // GPIOs already taken by a board signal (SDA/SCL/OE…) or another direct servo,
+  // each mapped to a short label explaining the clash. `self` is excluded.
+  function usedGpios(self) {
+    var p = GMB.state.profile, used = {};
+    p.pins.forEach(function (a) { if (a.gpio >= 0) used[a.gpio] = a.signal || 'signal'; });
+    p.servos.forEach(function (s) {
+      if (s !== self && s.enabled && s.source === 'gpio' && s.gpio >= 0)
+        used[s.gpio] = (s.function || 'servo') + (s.stringIndex >= 0 ? ' S' + (s.stringIndex + 1) : '');
+    });
+    return used;
+  }
+
+  // A <select> of output-capable GPIOs for a direct servo: reserved / USB-reserved /
+  // already-used pins are filtered out (same capability rules as the Pins tab), so a
+  // user can only pick a pin the firmware will accept. The current pin stays listed
+  // even if it now conflicts, so switching source never silently drops a value.
+  function servoGpioSelect(sv) {
+    var used = usedGpios(sv);
+    var reserveUsb = GMB.state.profile.board && GMB.state.profile.board.reserveUsb;
+    var sel = h('select');
+    sel.appendChild(h('option', { value: -1, selected: !(sv.gpio >= 0) }, '— select a GPIO —'));
+    var seen = {};
+    boardPins().forEach(function (cap) {
+      if (used[cap.gpio]) return;
+      if (cap.reserved || cap.preference === 'reserved') return;
+      if (cap.usb && reserveUsb) return;
+      if (cap.preference === 'caution' && !GMB.isAdvanced()) return;
+      if (!GMB.pinSupports(cap, 'servo')) return;
+      seen[cap.gpio] = true;
+      sel.appendChild(h('option', { value: cap.gpio, selected: cap.gpio === sv.gpio },
+        'GPIO' + cap.gpio + (cap.preference === 'caution' ? ' (caution)' : '')));
+    });
+    if (sv.gpio >= 0 && !seen[sv.gpio]) {
+      var why = used[sv.gpio] ? ' — conflict: ' + used[sv.gpio] : ' (current)';
+      sel.appendChild(h('option', { value: sv.gpio, selected: true }, 'GPIO' + sv.gpio + why));
+    }
+    sel.addEventListener('change', function () {
+      sv.gpio = Number(sel.value); GMB.markDirty(); drawStep();
+    });
+    return sel;
+  }
+
+  // Wiring editor for ONE servo — its signal source (PCA9685 channel or a direct
+  // ESP32 GPIO) — reused for every role: fingers, pluckers, strum-lift, damper, aux.
   function servoSourceEditor(sv) {
     var srcSel = GMB.input(sv, 'source', {
       type: 'select', options: [{ value: 'pca', label: 'PCA9685' }, { value: 'gpio', label: 'Direct GPIO' }],
@@ -296,7 +392,7 @@
     });
     var fields = [GMB.field('Source', srcSel)];
     if (sv.source === 'gpio') {
-      fields.push(GMB.field('GPIO', GMB.input(sv, 'gpio', { type: 'number', min: -1, max: 48 })));
+      fields.push(GMB.field('GPIO', servoGpioSelect(sv), 'output-capable free pins only'));
     } else {
       fields.push(GMB.field('PCA board', GMB.input(sv, 'pcaBoard', { type: 'number', min: 0, max: 7 })));
       fields.push(GMB.field('Channel', GMB.input(sv, 'channel', { type: 'number', min: 0, max: 15 })));
@@ -464,6 +560,95 @@
     return h('div', [h('span.muted', 'PCA board ' + board + ' channels: '), h('span.chan-map', chips)]);
   }
 
+  // ---- optional actuators (strum lift / damper / aux) -----------------------
+
+  // Shared editor body for a non-finger, non-plucker actuator: rest/active angles,
+  // a live test, and — in Advanced mode — the full wiring (source incl. direct GPIO)
+  // plus pulse/timing. Used for strum-lift, damper and auxiliary servos so every one
+  // of them can sit on a PCA channel OR a direct ESP32 GPIO, exactly like a finger.
+  function extraActuatorEditor(sv, hints) {
+    hints = hints || {};
+    var rows = [
+      angleSlider(sv, 'restUs', 'Rest angle', hints.rest),
+      angleSlider(sv, 'activeUs', 'Active angle', hints.active)
+    ];
+    if (sv.function === 'strumLift')
+      rows.push(GMB.field('Engage delay (ms)', GMB.input(sv, 'engageDelayMs',
+        { type: 'number', min: 0, max: 500 }), 'pause after the lift is down before the stroke fires'));
+    rows.push(GMB.field('Reverse direction', GMB.input(sv, 'inverted', { type: 'checkbox' })));
+    var block = [
+      h('div.grid2', rows),
+      h('div.row', [testServoBtn('Test rest', sv, false), testServoBtn('Test active', sv, true)])
+    ];
+    if (GMB.isAdvanced())
+      block.push(h('div.grid3', servoSourceEditor(sv).concat([
+        GMB.field('Pulse min (µs)', GMB.input(sv, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
+        GMB.field('Pulse max (µs)', GMB.input(sv, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
+        GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 2000 })),
+        GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 2000 })),
+        GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' }))
+      ])));
+    return block;
+  }
+
+  function actuatorBlock(title, sv, hints) {
+    return h('div.actuator', [
+      h('div.actuator-head', [h('strong', title),
+        GMB.button('Remove', function () { removeServo(sv); drawStep(); }, 'ghost')]),
+      extraActuatorEditor(sv, hints)
+    ]);
+  }
+
+  // Per-string optional actuators: a strum lift (lowers the plucker onto the string
+  // for a stroke, then raises it) and a damper (mutes the string). Both optional;
+  // each can be wired to a PCA channel or a direct GPIO via the editor above.
+  function optionalActuatorsCard(strIdx) {
+    var lift = perStringServo(strIdx, 'strumLift');
+    var damp = perStringServo(strIdx, 'damper');
+    var hasStriker = !!strikerFor(strIdx);
+    var items = [];
+
+    if (lift) items.push(actuatorBlock('Strum lift', lift,
+      { rest: 'raised — plucker off the string', active: 'lowered — plucker engaged' }));
+    else items.push(h('div.row', [
+      h('span.muted', 'Strum lift — lowers the plucker onto the string for a stroke, then raises it.'),
+      hasStriker
+        ? GMB.button('+ Add strum lift', function () { addRoleServo('strumLift', strIdx); drawStep(); }, 'ghost')
+        : h('span.muted', '(add a plucker first)')
+    ]));
+
+    if (damp) items.push(actuatorBlock('Damper', damp,
+      { rest: 'off the string', active: 'muting the string' }));
+    else items.push(h('div.row', [
+      h('span.muted', 'Damper — presses the string to mute it.'),
+      GMB.button('+ Add damper', function () { addRoleServo('damper', strIdx); drawStep(); }, 'ghost')
+    ]));
+
+    return h('div.card', [
+      h('div.card-head', [h('h3', 'Optional actuators · string ' + (strIdx + 1)),
+        h('span.muted', GMB.isAdvanced() ? 'wiring (incl. direct GPIO) below' : 'switch to Advanced for wiring')]),
+      items
+    ]);
+  }
+
+  // Global auxiliary actuators (not tied to a string; stringIndex -1): any extra
+  // servo, each on a PCA channel or a direct GPIO.
+  function auxCard() {
+    var list = auxServos();
+    var items = list.map(function (sv, k) {
+      return actuatorBlock('Auxiliary #' + (k + 1), sv,
+        { rest: 'idle position', active: 'actuated position' });
+    });
+    items.push(h('div.row', [
+      GMB.button('+ Add auxiliary actuator', function () { addRoleServo('aux', -1); drawStep(); }, 'ghost')
+    ]));
+    return h('div.card', [
+      h('div.card-head', [h('h3', 'Auxiliary actuators'),
+        h('span.muted', 'global — not tied to a string')]),
+      items
+    ]);
+  }
+
   function stepServos(body) {
     var p = GMB.state.profile;
     body.appendChild(h('p.muted',
@@ -511,6 +696,15 @@
         ])]),
       h('div.fret-lines', lines)
     ]));
+
+    // Optional per-string actuators (strum lift, damper) and global auxiliary
+    // servos. Each can be wired to a PCA channel OR a direct ESP32 GPIO, like the
+    // fingers and plucker. Shown in Advanced mode, or whenever one already exists
+    // so existing configuration is never hidden in Simplified mode.
+    if (GMB.isAdvanced() || perStringServo(activeStr, 'strumLift') || perStringServo(activeStr, 'damper'))
+      body.appendChild(optionalActuatorsCard(activeStr));
+    if (GMB.isAdvanced() || auxServos().length)
+      body.appendChild(auxCard());
   }
 
   // ---- Step 4: Install helper (guided per-fret calibration) -----------------
@@ -750,6 +944,9 @@
     p.strings.forEach(function (s, i) {
       if (!s.enabled) return;
       if (!strikerFor(i)) out.push({ level: 'error', field: 'string ' + i, message: 'no plucker/strum servo' });
+      // A strum lift only makes sense paired with a striker to lift (mirrors firmware).
+      if (perStringServo(i, 'strumLift') && !strikerFor(i))
+        out.push({ level: 'error', field: 'string ' + i, message: 'strum lift has no plucker/strum servo to lift' });
       if (s.maxFret > 0 && GMB.availableFrets(p, i).length === 0)
         out.push({ level: 'warning', field: 'string ' + i, message: 'no finger servo — only the open string plays' });
     });
