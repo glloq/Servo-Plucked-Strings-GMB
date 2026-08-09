@@ -28,22 +28,21 @@ actuators, SysEx block toggles, raw byte views, JSON import/export.
 
 ---
 
-## 2. First-configuration wizard — 8 steps (§10)
+## 2. First-configuration wizard — 7 steps (§10)
 
 | Step | Title | Content |
 | ----- | ----- | ------- |
-| 1 | **Instrument** | name, description, number of strings (1–6), instrument type (loads a tuning + a full servo-per-fret wiring), **capo**; Advanced adds GM program / GMB type id / transpose. A **Board & network** card lives here too: reserve native USB, Wi-Fi mode (access point / client), AP SSID, station SSID, hostname |
-| 2 | **Strings & tuning** | per string: enabled, open note (MIDI), highest fret; an **Auto-wire fingers 1–N** button (one PCA9685 for the string) |
-| 3 | **Frets** | the **finger servos only**, per string (string-tab strip): **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle and a **Geared** toggle (one servo → two frets). A clickable **coverage strip** shows equipped / geared / calibrated frets; clicking a fret opens its **inline guided calibration** (contact + rest angle previewed live, test rest/press, **play the note**, mark calibrated). Advanced adds the PCA channel map and per-servo wiring (source PCA channel or direct GPIO, pulse min/max, travel, settle, cut PWM at rest). A **test bench** sweeps one string or all strings |
-| 4 | **Plucking** | the **plucking mechanism only**, per string: the **plucker** servo (rest + strike angle), plus an optional **strum lift** and **damper**, and global **auxiliary** actuators. Test rest/strike and **pluck the open string**; a **test bench** plucks every open string, sweeps every plucker, and tests the strum lifts / dampers |
-| 5 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On, with a link to the full MIDI tab |
-| 6 | **Power** | current management: max servos moving at once, stagger between starts, fixed note-execution delay, strum lead |
-| 7 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); STOP (panic) |
-| 8 | **Validation** | "No problems found" or a precise list of problems; the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
+| 1 | **Builder** | the **Instrument Builder** — one adaptive screen driven by the *mechanical* choices. Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), set **strings & tuning** (count 1–6, per-string open note + max fret, a **tuning helper**), then choose the **fretting mechanism** (one servo per fret · **geared low neck** · open-string-only · custom) and the **sounding mechanism** (individual **pick** vs per-string **strum**, + optional strum-lift / damper). Live **finger-servo counts** and a **capacity meter** (PCA channels/boards, direct-GPIO limit) update as you choose; **Generate wiring** builds the servo list. Advanced adds capo / transpose / GM tags and the Board & network card |
+| 2 | **Frets** | the **finger servos only**, per string (string-tab strip): **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle and a **Geared** toggle (one servo → two frets). A clickable **coverage strip** shows equipped / geared / calibrated frets; clicking a fret opens its **inline guided calibration** (contact + rest angle previewed live, test rest/press, **play the note**, mark calibrated, **apply the angle to all frets**). An open-only string shows a banner with a one-click *Equip frets*. Advanced adds the PCA channel map and per-servo wiring. A **test bench** sweeps one string or all strings |
+| 3 | **Plucking** | the **plucking mechanism only**, per string: the **plucker / strum** servo (rest + strike angle); a strum striker also exposes its **stroke shaping** (alternate up/down, up-stroke angle, stroke time, min strike depth). Plus an optional **strum lift** and **damper**, and global **auxiliary** actuators. A **test bench** plucks every open string, sweeps every plucker, runs a strum down/up stroke, and tests the strum lifts / dampers |
+| 4 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On, with a link to the full MIDI tab |
+| 5 | **Power** | current management: max servos moving at once, stagger between starts, fixed note-execution delay, strum lead |
+| 6 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); a full-instrument **test bench**; STOP (panic) |
+| 7 | **Validation** | "No problems found" or a precise list of problems (incl. guard-rail warnings: contact≈rest angle, geared neutral outside press A/B); the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
 
-**Board** selection and **Network** settings are part of **step 1 (Instrument)**,
-and the **automatic pin assignment** is a button on the **GPIO Pins** tab — neither
-is a separate wizard step.
+**Board** selection and **Network** settings live in the Builder (Advanced) and in
+the **Settings** modal; the **automatic pin assignment** is a button on the
+**GPIO Pins** tab — neither is a separate wizard step.
 
 The per-string steps (**Frets** and **Plucking**) show **one string at a time** via
 a string-tab strip, so a 6-string instrument stays navigable. The frets (frettes)

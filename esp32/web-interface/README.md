@@ -72,7 +72,7 @@ web-interface/
 │   ├── app.js            shell, routing, DOM helpers, draft-profile state, mode toggle
 │   ├── dashboard.js      dashboard (§19)
 │   ├── pins.js           GPIO assignment grid (§11)
-│   ├── wizard.js         8-step setup wizard — Frets and Plucking configured separately (§10)
+│   ├── wizard.js         7-step wizard — mechanical Instrument Builder + separate Frets/Plucking (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
 │   ├── midiselect.js     MIDI page: string/fret selection (§14) + params (§18) + test tool (§16)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
@@ -89,16 +89,42 @@ and **Advanced** (manual GPIO assignment including caution pins, per-servo wirin
 / damper / auxiliary actuators, SysEx block toggles, raw byte views), per
 SPECIFICATION.md §9.2.
 
-## Frets and Plucking — configured separately (wizard steps 3–4)
+## Instrument Builder — mechanical-choice-driven creation (wizard step 1)
 
-The two physical halves of each string are set up on their **own steps**, so the
-frets (frettes) and the plucking (grattage) can each be equipped, calibrated and
-tested independently. The wizard configures a full **servo-per-fret** instrument
-(1–6 strings): each fret position has its own finger servo plus a pluck/strum
-servo per string, **with or without a PCA9685**. Every actuator step carries an
+The **type is cosmetic**; an instrument is defined by its **mechanics**. Step 1 is
+one adaptive **Builder** screen that makes those choices explicit and generates the
+servo wiring for you, so any plucked/strummed string instrument (1–6 strings) can
+be set up quickly:
+
+- **Starting point** — a preset (ukulele/guitar/bass/mandolin/banjo) loads a tuning
+  + GM tags, or **Custom** for your own. Type only tags the name / GM program.
+- **Strings & tuning** — string count, per-string open note + max fret, and a
+  **tuning helper** (named tunings for the count, ± a semitone on all).
+- **Fretting mechanism** — *one servo per fret* (full chromatic) · **geared low
+  neck** (pair the wide low frets on one antagonistic servo each, plain high frets;
+  halves the low-neck servo count) · **open-string-only** (no frets) · **custom**
+  (keep hand-tuned wiring). Each card shows the **live finger-servo count**.
+- **Sounding mechanism** — individual **pick** (a plectrum per string) vs per-string
+  **strum**, plus optional **strum-lift** and **damper**.
+- **Wiring & capacity** — one PCA9685 per string by default, with a **capacity
+  meter** (channels per board vs 16, boards vs 8, direct-GPIO vs 8).
+- **Generate wiring** — builds the servo list from the choices (a *pending* pill
+  tells you when the committed wiring no longer matches). Auxiliary servos and any
+  string still marked *custom* are preserved.
+
+The mechanical choice is **not stored** in the profile (the firmware derives frets
+from the servo list); the Builder re-derives it from the current servos on entry.
+
+## Frets and Plucking — calibrated separately (wizard steps 2–3)
+
+After the Builder, the two physical halves of each string are calibrated and tested
+on their **own steps**, so the frets (frettes) and the plucking (grattage) can each
+be tuned independently. Each fret position has its own finger servo plus a
+pluck/strum servo per string, **with or without a PCA9685**. Both steps adapt to the
+Builder's choices (open-only → a banner; strum → its stroke controls) and carry an
 **Arm** control and a **test bench** (below).
 
-- **Frets (step 3) — the finger servos only.** Per string (string-tab strip), add
+- **Frets (step 2) — the finger servos only.** Per string (string-tab strip), add
   **one finger servo per fret** (1..`maxFret`; frets need not be contiguous — gaps
   are allowed); a finger can be **geared** (one servo drives two frets: side A =
   `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted). A clickable
@@ -109,11 +135,13 @@ servo per string, **with or without a PCA9685**. Every actuator step carries an
   calibrates three positions — **neutral / press A / press B** — each driven to its
   exact `us` pulse and held (`POST /api/test/servo` with `us`).
 
-- **Plucking (step 4) — the plectrum and its helpers only.** Per string, calibrate
-  the **pluck/strum** servo (rest + strike angle), and optionally add a **strum
-  lift** (lowers the plucker onto the string for a stroke, then raises it) and a
-  **damper** (mutes the string). Global **auxiliary** actuators (`stringIndex = -1`)
-  live here too. Test **rest / strike** and **pluck the open string**.
+- **Plucking (step 3) — the plectrum and its helpers only.** Per string, calibrate
+  the **pluck/strum** servo (rest + strike angle); a **strum** striker also exposes
+  its **stroke shaping** (alternate up/down, up-stroke angle, stroke time, min strike
+  depth). Optionally add a **strum lift** (lowers the plucker onto the string for a
+  stroke, then raises it) and a **damper** (mutes the string). Global **auxiliary**
+  actuators (`stringIndex = -1`) live here too. Test **rest / strike** and **pluck
+  the open string**.
 
 Each servo picks its signal **source** (shown in Advanced mode):
 - **PCA9685** — choose `pcaBoard` (**0–7**, i.e. up to **8 boards / 128 channels**,
