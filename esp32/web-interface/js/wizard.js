@@ -516,6 +516,18 @@
     });
     return { global: global, perString: per };
   }
+  // Set the global fretting mechanism. Fretting is an instrument-wide choice (there
+  // is no per-string fretting control — only per-string *sounding*), so choosing it
+  // clears any per-string fretting override derived from a loaded profile, keeping
+  // the global card authoritative.
+  function setGlobalFretting(v) {
+    builder.global.fretting = v;
+    Object.keys(builder.perString).forEach(function (i) {
+      if (builder.perString[i].fretting !== undefined) delete builder.perString[i].fretting;
+      if (!Object.keys(builder.perString[i]).length) delete builder.perString[i];
+    });
+    drawStep();
+  }
   // The effective spec for string i (global merged with its overrides).
   function effectiveSpec(i) {
     var p = GMB.state.profile, g = builder.global, o = builder.perString[i] || {};
@@ -735,17 +747,17 @@
         radioCard(g.fretting === 'chromatic', 'One servo per fret',
           'A dedicated finger on every fret — maximum range, most servos.',
           fingerCountForFretting('chromatic', g.gearThreshold, strings) + ' fingers',
-          function () { g.fretting = 'chromatic'; drawStep(); }),
+          function () { setGlobalFretting('chromatic'); }),
         radioCard(g.fretting === 'geared', 'Geared low neck',
           'Pair the wide low frets on one antagonistic servo each; narrow high frets stay single. Halves the low-neck servo count.',
           fingerCountForFretting('geared', g.gearThreshold, strings) + ' fingers',
-          function () { g.fretting = 'geared'; drawStep(); }),
+          function () { setGlobalFretting('geared'); }),
         radioCard(g.fretting === 'open', 'Open string only',
           'No frets — each string plays its open note only (slide / open tunings).',
-          '0 fingers', function () { g.fretting = 'open'; drawStep(); }),
+          '0 fingers', function () { setGlobalFretting('open'); }),
         radioCard(g.fretting === 'custom', 'Custom',
           'Keep the current per-fret wiring; equip frets yourself on the Frets step.',
-          null, function () { g.fretting = 'custom'; drawStep(); })
+          null, function () { setGlobalFretting('custom'); })
       ])
     ].concat(fretExtra.length ? [h('div.row', fretExtra)] : [])));
 
