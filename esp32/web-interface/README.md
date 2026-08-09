@@ -68,11 +68,11 @@ web-interface/
 ├── index.html            SPA shell + script load order
 ├── css/style.css         responsive styling, light/dark via prefers-color-scheme
 ├── js/
-│   ├── api.js            REST + WebSocket client, board profile, mock backend
+│   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
 │   ├── app.js            shell, routing, DOM helpers, draft-profile state, mode toggle
 │   ├── dashboard.js      dashboard (§19)
 │   ├── pins.js           GPIO assignment grid (§11)
-│   ├── wizard.js         8-step servo-per-fret setup wizard (§10)
+│   ├── wizard.js         8-step setup wizard — Frets and Plucking configured separately (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
 │   ├── midiselect.js     MIDI page: string/fret selection (§14) + params (§18) + test tool (§16)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
@@ -89,41 +89,67 @@ and **Advanced** (manual GPIO assignment including caution pins, per-servo wirin
 / damper / auxiliary actuators, SysEx block toggles, raw byte views), per
 SPECIFICATION.md §9.2.
 
-## Servos & frets, and the install helper (wizard steps 3–4)
+## Frets and Plucking — configured separately (wizard steps 3–4)
 
-The setup wizard configures a full **servo-per-fret** instrument (1–6 strings):
-each fret position has its **own finger servo** plus a **pluck/strum** servo per
-string, **with or without a PCA9685**:
+The two physical halves of each string are set up on their **own steps**, so the
+frets (frettes) and the plucking (grattage) can each be equipped, calibrated and
+tested independently. The wizard configures a full **servo-per-fret** instrument
+(1–6 strings): each fret position has its own finger servo plus a pluck/strum
+servo per string, **with or without a PCA9685**. Every actuator step carries an
+**Arm** control and a **test bench** (below).
 
-- **Servos & frets (step 3).** Per string (string-tab strip), add **one finger
-  servo per fret** (1..`maxFret`; frets need not be contiguous — gaps are allowed)
-  and a **pluck/strum** servo; a finger can be **geared** (one servo drives two
-  frets: side A = `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted).
-  Optional per-string **strum lift** (lowers the plucker onto the string for a
-  stroke, then raises it) and **damper**, plus global **auxiliary** actuators, are
-  available in Advanced mode. Each servo picks its signal **source**:
-  - **PCA9685** — choose `pcaBoard` (**0–7**, i.e. up to **8 boards / 128
-    channels**, addresses 0x40–0x47) and `channel` (0–15). A compact
-    channel-availability map flags a duplicate `board+channel` in red.
-  - **Direct GPIO** — choose a free ESP32 pin, filtered with the same
-    green/yellow/red capability rules as the pin grid (reserved/USB pins hidden,
-    caution pins Advanced-only, pins already used by a board signal or another
-    servo excluded). At most **8 direct-GPIO servos** (one LEDC channel each).
+- **Frets (step 3) — the finger servos only.** Per string (string-tab strip), add
+  **one finger servo per fret** (1..`maxFret`; frets need not be contiguous — gaps
+  are allowed); a finger can be **geared** (one servo drives two frets: side A =
+  `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted). A clickable
+  **coverage strip** shows which frets are equipped, geared (⚙) and calibrated;
+  clicking a fret opens its **inline guided calibration** — set the contact / rest
+  angle with a slider (previewed live on the servo), **test rest / press**, **play
+  the note** (`POST /api/test/note`) and **mark it calibrated**. A geared finger
+  calibrates three positions — **neutral / press A / press B** — each driven to its
+  exact `us` pulse and held (`POST /api/test/servo` with `us`).
 
-  The system works with **no PCA at all** (every servo on a direct GPIO) or any
-  mix. Per-string servos get their `stringIndex` set automatically; global
-  auxiliary servos use `stringIndex = -1`. Each servo carries its calibration
-  (rest/active µs, pulse min/max, inverted, travelMs, settleMs, disableAtRest) and
-  **Test rest/active** buttons (`POST /api/test/servo`).
+- **Plucking (step 4) — the plectrum and its helpers only.** Per string, calibrate
+  the **pluck/strum** servo (rest + strike angle), and optionally add a **strum
+  lift** (lowers the plucker onto the string for a stroke, then raises it) and a
+  **damper** (mutes the string). Global **auxiliary** actuators (`stringIndex = -1`)
+  live here too. Test **rest / strike** and **pluck the open string**.
 
-- **Install helper (step 4).** A guided, per-fret contact-angle calibration. **Arm
-  the instrument**, pick a fret on the clickable strip, then adjust its **contact
-  angle** with the slider until the finger cleanly frets the string — each move is
-  previewed live on the servo. Test **rest / press**, **play the note**
-  (`POST /api/test/note`), then save & move on. A geared finger calibrates three
-  positions — **neutral / press A / press B** — each driven to its exact `us` pulse
-  and held (`POST /api/test/servo` with `us`). The strip colours each fret
-  no-servo / to-do / calibrated so nothing is missed.
+Each servo picks its signal **source** (shown in Advanced mode):
+- **PCA9685** — choose `pcaBoard` (**0–7**, i.e. up to **8 boards / 128 channels**,
+  addresses 0x40–0x47) and `channel` (0–15). A compact channel-availability map
+  flags a duplicate `board+channel` in red.
+- **Direct GPIO** — choose a free ESP32 pin, filtered with the same green/yellow/red
+  capability rules as the pin grid (reserved/USB pins hidden, caution pins
+  Advanced-only, pins already used by a board signal or another servo excluded). At
+  most **8 direct-GPIO servos** (one LEDC channel each).
+
+The system works with **no PCA at all** (every servo on a direct GPIO) or any mix.
+Per-string servos get their `stringIndex` set automatically. Each servo carries its
+calibration (rest/active µs, pulse min/max, inverted, travelMs, settleMs,
+disableAtRest).
+
+## Testing one servo or a whole group
+
+Every actuator step (Frets, Plucking) and the final **Test** step share a **test
+bench** driven by a small client-side **sequencer** (`GMB.testRunner`). Because the
+firmware drives **one servo at a time** (`POST /api/test/servo`), a group test is
+played as an ordered sequence with a dwell between moves, so the in-rush current
+stays bounded and each move is visible. Only one sequence runs at a time; a live
+status line shows progress and a **Stop** button (plus the STOP / panic button and
+navigating away) cancels it immediately.
+
+- **Single servo** — the rest / press / strike / exact-`us` buttons on each servo.
+- **Frets group tests** — *Sweep this string* (press then release every equipped
+  fret in turn), *Sweep all strings*, *All fingers to rest*.
+- **Plucking group tests** — *Pluck each open string*, *Sweep pluck servos*, and
+  *Test strum lifts* / *Test dampers* when present.
+- **Full instrument (Test step)** — *Play all open strings*, *Sweep all fingers*,
+  *Sweep all pluckers*, *Scale on the active string*, *Test everything* (open plus
+  a couple of fretted notes on each string, end-to-end).
+
+Group tests preview the **draft** calibration (the unsaved `us` values), so you can
+sweep a string right after adjusting an angle, before saving.
 
 ## Backend endpoints
 
