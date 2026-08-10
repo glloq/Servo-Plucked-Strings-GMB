@@ -233,7 +233,10 @@ int rebuildRuntimeCapabilities() {
 
 void notifyCapabilitiesChanged() {
     if (!g_midi.hasLastSender()) return;
-    std::vector<uint8_t> msg = g_sysex.notification(0x01);
+    // GMB v2 block 0x11 change flags: bit 1 = INSTRUMENTS_CHANGED (the capability
+    // set / string config moved). GMB uses it only as a cue to re-read the
+    // handshake and compare the revision, so an approximate flag is fine.
+    std::vector<uint8_t> msg = g_sysex.notification(0x02);
     if (!msg.empty()) g_midi.notifyLastSender(msg.data(), msg.size());
 }
 

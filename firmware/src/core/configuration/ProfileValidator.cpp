@@ -372,6 +372,14 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         err("instrument.transpose", "Transpose must be within +/-48 semitones");
     if (p.midi.transpose < -48 || p.midi.transpose > 48)
         err("midi.transpose", "MIDI transpose must be within +/-48 semitones");
+    // Announced polyphony: 0 = automatic; a custom cap can never exceed the number
+    // of physical strings (the snapshot also clamps it to the active count).
+    if (p.instrument.polyphonyMax > kMaxStrings)
+        err("instrument.polyphonyMax",
+            "Polyphony must be 0 (automatic) or at most the string count");
+    else if (p.instrument.polyphonyMax > p.instrument.stringCount)
+        warn("instrument.polyphonyMax",
+             "Polyphony exceeds the string count and will be clamped");
     // Enum-backed fields must be within their defined range: a JSON import does a
     // static_cast, so an out-of-range value would reach a switch and hit an
     // unintended default (audit P1-10).

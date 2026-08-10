@@ -1,5 +1,26 @@
 # Automatic capabilities communication via SysEx
 
+> **Implementation status — GMB v2 (JSON descriptor).**
+> The current [General-Midi-Boop](https://github.com/glloq/General-Midi-Boop)
+> controller no longer requests the fixed capability/string-config blocks
+> (5/6/7): it discovers an instrument from a **24-byte v2 handshake** and a
+> **JSON descriptor** (see `General-Midi-Boop/docs/SYSEX_IDENTITY.md`). The
+> firmware therefore now answers a Block-1 request with the v2 handshake
+> (`F0 7D 00 01 01 02 <instance_id[5]> <firmware[3]> <descriptor_size[3]>
+> <revision[5]> <flags> F7`), serves the descriptor over the segmented
+> **block `0x10`** transfer *and* over HTTP (`GET /gmb/descriptor.json`,
+> advertised by `flags` bit 0), and emits the **block `0x11`** change
+> notification. The descriptor is built from the same `CapabilitySnapshot`
+> described below (`buildSnapshot()` is unchanged in spirit) and serialised by
+> `firmware/src/core/gmb/GmbDescriptor.cpp`; encoders live in `GmbSysEx.cpp`.
+>
+> The fixed **Blocks 1 v1 / 5 / 6 / 7 / 8** specified in the rest of this
+> document are **retained as a deprecated fallback** (a pre-v2 host can still
+> request them) but are no longer the discovery path. Sections 5–13 below still
+> describe how the range, polyphony, tuning and CC list are *computed* — that
+> logic is unchanged and now feeds the JSON descriptor instead of the fixed
+> blocks. Polyphony is configurable via `instrument.polyphonyMax` (0 = automatic).
+
 ## 1. Objective
 
 Servo-Plucked-Strings-GMB must automatically communicate its capabilities to General-Midi-Boop.

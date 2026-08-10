@@ -217,6 +217,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     in["typeId"] = p.instrument.typeId;
     in["capo"] = p.instrument.capo;
     in["transpose"] = p.instrument.transpose;
+    in["polyphonyMax"] = p.instrument.polyphonyMax;
 
     JsonObject bo = doc["board"].to<JsonObject>();
     bo["profile"] = p.boardIdentifier;
@@ -348,6 +349,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.instrument.typeId = in["typeId"] | 4;
     out.instrument.capo = in["capo"] | 0;
     out.instrument.transpose = in["transpose"] | 0;
+    out.instrument.polyphonyMax = in["polyphonyMax"] | 0;
 
     JsonObjectConst bo = doc["board"];
     out.boardIdentifier = bo["profile"] | "esp32-s3-devkitc-1";

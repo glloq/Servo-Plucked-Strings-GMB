@@ -343,14 +343,20 @@ TEST(sysex_service_rate_limits_flood) {
     CHECK(!svc.handleMessage(req, sizeof(req), 100 + 200).empty());
 }
 
-// A config change increments the revision and the notification carries it.
+// A config change increments the revision and the (GMB v2 block 0x11)
+// notification carries it, little-endian.
 TEST(sysex_service_notification_after_change) {
     Profile p = ukulele();
     GmbSysExService svc;
     svc.rebuild(p);
     p.capabilitiesRevision = 2;  // config edited & saved
     svc.rebuild(p);
-    auto note = svc.notification(kStringConfigChanged);
-    CHECK_EQ((int)note[3], 0x08);
+    auto note = svc.notification(0x02);  // INSTRUMENTS_CHANGED
     CHECK(GmbSysEx::isWellFormed(note.data(), note.size()));
+    CHECK_EQ((int)note.size(), 12);
+    CHECK_EQ((int)note[3], 0x11);  // v2 change-notification block
+    CHECK_EQ((int)note[4], 0x02);  // spontaneous notification
+    uint32_t rev = note[5] | (note[6] << 7) | (note[7] << 14) |
+                   ((uint32_t)note[8] << 21) | ((uint32_t)(note[9] & 0x0F) << 28);
+    CHECK_EQ((int)rev, 2);
 }

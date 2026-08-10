@@ -1,7 +1,9 @@
 #include "TestFramework.h"
 #include "../src/core/configuration/Profile.h"
 #include "../src/core/gmb/Capabilities.h"
+#include "../src/core/gmb/GmbDescriptor.h"
 #include "../src/core/gmb/GmbSysEx.h"
+#include "../src/core/gmb/GmbSysExService.h"
 
 using namespace gmb;
 
@@ -91,7 +93,9 @@ TEST(block6_request_response) {
     CHECK_EQ((int)resp[3], 0x06);
 }
 
-// Block 7 v1 tuning is announced low -> high (SysEx spec section 8).
+// Block 7 v1 tuning is announced in physical string order (this profile is
+// already ascending, so positional == low->high here). Order is asserted more
+// strictly by sx2_tuning_positional_not_sorted below.
 TEST(block7_tuning_low_to_high) {
     Profile p = guitarProfile();
     CapabilitySnapshot s = buildSnapshot(p);
@@ -151,4 +155,167 @@ TEST(sysex_rejects_malformed) {
     SysExRequest r = GmbSysEx::parseRequest(unknown, sizeof(unknown));
     auto resp = GmbSysEx::respond(r, buildSnapshot(guitarProfile()));
     CHECK(resp.empty());
+}
+
+// ============================ GMB v2 (descriptor) ============================
+
+// A string with no finger servo on some frets is NOT contiguous: the range must
+// switch to discrete and exclude the unwired frets (audit SX-1).
+static Profile gappedString() {
+    Profile p = Profile::makeDefault("Gapped", 1, {60}, 5);  // fingers on frets 1..5
+    for (auto it = p.servos.begin(); it != p.servos.end();) {
+        if (it->function == "finger" && (it->fret == 3 || it->fret == 4))
+            it = p.servos.erase(it);
+        else
+            ++it;
+    }
+    return p;
+}
+
+TEST(sx1_discrete_excludes_unwired_frets) {
+    CapabilitySnapshot s = buildSnapshot(gappedString());
+    CHECK_EQ((int)s.capabilities.noteMode, 1);  // frets 3,4 missing -> discrete
+    auto in = [&](int n) {
+        for (uint8_t x : s.capabilities.discreteNotes)
+            if (x == n) return true;
+        return false;
+    };
+    CHECK(in(60));   // open
+    CHECK(in(61));   // fret 1
+    CHECK(in(62));   // fret 2
+    CHECK(in(65));   // fret 5
+    CHECK(!in(63));  // fret 3 has no servo
+    CHECK(!in(64));  // fret 4 has no servo
+}
+
+// A string with maxFret > 0 but NO finger servos plays only its open note; the
+// range must NOT advertise the whole span (the allocator's fretMask==0 sentinel
+// bug does not leak into the announced capabilities).
+TEST(sx1_no_finger_string_is_open_only) {
+    Profile p = Profile::makeDefault("Open", 1, {60}, 5);
+    for (auto it = p.servos.begin(); it != p.servos.end();) {
+        if (it->function == "finger") it = p.servos.erase(it);
+        else ++it;
+    }
+    CapabilitySnapshot s = buildSnapshot(p);
+    CHECK_EQ((int)s.capabilities.noteMin, 60);
+    CHECK_EQ((int)s.capabilities.noteMax, 60);  // open only, not 60..65
+    CHECK_EQ((int)s.stringConfig.tuning.size(), 1);
+}
+
+// Tuning is announced in physical string order, aligned with fretsPerString — NOT
+// sorted (audit SX-2), otherwise tuning[i] and fretsPerString[i] describe
+// different strings.
+TEST(sx2_tuning_positional_not_sorted) {
+    Profile p = Profile::makeDefault("Desc", 3, {64, 60, 67}, 5);
+    CapabilitySnapshot s = buildSnapshot(p);
+    CHECK_EQ((int)s.stringConfig.tuning.size(), 3);
+    CHECK_EQ((int)s.stringConfig.tuning[0], 64);
+    CHECK_EQ((int)s.stringConfig.tuning[1], 60);
+    CHECK_EQ((int)s.stringConfig.tuning[2], 67);
+    CHECK_EQ((int)s.stringConfig.fretsPerString.size(), 3);
+}
+
+// The global transpose is folded into the announced open pitch, so tuning + capo
+// reproduces the announced range (audit SX-3).
+TEST(sx3_transpose_folded_into_tuning_and_range) {
+    Profile p = Profile::makeDefault("Trans", 1, {60}, 5);
+    p.instrument.transpose = 2;
+    CapabilitySnapshot s = buildSnapshot(p);
+    CHECK_EQ((int)s.stringConfig.tuning[0], 62);  // 60 + 2
+    CHECK_EQ((int)s.capabilities.noteMin, 62);
+    CHECK_EQ((int)s.capabilities.noteMax, 67);  // 62 + 5 frets, all wired
+}
+
+// Configurable polyphony: 0 = auto (= active strings); a positive cap lowers it
+// and is clamped to the physical string count (audit SX-4).
+TEST(sx4_polyphony_max) {
+    Profile p = guitarProfile();
+    p.instrument.polyphonyMax = 4;
+    CHECK_EQ((int)buildSnapshot(p).capabilities.polyphony, 4);
+    p.instrument.polyphonyMax = 10;  // clamp to 6 strings
+    CHECK_EQ((int)buildSnapshot(p).capabilities.polyphony, 6);
+    p.instrument.polyphonyMax = 0;  // auto
+    CHECK_EQ((int)buildSnapshot(p).capabilities.polyphony, 6);
+}
+
+// The v2 handshake is exactly 24 bytes with proto_ver 0x02, a little-endian
+// descriptor_size and revision (matching the GMB DeviceManager decoder).
+TEST(v2_handshake_shape) {
+    CapabilitySnapshot s = buildSnapshot(guitarProfile());
+    s.revision = 300;
+    auto m = GmbSysEx::encodeHandshakeV2(s, 512, 0x03);
+    CHECK(GmbSysEx::isWellFormed(m.data(), m.size()));
+    CHECK_EQ((int)m.size(), 24);
+    CHECK_EQ((int)m[3], 0x01);  // block 1
+    CHECK_EQ((int)m[4], 0x01);  // response
+    CHECK_EQ((int)m[5], 0x02);  // proto_ver v2
+    CHECK_EQ((int)m.back(), 0xF7);
+    int descSize = m[14] | (m[15] << 7) | (m[16] << 14);
+    CHECK_EQ(descSize, 512);
+    uint32_t rev = m[17] | (m[18] << 7) | (m[19] << 14) | ((uint32_t)m[20] << 21) |
+                   ((uint32_t)(m[21] & 0x0F) << 28);
+    CHECK_EQ((int)rev, 300);
+    CHECK_EQ((int)m[22], 0x03);  // flags
+}
+
+// The descriptor JSON carries the v2 core fields, is 7-bit clean, and reassembles
+// from its 0x10 chunks byte-for-byte.
+TEST(v2_descriptor_json_and_chunking) {
+    CapabilitySnapshot s = buildSnapshot(guitarProfile());
+    std::string j = GmbDescriptor::toJson(s);
+    CHECK(j.find("\"gmb_descriptor\":2") != std::string::npos);
+    CHECK(j.find("\"family\":\"strings\"") != std::string::npos);
+    CHECK(j.find("\"string_count\":6") != std::string::npos);
+    CHECK(j.find("\"polyphony\":{\"max\":6") != std::string::npos);
+    for (char c : j) CHECK((static_cast<unsigned char>(c) & 0x80) == 0);  // 7-bit clean
+
+    size_t total = (j.size() + 199) / 200;
+    std::string re;
+    for (uint16_t idx = 0; idx < total; ++idx) {
+        auto ch = GmbSysEx::encodeDescriptorChunk(j, idx);
+        CHECK(GmbSysEx::isWellFormed(ch.data(), ch.size()));
+        int t = ch[5] | (ch[6] << 7);
+        CHECK_EQ(t, (int)total);
+        int i = ch[7] | (ch[8] << 7);
+        CHECK_EQ(i, (int)idx);
+        for (size_t k = 9; k + 1 < ch.size(); ++k) re += (char)ch[k];  // payload -> F7
+    }
+    CHECK(re == j);
+}
+
+// The v2 change notification is a 12-byte 0x11 frame with a little-endian revision.
+TEST(v2_change_notification) {
+    CapabilitySnapshot s = buildSnapshot(guitarProfile());
+    s.revision = 300;
+    auto m = GmbSysEx::encodeChangeNotification(s, 0x02);
+    CHECK(GmbSysEx::isWellFormed(m.data(), m.size()));
+    CHECK_EQ((int)m.size(), 12);
+    CHECK_EQ((int)m[3], 0x11);
+    CHECK_EQ((int)m[4], 0x02);
+    uint32_t rev = m[5] | (m[6] << 7) | (m[7] << 14) | ((uint32_t)m[8] << 21) |
+                   ((uint32_t)(m[9] & 0x0F) << 28);
+    CHECK_EQ((int)rev, 300);
+    CHECK_EQ((int)m[10], 0x02);
+}
+
+// End to end through the service: a Block-1 request now returns the v2 handshake
+// (level 1, descriptor_size > 0), and a 0x10 request returns a descriptor segment.
+TEST(v2_service_discovery) {
+    GmbSysExService svc;
+    svc.rebuild(guitarProfile());
+
+    uint8_t id[] = {0xF0, 0x7D, 0x00, 0x01, 0x00, 0xF7};
+    auto hs = svc.handleMessage(id, sizeof(id), 1);
+    CHECK_EQ((int)hs.size(), 24);
+    CHECK_EQ((int)hs[5], 0x02);
+    int descSize = hs[14] | (hs[15] << 7) | (hs[16] << 14);
+    CHECK(descSize > 0);  // level 1: a descriptor is available
+    CHECK_EQ((size_t)descSize, svc.descriptorJson().size());
+
+    uint8_t chunk[] = {0xF0, 0x7D, 0x00, 0x10, 0x00, 0x00, 0x00, 0xF7};
+    auto seg = svc.handleMessage(chunk, sizeof(chunk), 2);
+    CHECK(seg.size() > 9);
+    CHECK_EQ((int)seg[3], 0x10);
+    CHECK_EQ((int)seg[4], 0x01);
 }

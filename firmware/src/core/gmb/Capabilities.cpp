@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <set>
 
+#include "../Types.h"
 #include "../configuration/Profile.h"
 
 namespace gmb {
@@ -18,6 +19,7 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
 
     // ---- Identity ----
     snap.identity.deviceName = p.instrument.name;
+    snap.identity.model = p.project;
     snap.identity.features = 0x38;  // descriptor + capabilities + string config
     snap.identity.firmware[0] = 1;
     snap.identity.firmware[1] = 0;
@@ -27,22 +29,45 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     snap.descriptor.channel = channel;
     snap.descriptor.gmProgram = p.instrument.gmProgram;
     snap.descriptor.typeId = p.instrument.typeId;
+    snap.descriptor.type = p.instrument.type;
 
-    // ---- Playable range (spec section 5) ----
+    // ---- Playable range, tuning and per-string frets (spec §5 / §8) ----
+    // Playability follows the ACTUAL wired frets, not a contiguous assumption: a
+    // servo-per-fret string may equip only frets {1,3,5,12}, so the range, the
+    // discrete-note list and the per-string data are all built from
+    // availableFretMask() — the single source of truth for which frets exist
+    // (audit SX-1). Fret 0 (open string) is always playable. Tuning and
+    // fretsPerString are collected in PHYSICAL STRING ORDER and stay index-aligned
+    // (audit SX-2): tuning[i] and fretsPerString[i] must describe the same string.
+    // The announced open pitch folds in the global transpose so the announced
+    // tuning + capo reproduce the announced range (audit SX-3); capo stays a
+    // separate announced field.
     std::set<int> playable;
     int minNote = 128, maxNote = -1;
     uint8_t activeStrings = 0;
-    for (const auto& s : p.strings) {
+    uint8_t maxFretGlobal = 0;
+    std::vector<uint8_t> tuning;          // effective open pitch, physical order
+    std::vector<uint8_t> fretsPerString;  // declared reach, same order
+    for (size_t i = 0; i < p.strings.size(); ++i) {
+        const auto& s = p.strings[i];
         if (!s.enabled) continue;
         ++activeStrings;
-        int lo = s.openNote + capo + transpose;
-        int hi = lo + s.maxFret;
-        for (int n = lo; n <= hi; ++n) {
-            if (n < 0 || n > 127) continue;
+        maxFretGlobal = std::max(maxFretGlobal, s.maxFret);
+        const int openEff = s.openNote + transpose;  // pitch as addressed by MIDI
+        tuning.push_back(static_cast<uint8_t>(std::max(0, std::min(127, openEff))));
+        fretsPerString.push_back(s.maxFret);
+        const uint32_t mask = p.availableFretMask(i);
+        auto addFret = [&](int fret) {
+            const int n = openEff + capo + fret;
+            if (n < 0 || n > 127) return;
             playable.insert(n);
             minNote = std::min(minNote, n);
             maxNote = std::max(maxNote, n);
-        }
+        };
+        addFret(0);  // open string always playable
+        const int top = std::min<int>(s.maxFret, kMaxFret);
+        for (int f = 1; f <= top; ++f)
+            if ((mask >> f) & 1u) addFret(f);
     }
     if (maxNote < 0) {
         // No enabled/working string: the snapshot is NOT a playable instrument.
@@ -77,9 +102,15 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     }
 
     // ---- Polyphony (spec section 6) ----
-    caps.polyphony = polyphonyOverride >= 0
-                         ? static_cast<uint8_t>(polyphonyOverride)
-                         : activeStrings;
+    // Automatic = number of active strings. A profile-configured cap
+    // (instrument.polyphonyMax > 0) or an explicit runtime override lowers it, but
+    // it is never announced above the physical string count (audit SX-4).
+    if (polyphonyOverride >= 0)
+        caps.polyphony = static_cast<uint8_t>(std::min<int>(polyphonyOverride, activeStrings));
+    else if (p.instrument.polyphonyMax > 0)
+        caps.polyphony = std::min<uint8_t>(p.instrument.polyphonyMax, activeStrings);
+    else
+        caps.polyphony = activeStrings;
 
     // ---- Announced CCs (spec section 7): only activated ones ----
     caps.supportedCc.push_back(7);    // volume
@@ -94,38 +125,28 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     std::sort(caps.supportedCc.begin(), caps.supportedCc.end());
 
     // ---- String configuration (spec section 8 / 10) ----
-    StringInstrumentConfig& sc = snap.stringConfig;
-    sc.channel = channel;
     // Announce only the strings that are actually available (enabled). In a
     // degraded run the faulted axes are disabled in the runtime profile copy, so
-    // the whole string config shrinks consistently.
-    uint8_t enabledCount = 0;
-    uint8_t maxFret = 0;
-    for (const auto& s : p.strings) {
-        if (!s.enabled) continue;
-        ++enabledCount;
-        maxFret = std::max<uint8_t>(maxFret, s.maxFret);
-    }
-    sc.stringCount = enabledCount;
-    sc.fretCount = maxFret;
+    // the whole string config shrinks consistently. stringCount / tuning /
+    // fretsPerString all come from the single physical-order pass above so they
+    // stay index-aligned (audit SX-2).
+    StringInstrumentConfig& sc = snap.stringConfig;
+    sc.channel = channel;
+    sc.stringCount = activeStrings;
+    sc.fretCount = maxFretGlobal;
     sc.isFretless = 0;
     sc.capo = static_cast<uint8_t>(capo);
     sc.ccActive = p.selector.enabled ? 1 : 0;
     sc.ccString = p.selector.string.ccNumber;
     sc.ccFret = p.selector.fret.ccNumber;
-
-    // Tuning announced low -> high (spec section 8).
-    std::vector<uint8_t> tuning;
-    for (const auto& s : p.strings)
-        if (s.enabled) tuning.push_back(s.openNote);
-    std::sort(tuning.begin(), tuning.end());
-    sc.tuning = tuning;
+    sc.tuning = tuning;                  // physical order, transpose folded in
+    sc.fretsPerString = fretsPerString;  // physical order, aligned with tuning
 
     // A degraded run announces only the enabled strings (renumbered 1..N), so the
     // CC bounds and the custom mapping must be made consistent with that reduced
     // set — otherwise a client sees, say, 3 strings but a CC range / mapping still
     // referencing the original 4 axes (audit P1-6).
-    const bool degraded = enabledCount < p.strings.size();
+    const bool degraded = activeStrings < p.strings.size();
 
     // v2 extras.
     sc.ccStringMin = p.selector.string.minimum;
@@ -136,13 +157,11 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     sc.ccFretOffset = p.selector.fret.offset;
     sc.selectionMode = static_cast<uint8_t>(p.selector.mode);
     sc.stringOrder = p.selector.string.reverseOrder ? 1 : 0;
-    for (const auto& s : p.strings)
-        if (s.enabled) sc.fretsPerString.push_back(s.maxFret);
     if (degraded) {
         // Reduced set: clamp the CC range to what is actually announced and drop
         // the custom mapping (it references the original physical axes and would
         // be incoherent against the renumbered set).
-        if (sc.ccStringMax > enabledCount) sc.ccStringMax = enabledCount;
+        if (sc.ccStringMax > activeStrings) sc.ccStringMax = activeStrings;
         if (sc.ccStringMin > sc.ccStringMax) sc.ccStringMin = sc.ccStringMax;
     } else {
         if (!p.selector.string.mapping.empty()) sc.stringOrder = 2;
