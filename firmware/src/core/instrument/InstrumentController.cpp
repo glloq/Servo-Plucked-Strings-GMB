@@ -44,8 +44,11 @@ void InstrumentController::load(const Profile& p) {
         spec.openNote = static_cast<int16_t>(static_cast<int>(s.openNote) + pitchShift);
         spec.maxFret = s.maxFret;
         spec.enabled = s.enabled;
-        // Only frets that actually carry a finger servo are auto-allocatable.
+        // Only frets that actually carry a finger servo are auto-allocatable. The
+        // mask is authoritative here (even when empty), so a fingerless string is
+        // restricted to its open note (audit M-A).
         spec.fretMask = p.availableFretMask(i);
+        spec.hasFretMask = true;
         specs.push_back(spec);
 
         StringController c;
@@ -165,8 +168,12 @@ void InstrumentController::handleEvent(const MidiEvent& e, uint32_t nowUs) {
     if (!accepts(e.channel)) return;  // channel / omni filter (spec §18)
 
     if (e.isControlChange()) {
-        if (e.data1 == 120 || e.data1 == 123) {  // all sound / notes off
-            panic();
+        if (e.data1 == 120) {  // All Sound Off: cut every note immediately
+            allSoundOff();
+            return;
+        }
+        if (e.data1 == 123) {  // All Notes Off: release notes, honouring sustain
+            allNotesOff();
             return;
         }
         if (e.data1 == 7) {  // channel volume -> attack gain
@@ -280,7 +287,37 @@ void InstrumentController::flushChord() {
     chordBuffer_.clear();
 }
 
+// CC120 All Sound Off: silence every note at once, ignoring the sustain pedal.
+// Does NOT reset volume/expression (a controller reset is not implied by 120).
+void InstrumentController::allSoundOff() {
+    for (int i = static_cast<int>(active_.size()) - 1; i >= 0; --i) {
+        int s = active_[i].stringIndex;
+        active_.erase(active_.begin() + i);
+        stopString(s);
+    }
+    chordBuffer_.clear();
+    pedalDown_ = false;  // nothing is sounding; a held pedal sustains nothing
+}
+
+// CC123 All Notes Off: release notes as if the keys were lifted — a note held by
+// the sustain pedal keeps sounding until the pedal is released (unlike 120).
+void InstrumentController::allNotesOff() {
+    for (int i = static_cast<int>(active_.size()) - 1; i >= 0; --i) {
+        if (pedalDown_ && sustainEnabled_) {
+            active_[i].heldByPedal = true;  // stays until pedal up
+        } else {
+            int s = active_[i].stringIndex;
+            active_.erase(active_.begin() + i);
+            stopString(s);
+        }
+    }
+    chordBuffer_.clear();  // notes not yet flushed are keys being lifted
+}
+
 void InstrumentController::tick(uint32_t nowUs) {
+    // Prune expired pending CC selections even without a Note On (the selector's
+    // expire() is documented as "call periodically"; audit M-C).
+    selector_.expire(nowUs);
     // Expire anticipated preparations that never received their Note On. The
     // window matches the SELECTION's own expiry (audit P1-6) so a prepared string
     // is released exactly when the CC selection lapses — a late Note On then falls

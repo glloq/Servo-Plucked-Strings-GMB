@@ -27,11 +27,13 @@ static Profile makeGeared(int stringIndex, int fretA, int fretB, uint16_t active
         else
             ++it;
     }
-    // Gear the fretA servo to also press fretB (side B).
+    // Gear the fretA servo to also press fretB (side B). The neutral (restUs) is
+    // the both-lifted position and must sit BETWEEN the two press pulses.
     for (auto& s : p.servos)
         if (s.function == "finger" && s.stringIndex == stringIndex && s.fret == fretA) {
             s.fretB = static_cast<int8_t>(fretB);
             s.activeBUs = activeBUs;
+            s.restUs = static_cast<uint16_t>((s.activeUs + activeBUs) / 2);
         }
     return p;
 }
@@ -136,6 +138,7 @@ TEST(allocator_plays_both_geared_frets) {
     StringSpec s;
     s.openNote = 40; s.maxFret = 5; s.enabled = true;
     s.fretMask = (1u << 1) | (1u << 2);  // one geared servo covers frets 1 & 2
+    s.hasFretMask = true;                 // honour the mask strictly (fret 3 is a gap)
     alloc.setStrings({s});
     CHECK(alloc.canPlay(0, 40));   // open
     CHECK(alloc.canPlay(0, 41));   // fret 1 (side A)
@@ -156,6 +159,17 @@ TEST(geared_pair_is_valid_and_saves_a_servo) {
     InstrumentView v = p.instrumentView();
     CHECK(v.fretAvailable(0, 1));
     CHECK(v.fretAvailable(0, 2));
+}
+
+// The geared neutral (restUs) must lie strictly between the two press pulses; a
+// neutral outside that band leaves one side pressed at "rest" (audit P-B1).
+TEST(geared_neutral_outside_press_range_rejected) {
+    Profile p = makeGeared(0, 1, 2, 1100);  // side A 1800 (default), side B 1100
+    CHECK(ProfileValidator::isActivatable(p));  // makeGeared set a valid neutral
+    for (auto& s : p.servos)
+        if (s.function == "finger" && s.stringIndex == 0 && s.fret == 1)
+            s.restUs = 900;  // below BOTH presses -> not a "both-lifted" neutral
+    CHECK(!ProfileValidator::isActivatable(p));
 }
 
 // The two frets of a geared finger must differ.

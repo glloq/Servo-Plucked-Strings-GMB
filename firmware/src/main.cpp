@@ -196,12 +196,21 @@ void applyProfile() {
     // global leaves each servo untouched (historical behaviour); the profile itself
     // keeps the per-servo values intact.
     std::vector<ServoConfig> servos = g_profile.servos;
-    for (auto& s : servos)
+    for (auto& s : servos) {
         if (s.function == "pluck" || s.function == "strum") {
-            if (g_profile.pluck.strokeMs != 0) s.strokeMs = g_profile.pluck.strokeMs;
-            if (g_profile.pluck.minStrikePct != 0)
-                s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
+            // Overlay the global gesture via the unit-tested PluckPlan helpers so the
+            // runtime and the tests can never drift (both are no-ops when the global
+            // fields are zero, preserving the historical per-servo values) — audit P-B9.
+            s.strokeMs = effectivePluckStrokeMs(g_profile.pluck, s);
+            s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
         }
+        // A raise-to-play strum lift damps by resting ON the string, so it must stay
+        // energised at rest for the mute to hold — override disableAtRest regardless
+        // of the profile (audit P-B5).
+        if (s.function == "strumLift" &&
+            g_profile.pluck.liftEngage == LiftEngage::RaiseToPlay)
+            s.disableAtRest = false;
+    }
     g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
     g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
 
@@ -233,7 +242,10 @@ int rebuildRuntimeCapabilities() {
 
 void notifyCapabilitiesChanged() {
     if (!g_midi.hasLastSender()) return;
-    std::vector<uint8_t> msg = g_sysex.notification(0x01);
+    // GMB v2 block 0x11 change flags: bit 1 = INSTRUMENTS_CHANGED (the capability
+    // set / string config moved). GMB uses it only as a cue to re-read the
+    // handshake and compare the revision, so an approximate flag is fine.
+    std::vector<uint8_t> msg = g_sysex.notification(0x02);
     if (!msg.empty()) g_midi.notifyLastSender(msg.data(), msg.size());
 }
 

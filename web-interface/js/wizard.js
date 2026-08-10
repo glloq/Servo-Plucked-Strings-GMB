@@ -9,8 +9,9 @@
  *   • PLUCK  (grattage) — the plectrum / strum servo that sounds the string, plus
  *                        the optional strum-lift and damper. Step "Plucking".
  *
- * Steps: Instrument -> Strings -> Frets -> Plucking -> MIDI -> Power -> Test ->
- * Validation. Every actuator step carries an Arm control and a "test bench" that
+ * Steps: Builder -> Frets -> Plucking -> MIDI -> Power -> Test -> Validation
+ * (the Builder merges the old Instrument + Strings steps). Every actuator step
+ * carries an Arm control and a "test bench" that
  * drives ONE servo or a whole GROUP (sweep every fret of a string, pluck every
  * string, test everything…) through the shared GMB.testRunner sequencer, with a
  * live status line and a Stop button. The Simplified / Advanced toggle hides the
@@ -719,8 +720,10 @@
         GMB.field('Description', GMB.input(p.instrument, 'description'))
       ]),
       GMB.isAdvanced() ? h('div.grid3', [
-        GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 })),
-        GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 })),
+        GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 }),
+          'décalage virtuel (agit comme transpose) — laisser à 0 : pas de barre physique'),
+        GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 }),
+          'décalage global en demi-tons (à privilégier au capo)'),
         GMB.field('GM program', GMB.input(p.instrument, 'gmProgram', { type: 'number', min: 0, max: 127 })),
         GMB.field('GMB type id', GMB.input(p.instrument, 'typeId', { type: 'number', min: 0, max: 127 }))
       ]) : null
@@ -968,7 +971,7 @@
     GMB.markDirty();
   }
 
-  // ---- Step 3: Frets (frettes) — finger servos only -------------------------
+  // ---- Step 2: Frets (frettes) — finger servos only -------------------------
 
   // A clickable fret strip for the active string: shows which frets carry a finger
   // (geared marked ⚙) and this-session calibration progress, and expands a row when
@@ -1091,7 +1094,10 @@
         GMB.field('Pulse max (µs)', GMB.input(sv, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
         GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 2000 })),
         GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 2000 })),
-        GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' }))
+        GMB.field('Cut PWM at rest', GMB.input(sv, 'disableAtRest', { type: 'checkbox' })),
+        // Disable keeps the calibration but drops this fret from play (unlike Remove,
+        // which deletes it) — audit G7.
+        GMB.field('Enabled', GMB.input(sv, 'enabled', { type: 'checkbox', onChange: drawStep }))
       ])));
     }
     return h('div.fret-line-wrap', [line, h('div.fret-detail', detail)]);
@@ -1200,7 +1206,7 @@
     ]));
   }
 
-  // ---- Step 4: Plucking (grattage) — plucker + strum lift + damper + aux -----
+  // ---- Step 3: Plucking (grattage) — plucker + strum lift + damper + aux -----
 
   // Shared editor body for a non-finger, non-plucker actuator: rest/active angles,
   // a live test, and — in Advanced mode — the full wiring (source incl. direct GPIO)
@@ -1291,7 +1297,7 @@
           'plancher d’attaque pour les notes douces (0 = par servo)'),
         GMB.field('Délai frette → grattage (ms)', GMB.input(pk, 'fretToPluckMs', { type: 'number', min: 0, max: 1000 }),
           'attente après la mise en place de la frette, avant de gratter'),
-        GMB.field('Latence Note On → son (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 1000 }),
+        GMB.field('Latence Note On → son (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 2000 }),
           'latence fixe pour un rendu régulier')
       ])
     ]);
@@ -1328,10 +1334,11 @@
               { value: 'lowerToPlay', label: 'Abaisse pour jouer (repos = plectre écarté)' },
               { value: 'raiseToPlay', label: 'Lève pour jouer (repos = plectre posé → étouffe)' }
             ], onChange: drawStep
-          }), raise
+          }), (raise
             ? 'repos = plectre sur la corde ; à la note il lève, tient, puis redescend étouffer'
-            : 'repos = plectre écarté ; à la note il abaisse pour frapper puis relève'),
-          GMB.field('Avance (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 1000 }),
+            : 'repos = plectre écarté ; à la note il abaisse pour frapper puis relève') +
+            ' — recalibre les angles repos/actif du levage si tu changes de sens'),
+          GMB.field('Avance (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 2000 }),
             'engage le levage en avance — plectre en place pile à la frappe')
         ])
       ]);
@@ -1422,7 +1429,9 @@
           GMB.field('Pulse min (µs)', GMB.input(striker, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
           GMB.field('Pulse max (µs)', GMB.input(striker, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
           GMB.field('Travel (ms)', GMB.input(striker, 'travelMs', { type: 'number', min: 0, max: 2000 })),
-          GMB.field('Settle (ms)', GMB.input(striker, 'settleMs', { type: 'number', min: 0, max: 2000 }))
+          GMB.field('Settle (ms)', GMB.input(striker, 'settleMs', { type: 'number', min: 0, max: 2000 })),
+          GMB.field('Cut PWM at rest', GMB.input(striker, 'disableAtRest', { type: 'checkbox' })),
+          GMB.field('Enabled', GMB.input(striker, 'enabled', { type: 'checkbox', onChange: drawStep }))
         ]).concat(striker.function === 'strum' ? []
           : [GMB.field('Alternate stroke', GMB.input(striker, 'alternateDirection', { type: 'checkbox' }))]);
       }
@@ -1475,7 +1484,7 @@
     if (GMB.isAdvanced() || auxServos().length) body.appendChild(auxCard());
   }
 
-  // ---- Step 5: MIDI (compact; full CC editor is the MIDI tab) ---------------
+  // ---- Step 4: MIDI (compact; full CC editor is the MIDI tab) ---------------
 
   function stepMidi(body) {
     var p = GMB.state.profile;
@@ -1484,7 +1493,7 @@
       GMB.field('Omni (all channels)', GMB.input(p.midi, 'omni', { type: 'checkbox' })),
       GMB.field('Sustain pedal', GMB.input(p.midi, 'sustainPedal', { type: 'checkbox' })),
       GMB.field('Velocity curve', GMB.input(p.midi, 'velocityCurve',
-        { type: 'select', options: ['linear', 'soft', 'hard', 'exponential', 'custom'] }))
+        { type: 'select', options: ['linear', 'soft', 'hard', 'exponential'] }))
     ]));
     body.appendChild(h('div.card', [
       h('h3', 'String / fret selection (CC)'),
@@ -1496,7 +1505,7 @@
     ]));
   }
 
-  // ---- Step 6: Power / current management -----------------------------------
+  // ---- Step 5: Power / current management -----------------------------------
 
   function stepPower(body) {
     var p = GMB.state.profile;
@@ -1511,13 +1520,13 @@
       GMB.field('Stagger between starts (ms)', GMB.input(p.power, 'staggerMs',
         { type: 'number', min: 0, max: 200 }), '0 disables staggering'),
       GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
-        { type: 'number', min: 0, max: 500 }), 'fixed reception → sound latency'),
+        { type: 'number', min: 0, max: 2000 }), 'fixed reception → sound latency'),
       GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs',
-        { type: 'number', min: 0, max: 500 }), 'lower the strum lift early (0 = off)')
+        { type: 'number', min: 0, max: 2000 }), 'lower the strum lift early (0 = off)')
     ]));
   }
 
-  // ---- Step 7: Test (whole instrument) --------------------------------------
+  // ---- Step 6: Test (whole instrument) --------------------------------------
 
   function stepTest(body) {
     var p = GMB.state.profile;
@@ -1553,7 +1562,7 @@
     body.appendChild(h('div.row', [GMB.button('STOP (panic)', function () { GMB.doPanic && GMB.doPanic(); }, 'danger')]));
   }
 
-  // ---- Step 8: Validation ---------------------------------------------------
+  // ---- Step 7: Validation ---------------------------------------------------
 
   function stepValidation(body) {
     var issues = GMB.validateProfile(GMB.state.profile);
@@ -1614,8 +1623,13 @@
     });
     if (direct > 8) out.push({ level: 'error', field: 'servos', message: 'at most 8 direct-GPIO servos (LEDC channels)' });
     var hasPin = function (sig) { return p.pins.some(function (a) { return a.signal === sig && a.gpio >= 0; }); };
-    if (anyPca && (!hasPin('SDA') || !hasPin('SCL') || !hasPin('SERVO_OE')))
-      out.push({ level: 'error', field: 'pins', message: 'SDA, SCL and SERVO_OE are required for PCA servos' });
+    // When automatic pin assignment is on and no pins are set yet, the backend wires
+    // SDA/SCL/OE on save (see ProfileStorage import), so don't flag them as missing
+    // — only require them when the user manages pins manually (audit G11).
+    var autoPins = p.board && p.board.automaticPinAssignment && (!p.pins || p.pins.length === 0);
+    if (anyPca && !autoPins && (!hasPin('SDA') || !hasPin('SCL') || !hasPin('SERVO_OE')))
+      out.push({ level: 'error', field: 'pins',
+        message: 'SDA, SCL and SERVO_OE are required for PCA servos (or enable automatic pin assignment)' });
     p.strings.forEach(function (s, i) {
       if (!s.enabled) return;
       if (!strikerFor(i)) out.push({ level: 'error', field: 'string ' + i, message: 'no plucker/strum servo' });

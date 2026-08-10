@@ -91,6 +91,24 @@ TEST(allocator_empty_mask_allows_range) {
     CHECK(!alloc.canPlay(0, 46));
 }
 
+// A SUPPLIED but empty mask (a real fingerless string) plays ONLY its open note:
+// the fretMask==0 sentinel no longer mis-plays a fretted request at the open
+// pitch (audit M-A).
+TEST(allocator_supplied_empty_mask_is_open_only) {
+    NoteAllocator alloc;
+    StringSpec s;
+    s.openNote = 40;
+    s.maxFret = 5;
+    s.enabled = true;
+    s.fretMask = 0;
+    s.hasFretMask = true;  // real wiring data: this string has NO finger servo
+    alloc.setStrings({s});
+    CHECK(alloc.canPlay(0, 40));   // open plays
+    CHECK(!alloc.canPlay(0, 41));  // fret 1: no servo -> refused (not open-pitch)
+    uint8_t fret = 9;
+    CHECK_EQ((int)alloc.allocateOne(41, &fret), -1);  // dropped, not mis-played
+}
+
 static MidiEvent cc(uint8_t ch, uint8_t num, uint8_t val, uint32_t t) {
     MidiEvent e;
     e.type = static_cast<uint8_t>(MidiType::ControlChange);

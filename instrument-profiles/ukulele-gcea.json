@@ -51,7 +51,6 @@
     "velocityCurve": "linear",
     "saturationStrategy": "priorityLow",
     "noteExecutionDelayMs": 0,
-    "fingerLeadMs": 0,
     "strumLeadMs": 0
   },
   "stringFretSelection": {

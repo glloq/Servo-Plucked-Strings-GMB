@@ -29,6 +29,11 @@ struct InstrumentInfo {
     uint8_t typeId = 0x04;    // GMB instrument type id (guitar)
     int8_t capo = 0;
     int8_t transpose = 0;
+    // Announced polyphony (GMB descriptor / spec §6). 0 = automatic (= the number
+    // of active, functional strings). A positive value caps it (e.g. a mechanical
+    // constraint that only lets 4 of 6 strings sound); it is never announced above
+    // the physical string count.
+    uint8_t polyphonyMax = 0;
 };
 
 struct NetworkConfig {

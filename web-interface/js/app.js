@@ -77,8 +77,12 @@
     el.addEventListener('change', function () {
       var v;
       if (type === 'checkbox') v = el.checked;
-      else if (type === 'number') v = el.value === '' ? null : Number(el.value);
-      else v = el.value;
+      else if (type === 'number') {
+        // A cleared number field coerces to its minimum (or 0), never null: a null
+        // openNote/maxFret rendered "--" and turned fret loops into no-ops (G10).
+        if (el.value === '') { v = (opts.min !== undefined) ? opts.min : 0; el.value = v; }
+        else v = Number(el.value);
+      } else v = el.value;
       if (opts.coerce) v = opts.coerce(v);
       obj[key] = v;
       if (opts.onChange) opts.onChange(v);

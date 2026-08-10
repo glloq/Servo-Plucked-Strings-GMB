@@ -295,6 +295,36 @@ TEST(controller_panic_clears) {
     CHECK_EQ(ic.soundingCount(), 0);
 }
 
+// M-F: CC123 (All Notes Off) honours the sustain pedal — a note released while the
+// pedal is down keeps sounding until the pedal lifts.
+TEST(all_notes_off_honours_sustain) {
+    InstrumentController ic;
+    ic.load(ukulele());
+    ic.handleEvent(cc(0, 64, 127), 0);       // sustain pedal DOWN
+    ic.handleEvent(noteOn(0, 62, 100), 0);
+    ic.tick(5000);
+    CHECK_EQ(ic.soundingCount(), 1);
+    ic.handleEvent(cc(0, 123, 0), 6000);     // All Notes Off, pedal still down
+    ic.tick(7000);
+    CHECK_EQ(ic.soundingCount(), 1);         // held by the pedal -> still sounding
+    ic.handleEvent(cc(0, 64, 0), 8000);      // pedal UP
+    ic.tick(9000);
+    CHECK_EQ(ic.soundingCount(), 0);         // now released
+}
+
+// M-F: CC120 (All Sound Off) cuts everything, ignoring the sustain pedal.
+TEST(all_sound_off_ignores_sustain) {
+    InstrumentController ic;
+    ic.load(ukulele());
+    ic.handleEvent(cc(0, 64, 127), 0);       // pedal DOWN
+    ic.handleEvent(noteOn(0, 62, 100), 0);
+    ic.tick(5000);
+    CHECK_EQ(ic.soundingCount(), 1);
+    ic.handleEvent(cc(0, 120, 0), 6000);     // All Sound Off
+    ic.tick(7000);
+    CHECK_EQ(ic.soundingCount(), 0);         // cut regardless of the pedal
+}
+
 // SysEx service answers a full discovery from one snapshot (criteria 1,8,9,10).
 TEST(sysex_service_discovery) {
     Profile p = ukulele();
@@ -343,14 +373,20 @@ TEST(sysex_service_rate_limits_flood) {
     CHECK(!svc.handleMessage(req, sizeof(req), 100 + 200).empty());
 }
 
-// A config change increments the revision and the notification carries it.
+// A config change increments the revision and the (GMB v2 block 0x11)
+// notification carries it, little-endian.
 TEST(sysex_service_notification_after_change) {
     Profile p = ukulele();
     GmbSysExService svc;
     svc.rebuild(p);
     p.capabilitiesRevision = 2;  // config edited & saved
     svc.rebuild(p);
-    auto note = svc.notification(kStringConfigChanged);
-    CHECK_EQ((int)note[3], 0x08);
+    auto note = svc.notification(0x02);  // INSTRUMENTS_CHANGED
     CHECK(GmbSysEx::isWellFormed(note.data(), note.size()));
+    CHECK_EQ((int)note.size(), 12);
+    CHECK_EQ((int)note[3], 0x11);  // v2 change-notification block
+    CHECK_EQ((int)note[4], 0x02);  // spontaneous notification
+    uint32_t rev = note[5] | (note[6] << 7) | (note[7] << 14) |
+                   ((uint32_t)note[8] << 21) | ((uint32_t)(note[9] & 0x0F) << 28);
+    CHECK_EQ((int)rev, 2);
 }

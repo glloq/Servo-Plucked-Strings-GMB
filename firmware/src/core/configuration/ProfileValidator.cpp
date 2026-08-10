@@ -8,6 +8,10 @@ namespace gmb {
 
 using Sev = ValidationIssue::Severity;
 
+// A single servo move / stroke / delay never legitimately takes this long; a value
+// beyond it is a typo that would stall a note for tens of seconds (audit P-B3).
+static constexpr uint16_t kMaxServoTimeMs = 5000;
+
 std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     std::vector<ValidationIssue> issues;
     auto err = [&](const std::string& f, const std::string& m) {
@@ -155,6 +159,16 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                     if (s.activeBUs < s.pulseMinUs || s.activeBUs > s.pulseMaxUs)
                         err(tag + ".activeBUs",
                             "Side-B active pulse is outside the servo's min/max range");
+                    // The neutral (restUs) is the both-fingers-lifted position and
+                    // must sit strictly BETWEEN the two press pulses; otherwise
+                    // "rest" leaves one side pressed on the string (audit P-B1,
+                    // GEARED_FINGERS §5).
+                    uint16_t glo = s.activeUs < s.activeBUs ? s.activeUs : s.activeBUs;
+                    uint16_t ghi = s.activeUs < s.activeBUs ? s.activeBUs : s.activeUs;
+                    if (s.restUs <= glo || s.restUs >= ghi)
+                        err(tag + ".restUs",
+                            "A geared finger's neutral (restUs) must lie strictly "
+                            "between its side-A and side-B active pulses");
                 }
             }
 
@@ -171,10 +185,30 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 err(tag + ".restUs", "Rest pulse is outside the servo's min/max range");
             if (s.activeUs < s.pulseMinUs || s.activeUs > s.pulseMaxUs)
                 err(tag + ".activeUs", "Active pulse is outside the servo's min/max range");
+            // A rest position identical to the active position can never actuate: a
+            // finger would stay pressed forever (stuck note, breaks the one-finger-
+            // per-string invariant), a plucker/strum would never strike (audit P-B1).
+            if ((s.function == "finger" || s.function == "pluck" || s.function == "strum" ||
+                 s.function == "strumLift" || s.function == "damper") &&
+                s.restUs == s.activeUs)
+                err(tag + ".activeUs",
+                    "Rest and active pulses are identical — the servo cannot move");
             if (s.activeAltUs != 0 &&
                 (s.activeAltUs < s.pulseMinUs || s.activeAltUs > s.pulseMaxUs))
                 err(tag + ".activeAltUs",
                     "Alternate active pulse is outside the servo's min/max range");
+            // Alternate up-stroke with no explicit endpoint uses the implicit mirror
+            // 2*rest-active; if that lands outside the pulse window it is silently
+            // clamped, so the "symmetric" up-stroke is weaker than intended — warn so
+            // the user sets an explicit activeAltUs (audit P-B7).
+            if (s.alternateDirection && s.activeAltUs == 0) {
+                int mirror = 2 * static_cast<int>(s.restUs) - static_cast<int>(s.activeUs);
+                if (mirror < static_cast<int>(s.pulseMinUs) ||
+                    mirror > static_cast<int>(s.pulseMaxUs))
+                    warn(tag + ".activeAltUs",
+                         "Alternate up-stroke mirror (2*rest-active) is out of the pulse "
+                         "window and will be clamped; set an explicit activeAltUs");
+            }
             if (s.minStrikeUs != 0 &&
                 (s.minStrikeUs < s.pulseMinUs || s.minStrikeUs > s.pulseMaxUs))
                 err(tag + ".minStrikeUs",
@@ -183,6 +217,27 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
             if (s.muteUs != 0 && (s.muteUs < s.pulseMinUs || s.muteUs > s.pulseMaxUs))
                 err(tag + ".muteUs",
                     "Mute pulse is outside the servo's min/max range");
+            // A raise-to-play strum lift RESTS on the string — that rest position IS
+            // the mute — so cutting its PWM at rest lets it drift off and the note
+            // may not damp. disableAtRest must stay off for that servo (audit P-B5,
+            // GEARED_FINGERS §8). The runtime forces this too, so it is a warning.
+            if (s.function == "strumLift" && s.disableAtRest &&
+                p.pluck.liftEngage == LiftEngage::RaiseToPlay)
+                warn(tag + ".disableAtRest",
+                     "A raise-to-play strum lift holds its mute at rest; disableAtRest "
+                     "should be off so the plectrum keeps damping the string");
+            // Timing sanity: a mis-typed motion time would stall a note for tens of
+            // seconds while the FSM believes it is still moving/striking (audit P-B3).
+            auto boundServoMs = [&](uint16_t v, const char* field) {
+                if (v > kMaxServoTimeMs)
+                    err(tag + "." + field,
+                        std::string(field) + " exceeds the sane servo-timing bound (" +
+                            std::to_string(kMaxServoTimeMs) + " ms)");
+            };
+            boundServoMs(s.travelMs, "travelMs");
+            boundServoMs(s.settleMs, "settleMs");
+            boundServoMs(s.strokeMs, "strokeMs");
+            boundServoMs(s.engageDelayMs, "engageDelayMs");
 
             if (s.source == ServoSource::Pca) {
                 if (s.pcaBoard > kMaxPca - 1)
@@ -298,6 +353,22 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     if (p.power.maxConcurrentMoves == 0)
         err("power.maxConcurrentMoves",
             "At least one servo must be allowed to move at a time");
+    if (p.power.staggerMs > 1000)
+        err("power.staggerMs", "Servo start stagger exceeds a sane bound (1000 ms)");
+
+    // Global timing sanity (audit P-B3): a huge value stalls notes for tens of
+    // seconds. chordWindowMs is a small grouping window — a large one merges
+    // unrelated notes into one chord, so it is only a warning.
+    if (p.midi.noteExecutionDelayMs > kMaxServoTimeMs)
+        err("midi.noteExecutionDelayMs", "Note-execution delay exceeds 5000 ms");
+    if (p.midi.strumLeadMs > kMaxServoTimeMs)
+        err("midi.strumLeadMs", "Strum lead exceeds 5000 ms");
+    if (p.pluck.muteHoldMs > kMaxServoTimeMs)
+        err("pluck.muteHoldMs", "Mute hold exceeds 5000 ms");
+    if (p.pluck.fretToPluckMs > kMaxServoTimeMs)
+        err("pluck.fretToPluckMs", "Fret-to-pluck delay exceeds 5000 ms");
+    if (p.midi.chordWindowMs > 100)
+        warn("midi.chordWindowMs", "Chord window over 100 ms may merge unrelated notes");
 
     // String/fret selection CC configuration (selection spec section 18). The
     // string/fret CCs are only consumed when selection is enabled and not in the
@@ -342,6 +413,12 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         err("selector.string.range", "String CC minimum must be <= maximum");
     if (s.fret.minimum > s.fret.maximum)
         err("selector.fret.range", "Fret CC minimum must be <= maximum");
+    // Signed CC offsets are transmitted as offset+64 over SysEx, so they must fit
+    // the encodable band -64..63 (audit SX-5).
+    if (s.string.offset < -64 || s.string.offset > 63)
+        err("selector.string.offset", "String CC offset must be within -64..63");
+    if (s.fret.offset < -64 || s.fret.offset > 63)
+        err("selector.fret.offset", "Fret CC offset must be within -64..63");
     // Custom string mapping, when present, must be one entry per string, each
     // referencing a valid axis, AND a permutation (no axis used twice / skipped) —
     // otherwise a CC value would target a duplicate string while another becomes
@@ -372,6 +449,20 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         err("instrument.transpose", "Transpose must be within +/-48 semitones");
     if (p.midi.transpose < -48 || p.midi.transpose > 48)
         err("midi.transpose", "MIDI transpose must be within +/-48 semitones");
+    // Announced polyphony: 0 = automatic; a custom cap can never exceed the number
+    // of physical strings (the snapshot also clamps it to the active count).
+    if (p.instrument.polyphonyMax > kMaxStrings)
+        err("instrument.polyphonyMax",
+            "Polyphony must be 0 (automatic) or at most the string count");
+    else if (p.instrument.polyphonyMax > p.instrument.stringCount)
+        warn("instrument.polyphonyMax",
+             "Polyphony exceeds the string count and will be clamped");
+    // A name over 32 chars is truncated on the SysEx identity/capabilities wire (the
+    // v2 descriptor carries it in full) — warn so the short announced name is not a
+    // surprise (audit SX-6).
+    if (p.instrument.name.size() > 32)
+        warn("instrument.name",
+             "Name longer than 32 characters is truncated on the SysEx wire");
     // Enum-backed fields must be within their defined range: a JSON import does a
     // static_cast, so an out-of-range value would reach a switch and hit an
     // unintended default (audit P1-10).

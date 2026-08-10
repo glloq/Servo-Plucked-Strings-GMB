@@ -100,6 +100,70 @@ TEST(validator_rejects_out_of_range_rest_pulse) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
+// A finger whose rest == active can never lift: stuck note, breaks the one-finger-
+// per-string invariant (audit P-B1).
+TEST(validator_rejects_rest_equals_active) {
+    Profile p = uke();
+    CHECK(ProfileValidator::isActivatable(p));
+    p.servos[0].restUs = p.servos[0].activeUs;  // finger stuck pressed
+    CHECK(!ProfileValidator::isActivatable(p));
+}
+
+// An absurd motion/global time is a typo that would stall a note for tens of
+// seconds; the validator rejects it (audit P-B3).
+TEST(validator_rejects_absurd_timing) {
+    Profile p = uke();
+    p.servos[0].travelMs = 60000;  // ~60 s finger move
+    CHECK(!ProfileValidator::isActivatable(p));
+    Profile q = uke();
+    q.midi.noteExecutionDelayMs = 60000;
+    CHECK(!ProfileValidator::isActivatable(q));
+    Profile r = uke();
+    r.power.staggerMs = 5000;
+    CHECK(!ProfileValidator::isActivatable(r));
+}
+
+// An alternate up-stroke whose implicit mirror (2*rest-active) falls outside the
+// pulse window is silently clamped — the validator warns (audit P-B7).
+TEST(validator_warns_alternate_mirror_out_of_window) {
+    Profile p = uke();
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) {
+            s.function = "strum";
+            s.alternateDirection = true;
+            s.activeAltUs = 0;                     // use the implicit mirror
+            s.restUs = 600; s.activeUs = 2400;     // mirror = -1200 -> out of window
+        }
+    bool warned = false;
+    for (const auto& is : ProfileValidator::validate(p))
+        if (is.field.find("activeAltUs") != std::string::npos &&
+            is.severity == ValidationIssue::Severity::Warning)
+            warned = true;
+    CHECK(warned);
+    CHECK(ProfileValidator::isActivatable(p));  // warning only
+}
+
+// A raise-to-play strum lift holds its mute AT REST, so disableAtRest would cut the
+// PWM that keeps it damping — the validator warns (still activatable) (audit P-B5).
+TEST(validator_warns_raise_to_play_lift_disable_at_rest) {
+    Profile p = uke();
+    p.pluck.liftEngage = LiftEngage::RaiseToPlay;
+    ServoConfig lift;
+    lift.enabled = true;
+    lift.function = "strumLift";
+    lift.stringIndex = 0;
+    lift.channel = 13;              // free channel on string 0's PCA board
+    lift.disableAtRest = true;      // the flagged condition
+    p.servos.push_back(lift);
+    bool warned = false;
+    for (const auto& is : ProfileValidator::validate(p))
+        if (is.field.find("disableAtRest") != std::string::npos &&
+            is.severity == ValidationIssue::Severity::Warning)
+            warned = true;
+    CHECK(warned);
+    CHECK(ProfileValidator::isActivatable(p));  // warning only
+}
+
 TEST(validator_requires_striker_per_string) {
     Profile p = uke();
     // Remove all pluck servos: every string now lacks a striker (strumming is per
@@ -339,4 +403,78 @@ TEST(fret_before_string_cc_order) {
     CHECK_EQ((int)r.stringIndex, 2);
     CHECK_EQ((int)r.fret, 5);
     CHECK_EQ((int)sel.pending().size(), 0);  // exactly one selection consumed
+}
+
+// SX-5: a signed CC offset outside the SysEx-encodable band (-64..63) is rejected.
+TEST(validator_rejects_cc_offset_out_of_band) {
+    Profile p = uke();
+    p.selector.string.offset = 100;  // > 63
+    CHECK(!ProfileValidator::isActivatable(p));
+    Profile q = uke();
+    q.selector.fret.offset = -100;   // < -64
+    CHECK(!ProfileValidator::isActivatable(q));
+}
+
+// --- MIDI robustness (M-C / M-E / M-G) ---
+
+static void setupSel(StringFretSelector& sel) {
+    SelectorConfig cfg;
+    cfg.mode = SelectionMode::Explicit;
+    cfg.selectionTimeoutMs = 100;
+    cfg.string.minimum = 1; cfg.string.maximum = 4;
+    cfg.fret.minimum = 0; cfg.fret.maximum = 12;
+    sel.configure(cfg);
+    InstrumentView v;
+    v.stringCount = 4; v.openNotes = {67, 60, 64, 69};
+    v.maxFretPerString = {12, 12, 12, 12};
+    sel.setInstrument(v);
+}
+
+// M-C: an expired older selection must not shadow a newer, still-valid one.
+TEST(expired_selection_does_not_shadow_newer_valid) {
+    StringFretSelector sel;
+    setupSel(sel);
+    sel.onControlChange(cc(0, 20, 1, 0));       // A @0: string 1 (idx 0)
+    sel.onControlChange(cc(0, 21, 0, 0));       // A: fret 0   (expires @100ms)
+    sel.onControlChange(cc(0, 20, 3, 50000));   // B @50: string 3 (idx 2)
+    sel.onControlChange(cc(0, 21, 5, 50000));   // B: fret 5   (expires @150ms)
+    // @120ms: A is expired, B is still valid -> B must be chosen, not A.
+    NoteResolution r = sel.onNoteOn(noteOn(0, 69, 100, 120000), 120000);
+    CHECK(r.play);
+    CHECK(r.source == ResolveSource::Explicit);
+    CHECK_EQ((int)r.stringIndex, 2);
+    CHECK_EQ((int)r.fret, 5);
+}
+
+// M-E: an invalid string CC binds the waiting fret as invalid so a LATER valid
+// string can't mis-pair it; the invalid selection routes through the policy.
+TEST(invalid_string_cc_does_not_orphan_fret) {
+    StringFretSelector sel;
+    setupSel(sel);  // fret.invalidValuePolicy defaults to AutomaticFallback
+    sel.onControlChange(cc(0, 21, 5, 0));    // fret 5 first (fret-only pending)
+    sel.onControlChange(cc(0, 20, 99, 0));   // INVALID string -> binds fret as invalid
+    sel.onControlChange(cc(0, 20, 2, 0));    // valid string 2 -> its OWN new pending
+    // The oldest complete selection is the invalid one -> policy (fallback), NOT a
+    // mis-paired string2+fret5 explicit note.
+    NoteResolution r = sel.onNoteOn(noteOn(0, 69, 100, 0), 0);
+    CHECK(r.source != ResolveSource::Explicit);  // not the mis-paired pair
+}
+
+// M-G: the CC offset is applied BEFORE the range check, so a value whose LOGICAL
+// result is in range is accepted (and a raw-but-out-of-logical-range one is not).
+TEST(cc_offset_applied_before_validation) {
+    StringFretSelector sel;
+    SelectorConfig cfg;
+    cfg.mode = SelectionMode::Explicit;
+    cfg.string.minimum = 1; cfg.string.maximum = 4; cfg.string.offset = -4;  // sends 5..8
+    cfg.fret.maximum = 12;
+    sel.configure(cfg);
+    InstrumentView v;
+    v.stringCount = 4; v.openNotes = {67, 60, 64, 69};
+    v.maxFretPerString = {12, 12, 12, 12};
+    sel.setInstrument(v);
+    CHECK_EQ(sel.mapStringValue(5), 0);   // 5-4 = logical 1 -> index 0
+    CHECK_EQ(sel.mapStringValue(8), 3);   // 8-4 = logical 4 -> index 3
+    CHECK_EQ(sel.mapStringValue(1), -1);  // 1-4 = logical -3 -> rejected
+    CHECK_EQ(sel.mapStringValue(9), -1);  // 9-4 = logical 5 -> out of [1,4]
 }

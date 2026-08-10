@@ -351,6 +351,16 @@ void WebApi::registerRoutes() {
         sendJson(req, doc);
     });
 
+    // ---- GET /gmb/descriptor.json (GMB v2 level-1 descriptor over HTTP) ----
+    // Advertised by the SysEx handshake `flags` bit 0 so a GMB controller can fetch
+    // the whole descriptor in one request instead of the segmented block 0x10
+    // transfer. Served from the same immutable snapshot as the SysEx path.
+    server_->on("/gmb/descriptor.json", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        std::string json;
+        { WebStateLock lk(ctx_); if (ctx_.sysex) json = ctx_.sysex->descriptorJson(); }
+        req->send(200, "application/json", String(json.c_str()));
+    });
+
     // ---- GET /api/profile ----
     server_->on("/api/profile", HTTP_GET, [this](AsyncWebServerRequest* req) {
         JsonDocument doc;

@@ -29,7 +29,8 @@
           onChange: function () {}, // stored zero-based
         }), 'stored zero-based (0 = channel 1)'),
         GMB.field('Omni mode', GMB.input(p.midi, 'omni', { type: 'checkbox' })),
-        GMB.field('Transpose (semitones)', GMB.input(p.midi, 'transpose', { type: 'number', min: -24, max: 24 })),
+        GMB.field('Transpose (semitones)', GMB.input(p.midi, 'transpose', { type: 'number', min: -48, max: 48 }),
+          'adds to the instrument transpose (Builder → Advanced); both are summed'),
         GMB.field('Chord window (ms)', GMB.input(p.midi, 'chordWindowMs', { type: 'number', min: 0, max: 50 })),
         GMB.field('Velocity curve', GMB.input(p.midi, 'velocityCurve', {
           // 'custom' is intentionally omitted: no custom curve table exists yet,
@@ -57,9 +58,9 @@
       h('h2', 'Playback timing'),
       h('p.muted', 'Manage the delay between receiving a note and hearing it, and how early the mechanics anticipate.'),
       h('div.form-grid', [
-        GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 500 }),
+        GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 2000 }),
           'Fixed delay from Note On to the note actually sounding, giving the finger a constant window to reach the fret.'),
-        GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs', { type: 'number', min: 0, max: 500 }),
+        GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs', { type: 'number', min: 0, max: 2000 }),
           'Start lowering the strum lift this long before the string is ready, so it is engaged when the strike time comes.')
       ])
     ]));

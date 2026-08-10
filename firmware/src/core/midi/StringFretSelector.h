@@ -103,6 +103,11 @@ struct PendingStringSelection {
     uint8_t midiChannel = 0;
     bool hasString = false;
     bool hasFret = false;
+    // An out-of-range string/fret CC value was received for this selection. The
+    // slot is still marked filled (so a later, unrelated valid CC can't complete
+    // and mis-pair it), but the Note On resolves it through the invalid-value
+    // policy instead of playing it (audit M-E).
+    bool invalid = false;
     uint8_t stringValue = 0;   // physical axis index (already mapped)
     uint8_t fretValue = 0;
     uint32_t receivedAtUs = 0;

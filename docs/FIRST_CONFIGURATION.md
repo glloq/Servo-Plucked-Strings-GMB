@@ -33,9 +33,10 @@ Default SSID: Servo-Plucked-Strings-GMB
 3. The configuration wizard opens.
 
 You can later switch to **client mode** (the ESP32 joins your network): SSID,
-password, network name, optional static IP, mDNS name. If the connection fails
-several times, the system automatically reverts to access-point mode. A long
-press on the **BOOT** button forces the hotspot back on at any time.
+password, and the mDNS host name (used as `<hostname>.local`). The address is
+obtained by DHCP — a fixed static IP is not currently configurable. If the
+connection fails several times, the system automatically reverts to access-point
+mode. A long press on the **BOOT** button forces the hotspot back on at any time.
 
 The wizard has **7 steps**: **Builder** → **Frets** → **Plucking** → MIDI →
 Power → Test → Validation. Step 1 (the Builder) makes the *mechanical* choices
