@@ -8,6 +8,12 @@ be reassigned from the web interface.
 There are **no stepper drivers, no HOME/LIMIT sensors and no 24 V motor rail** —
 fingers and pluckers are servos, driven over a PCA9685 or directly from a GPIO.
 
+> 💡 The web interface renders this harness **live for your own configuration**:
+> open the **Wiring** tab for a graphical, adaptive map of the ESP32, every
+> PCA9685 (at its I²C address) and its 16 channels, the shared I²C / `/OE` /
+> power buses and any direct-GPIO servos — with wiring-conflict checks and an
+> SVG export. This page is the static reference behind that diagram.
+
 > ⚠️ Wire and power-check the machine unpowered, with the PCA9685 `/OE` **high**
 > (servos off). The firmware boots into a safe state: `/OE` high, servos
 > neutralised (§21.1).

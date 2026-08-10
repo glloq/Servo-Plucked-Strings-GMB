@@ -124,6 +124,7 @@
     { id: 'fretboard', label: 'Fretboard', icon: 'B' },
     { id: 'wizard', label: 'Setup Wizard', icon: 'W' },
     { id: 'pins', label: 'GPIO Pins', icon: 'P' },
+    { id: 'wiring', label: 'Wiring', icon: 'C' },
     { id: 'midi', label: 'MIDI', icon: 'M' },
     { id: 'sysex', label: 'GMB / SysEx', icon: 'S' },
     { id: 'profiles', label: 'Profiles', icon: 'F' }

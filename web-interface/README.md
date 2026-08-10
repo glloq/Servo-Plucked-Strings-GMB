@@ -73,6 +73,7 @@ web-interface/
 │   ├── dashboard.js      dashboard (§19)
 │   ├── fretboard.js      playable fretboard visualization (press-and-hold to play)
 │   ├── pins.js           GPIO assignment grid (§11)
+│   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram)
 │   ├── wizard.js         7-step wizard — mechanical Instrument Builder + separate Frets/Plucking (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
 │   ├── midiselect.js     MIDI page: string/fret selection (§14) + params (§18) + test tool (§16)
@@ -189,6 +190,37 @@ backend. It reads the working **draft** profile, so an in-progress calibration c
 tried immediately. Leaving the tab (or a re-render) always lifts any held finger and
 cancels pending strokes. An **All fingers up** button and the **STOP (panic)** button
 provide a manual safety net.
+
+## Wiring map (Wiring tab)
+
+The **Wiring** tab draws the current instrument's electrical harness as a
+schematic, **as close to the real build as the profile allows** and fully
+**adaptive** — every element is derived from the working `profile` (the same
+draft the wizard edits), so the picture updates with each mechanical / pin /
+servo choice made during creation. It shows (SPECIFICATION.md §7 / §11 / §22,
+`hardware/wiring/WIRING.md`):
+
+- the **ESP32-S3** module with its three board-level signals (I²C **SDA**,
+  **SCL** and the PCA9685 **/OE** safety line) read from `profile.pins`;
+- a **separate 5–6 V servo PSU** feeding the servo rail (never the ESP
+  regulator);
+- **one PCA9685 breakout per distinct `pcaBoard`** actually used, at its real
+  I²C address (**0x40 + index**, set by the A0–A2 jumpers), with its **16
+  channels** laid out and every occupied channel labelled with the servo it
+  drives (**fret number** for a finger, **P**/**S**/**L**/**D**/**A** for
+  plucker / strum / lift / damper / auxiliary; a geared finger shows both frets);
+- the shared **I²C + /OE + power buses** every board taps (junction dots mark a
+  connection, crossings without a dot do not connect);
+- any **direct-GPIO servos** wired straight to an ESP32 output pin.
+
+It also flags real wiring faults live: a **duplicated `board+channel`**, two
+servos (or a servo and a board signal) on the **same GPIO**, an **unassigned
+SDA/SCL/OE** while a PCA is in use, and the firmware **capacity limits** (8
+boards, 8 direct servos). A **harness summary** (boards, I²C addresses, servo
+counts, signal pins) sits below the diagram. The view is **read-only** — it
+drives no hardware, so there is nothing to arm — and a **Download SVG** button
+saves the diagram (colours inlined) to take to the workbench. Like the
+fretboard, the diagram scrolls horizontally on narrow screens.
 
 ## Testing one servo or a whole group
 
