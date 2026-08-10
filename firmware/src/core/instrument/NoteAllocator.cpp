@@ -18,11 +18,15 @@ bool NoteAllocator::canPlay(int stringIndex, uint8_t note) const {
     int n = static_cast<int>(note);
     if (n < s.openNote || n > s.openNote + s.maxFret) return false;
     // Servo-per-fret: a fret with no finger servo (a gap in a non-contiguous
-    // fretboard) cannot be auto-allocated. Fret 0 (open) is always playable; an
-    // empty mask means "assume all frets in range are wired".
+    // fretboard) cannot be auto-allocated. Fret 0 (open) is always playable.
     int fret = n - s.openNote;
-    if (fret == 0 || s.fretMask == 0) return true;
+    if (fret == 0) return true;
     if (fret > static_cast<int>(kMaxFret)) return false;
+    // An EMPTY mask with no wiring data means "assume the whole range is wired"
+    // (back-compat for callers/tests that don't build a mask). A supplied mask is
+    // authoritative even when empty, so a string with no finger servo plays only
+    // its open note rather than sounding a fret at the open pitch (audit M-A).
+    if (s.fretMask == 0 && !s.hasFretMask) return true;
     return (s.fretMask >> fret) & 1u;
 }
 

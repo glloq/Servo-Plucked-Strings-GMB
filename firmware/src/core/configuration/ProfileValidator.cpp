@@ -155,6 +155,16 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                     if (s.activeBUs < s.pulseMinUs || s.activeBUs > s.pulseMaxUs)
                         err(tag + ".activeBUs",
                             "Side-B active pulse is outside the servo's min/max range");
+                    // The neutral (restUs) is the both-fingers-lifted position and
+                    // must sit strictly BETWEEN the two press pulses; otherwise
+                    // "rest" leaves one side pressed on the string (audit P-B1,
+                    // GEARED_FINGERS §5).
+                    uint16_t glo = s.activeUs < s.activeBUs ? s.activeUs : s.activeBUs;
+                    uint16_t ghi = s.activeUs < s.activeBUs ? s.activeBUs : s.activeUs;
+                    if (s.restUs <= glo || s.restUs >= ghi)
+                        err(tag + ".restUs",
+                            "A geared finger's neutral (restUs) must lie strictly "
+                            "between its side-A and side-B active pulses");
                 }
             }
 
@@ -171,6 +181,14 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 err(tag + ".restUs", "Rest pulse is outside the servo's min/max range");
             if (s.activeUs < s.pulseMinUs || s.activeUs > s.pulseMaxUs)
                 err(tag + ".activeUs", "Active pulse is outside the servo's min/max range");
+            // A rest position identical to the active position can never actuate: a
+            // finger would stay pressed forever (stuck note, breaks the one-finger-
+            // per-string invariant), a plucker/strum would never strike (audit P-B1).
+            if ((s.function == "finger" || s.function == "pluck" || s.function == "strum" ||
+                 s.function == "strumLift" || s.function == "damper") &&
+                s.restUs == s.activeUs)
+                err(tag + ".activeUs",
+                    "Rest and active pulses are identical — the servo cannot move");
             if (s.activeAltUs != 0 &&
                 (s.activeAltUs < s.pulseMinUs || s.activeAltUs > s.pulseMaxUs))
                 err(tag + ".activeAltUs",
@@ -183,6 +201,15 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
             if (s.muteUs != 0 && (s.muteUs < s.pulseMinUs || s.muteUs > s.pulseMaxUs))
                 err(tag + ".muteUs",
                     "Mute pulse is outside the servo's min/max range");
+            // A raise-to-play strum lift RESTS on the string — that rest position IS
+            // the mute — so cutting its PWM at rest lets it drift off and the note
+            // may not damp. disableAtRest must stay off for that servo (audit P-B5,
+            // GEARED_FINGERS §8). The runtime forces this too, so it is a warning.
+            if (s.function == "strumLift" && s.disableAtRest &&
+                p.pluck.liftEngage == LiftEngage::RaiseToPlay)
+                warn(tag + ".disableAtRest",
+                     "A raise-to-play strum lift holds its mute at rest; disableAtRest "
+                     "should be off so the plectrum keeps damping the string");
 
             if (s.source == ServoSource::Pca) {
                 if (s.pcaBoard > kMaxPca - 1)

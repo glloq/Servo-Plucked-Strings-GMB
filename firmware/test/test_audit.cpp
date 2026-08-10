@@ -100,6 +100,36 @@ TEST(validator_rejects_out_of_range_rest_pulse) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
+// A finger whose rest == active can never lift: stuck note, breaks the one-finger-
+// per-string invariant (audit P-B1).
+TEST(validator_rejects_rest_equals_active) {
+    Profile p = uke();
+    CHECK(ProfileValidator::isActivatable(p));
+    p.servos[0].restUs = p.servos[0].activeUs;  // finger stuck pressed
+    CHECK(!ProfileValidator::isActivatable(p));
+}
+
+// A raise-to-play strum lift holds its mute AT REST, so disableAtRest would cut the
+// PWM that keeps it damping — the validator warns (still activatable) (audit P-B5).
+TEST(validator_warns_raise_to_play_lift_disable_at_rest) {
+    Profile p = uke();
+    p.pluck.liftEngage = LiftEngage::RaiseToPlay;
+    ServoConfig lift;
+    lift.enabled = true;
+    lift.function = "strumLift";
+    lift.stringIndex = 0;
+    lift.channel = 13;              // free channel on string 0's PCA board
+    lift.disableAtRest = true;      // the flagged condition
+    p.servos.push_back(lift);
+    bool warned = false;
+    for (const auto& is : ProfileValidator::validate(p))
+        if (is.field.find("disableAtRest") != std::string::npos &&
+            is.severity == ValidationIssue::Severity::Warning)
+            warned = true;
+    CHECK(warned);
+    CHECK(ProfileValidator::isActivatable(p));  // warning only
+}
+
 TEST(validator_requires_striker_per_string) {
     Profile p = uke();
     // Remove all pluck servos: every string now lacks a striker (strumming is per

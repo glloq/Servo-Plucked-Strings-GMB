@@ -196,12 +196,19 @@ void applyProfile() {
     // global leaves each servo untouched (historical behaviour); the profile itself
     // keeps the per-servo values intact.
     std::vector<ServoConfig> servos = g_profile.servos;
-    for (auto& s : servos)
+    for (auto& s : servos) {
         if (s.function == "pluck" || s.function == "strum") {
             if (g_profile.pluck.strokeMs != 0) s.strokeMs = g_profile.pluck.strokeMs;
             if (g_profile.pluck.minStrikePct != 0)
                 s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
         }
+        // A raise-to-play strum lift damps by resting ON the string, so it must stay
+        // energised at rest for the mute to hold — override disableAtRest regardless
+        // of the profile (audit P-B5).
+        if (s.function == "strumLift" &&
+            g_profile.pluck.liftEngage == LiftEngage::RaiseToPlay)
+            s.disableAtRest = false;
+    }
     g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
     g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
 

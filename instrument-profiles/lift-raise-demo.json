@@ -149,7 +149,7 @@
       "travelMs": 110,
       "settleMs": 20,
       "engageDelayMs": 10,
-      "disableAtRest": true
+      "disableAtRest": false
     }
   ]
 }
