@@ -109,6 +109,19 @@ mapping reste néanmoins libre par servo.
   capacités de l'instrument (tessiture, polyphonie, CC, accordage) et s'adapte.
   Voir [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).
 
+## 🖥️ Interface web
+
+Toute la configuration se fait dans le navigateur (servie par l'ESP32, ou en
+ouvrant `web-interface/index.html` en **mode démo**). Huit pages **adaptatives** —
+tableau de bord, manche jouable, assistant de création, broches GPIO, **câblage**,
+MIDI, GMB/SysEx et profils. Aperçu de chacune :
+[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-eight-pages-at-a-glance).
+
+La carte de **câblage** dessine le faisceau ESP32 + PCA9685 de l'instrument courant
+(un ou deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit) :
+
+<img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/>
+
 ## 🔌 Matériel
 
 <img src="img/Schemas.png" alt="Architecture PCA9685" width="80%"/>
