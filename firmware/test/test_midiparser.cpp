@@ -49,6 +49,21 @@ TEST(parser_reset_stream_abandons_sysex) {
     CHECK_EQ((int)p.sysex().size(), 0);     // no SysEx completed from mixed senders
 }
 
+// A stray 0xF7 (End-of-Exclusive with no open SysEx) is ignored: it emits no event
+// and clears running status, so it cannot latch status_=0xF7 and turn every
+// following data byte into a junk 0xF0 event (audit M-D).
+TEST(stray_eox_emits_no_junk) {
+    MidiParser p;
+    uint8_t msg[] = {0x90, 60, 100,  // Note On (establishes running status)
+                     0xF7,           // stray EOX
+                     62, 100};       // data bytes: running status cleared -> ignored
+    p.feed(msg, sizeof(msg), 0);
+    CHECK_EQ((int)p.events().size(), 1);          // only the Note On
+    CHECK_EQ((int)p.events()[0].type, 0x90);
+    CHECK_EQ((int)p.events()[0].data1, 60);
+    for (const auto& e : p.events()) CHECK(e.type != 0xF0);  // no junk system events
+}
+
 TEST(parser_control_change) {
     MidiParser p;
     uint8_t bytes[] = {0xB2, 20, 3};  // CC20=3 on channel 2

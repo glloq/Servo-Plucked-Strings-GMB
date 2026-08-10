@@ -370,3 +370,67 @@ TEST(fret_before_string_cc_order) {
     CHECK_EQ((int)r.fret, 5);
     CHECK_EQ((int)sel.pending().size(), 0);  // exactly one selection consumed
 }
+
+// --- MIDI robustness (M-C / M-E / M-G) ---
+
+static void setupSel(StringFretSelector& sel) {
+    SelectorConfig cfg;
+    cfg.mode = SelectionMode::Explicit;
+    cfg.selectionTimeoutMs = 100;
+    cfg.string.minimum = 1; cfg.string.maximum = 4;
+    cfg.fret.minimum = 0; cfg.fret.maximum = 12;
+    sel.configure(cfg);
+    InstrumentView v;
+    v.stringCount = 4; v.openNotes = {67, 60, 64, 69};
+    v.maxFretPerString = {12, 12, 12, 12};
+    sel.setInstrument(v);
+}
+
+// M-C: an expired older selection must not shadow a newer, still-valid one.
+TEST(expired_selection_does_not_shadow_newer_valid) {
+    StringFretSelector sel;
+    setupSel(sel);
+    sel.onControlChange(cc(0, 20, 1, 0));       // A @0: string 1 (idx 0)
+    sel.onControlChange(cc(0, 21, 0, 0));       // A: fret 0   (expires @100ms)
+    sel.onControlChange(cc(0, 20, 3, 50000));   // B @50: string 3 (idx 2)
+    sel.onControlChange(cc(0, 21, 5, 50000));   // B: fret 5   (expires @150ms)
+    // @120ms: A is expired, B is still valid -> B must be chosen, not A.
+    NoteResolution r = sel.onNoteOn(noteOn(0, 69, 100, 120000), 120000);
+    CHECK(r.play);
+    CHECK(r.source == ResolveSource::Explicit);
+    CHECK_EQ((int)r.stringIndex, 2);
+    CHECK_EQ((int)r.fret, 5);
+}
+
+// M-E: an invalid string CC binds the waiting fret as invalid so a LATER valid
+// string can't mis-pair it; the invalid selection routes through the policy.
+TEST(invalid_string_cc_does_not_orphan_fret) {
+    StringFretSelector sel;
+    setupSel(sel);  // fret.invalidValuePolicy defaults to AutomaticFallback
+    sel.onControlChange(cc(0, 21, 5, 0));    // fret 5 first (fret-only pending)
+    sel.onControlChange(cc(0, 20, 99, 0));   // INVALID string -> binds fret as invalid
+    sel.onControlChange(cc(0, 20, 2, 0));    // valid string 2 -> its OWN new pending
+    // The oldest complete selection is the invalid one -> policy (fallback), NOT a
+    // mis-paired string2+fret5 explicit note.
+    NoteResolution r = sel.onNoteOn(noteOn(0, 69, 100, 0), 0);
+    CHECK(r.source != ResolveSource::Explicit);  // not the mis-paired pair
+}
+
+// M-G: the CC offset is applied BEFORE the range check, so a value whose LOGICAL
+// result is in range is accepted (and a raw-but-out-of-logical-range one is not).
+TEST(cc_offset_applied_before_validation) {
+    StringFretSelector sel;
+    SelectorConfig cfg;
+    cfg.mode = SelectionMode::Explicit;
+    cfg.string.minimum = 1; cfg.string.maximum = 4; cfg.string.offset = -4;  // sends 5..8
+    cfg.fret.maximum = 12;
+    sel.configure(cfg);
+    InstrumentView v;
+    v.stringCount = 4; v.openNotes = {67, 60, 64, 69};
+    v.maxFretPerString = {12, 12, 12, 12};
+    sel.setInstrument(v);
+    CHECK_EQ(sel.mapStringValue(5), 0);   // 5-4 = logical 1 -> index 0
+    CHECK_EQ(sel.mapStringValue(8), 3);   // 8-4 = logical 4 -> index 3
+    CHECK_EQ(sel.mapStringValue(1), -1);  // 1-4 = logical -3 -> rejected
+    CHECK_EQ(sel.mapStringValue(9), -1);  // 9-4 = logical 5 -> out of [1,4]
+}

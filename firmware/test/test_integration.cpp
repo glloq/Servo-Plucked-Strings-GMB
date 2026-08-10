@@ -295,6 +295,36 @@ TEST(controller_panic_clears) {
     CHECK_EQ(ic.soundingCount(), 0);
 }
 
+// M-F: CC123 (All Notes Off) honours the sustain pedal — a note released while the
+// pedal is down keeps sounding until the pedal lifts.
+TEST(all_notes_off_honours_sustain) {
+    InstrumentController ic;
+    ic.load(ukulele());
+    ic.handleEvent(cc(0, 64, 127), 0);       // sustain pedal DOWN
+    ic.handleEvent(noteOn(0, 62, 100), 0);
+    ic.tick(5000);
+    CHECK_EQ(ic.soundingCount(), 1);
+    ic.handleEvent(cc(0, 123, 0), 6000);     // All Notes Off, pedal still down
+    ic.tick(7000);
+    CHECK_EQ(ic.soundingCount(), 1);         // held by the pedal -> still sounding
+    ic.handleEvent(cc(0, 64, 0), 8000);      // pedal UP
+    ic.tick(9000);
+    CHECK_EQ(ic.soundingCount(), 0);         // now released
+}
+
+// M-F: CC120 (All Sound Off) cuts everything, ignoring the sustain pedal.
+TEST(all_sound_off_ignores_sustain) {
+    InstrumentController ic;
+    ic.load(ukulele());
+    ic.handleEvent(cc(0, 64, 127), 0);       // pedal DOWN
+    ic.handleEvent(noteOn(0, 62, 100), 0);
+    ic.tick(5000);
+    CHECK_EQ(ic.soundingCount(), 1);
+    ic.handleEvent(cc(0, 120, 0), 6000);     // All Sound Off
+    ic.tick(7000);
+    CHECK_EQ(ic.soundingCount(), 0);         // cut regardless of the pedal
+}
+
 // SysEx service answers a full discovery from one snapshot (criteria 1,8,9,10).
 TEST(sysex_service_discovery) {
     Profile p = ukulele();

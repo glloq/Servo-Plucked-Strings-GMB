@@ -38,6 +38,12 @@ public:
     // Emergency stop everything (spec §21.3).
     void panic();
 
+    // CC120 All Sound Off: cut every note immediately, ignoring the sustain pedal.
+    void allSoundOff();
+    // CC123 All Notes Off: release notes as if the keys were lifted, honouring the
+    // sustain pedal (pedal-held notes keep sounding until the pedal is released).
+    void allNotesOff();
+
     // Take a string out of service at runtime (a servo fault, etc.): fault its
     // state machine, mark it faulted in the allocator, drop its target and any
     // active note. It can no longer be chosen automatically OR by explicit CC.
