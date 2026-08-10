@@ -76,8 +76,9 @@
         h('div.cc-list', caps.supportedCc.map(function (c) { return h('span.pill.mini', 'CC' + c); })),
         h('div.toolbar', [
           GMB.button('View raw SysEx bytes', function () { runSysEx('capabilities'); }, 'ghost'),
-          GMB.button('Send change notification (block 0x11)', function () { runSysEx('notify'); }, 'ghost'),
-          GMB.button('Regenerate device id', function () { GMB.toast('Device id regenerated (mock).', 'ok'); }, 'ghost')
+          GMB.button('Send change notification (block 0x11)', function () { runSysEx('notify'); }, 'ghost')
+          // (No "regenerate device id": the v2 instance_id is derived from the
+          //  ESP32 MAC and is stable by design — there is nothing to regenerate.)
         ])
       ]));
     }
