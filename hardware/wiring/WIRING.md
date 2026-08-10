@@ -50,9 +50,9 @@ jumpers). Recommended: **one board per string**.
 > web interface (Setup Wizard → *Wiring & capacity*, or per servo in Advanced) and
 > give SDA2/SCL2 their own pull-ups. The `/OE` safety line can stay **shared** across
 > both buses or be **split per bus** (a second `SERVO_OE2` GPIO, default GPIO21) if
-> you want independent output-enable control. *(Firmware note: the reference firmware
-> currently drives a single `Wire` bus; the second bus needs matching `Wire1` support
-> in `firmware/src/platform/esp32/ServoBank.cpp`.)*
+> you want independent output-enable control. The firmware drives both controllers
+> (`Wire` = bus 0, `Wire1` = bus 1), routing each board to its bus and holding every
+> configured `/OE` line safe, so the second bus works on real hardware.
 
 | PCA9685 pin | Connect to | Notes |
 | ----------- | ---------- | ----- |

@@ -44,11 +44,16 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         return false;
     };
     bool anyPca = false;
+    bool anyBus1 = false;
     int directServos = 0;
     for (const auto& s : p.servos) {
         if (!s.enabled) continue;
-        if (s.source == ServoSource::Pca) anyPca = true;
-        else ++directServos;
+        if (s.source == ServoSource::Pca) {
+            anyPca = true;
+            if (s.i2cBus == 1) anyBus1 = true;
+        } else {
+            ++directServos;
+        }
     }
     // The only mandatory pins are the PCA9685 I2C bus and its /OE safety line, and
     // only when at least one servo is driven through a PCA. Direct-GPIO servos carry
@@ -60,6 +65,11 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         if (!hasPin("SERVO_OE"))
             err("pins.SERVO_OE", "The PCA9685 /OE safety pin is required");
     }
+    // A board on the second I2C bus needs its own SDA2/SCL2; its /OE may be shared
+    // with bus 0 (SERVO_OE) or split onto SERVO_OE2, so /OE2 is not required here.
+    if (anyBus1 && (!hasPin("SDA2") || !hasPin("SCL2")))
+        err("pins.i2c2",
+            "SDA2 and SCL2 are required when a PCA9685 is on the second I2C bus");
     // ESP32-S3 has 8 LEDC channels; a direct servo consumes one.
     if (directServos > 8)
         err("servos.direct",
@@ -244,13 +254,19 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                     err(tag + ".pcaBoard",
                         "PCA board index must be 0.." + std::to_string(kMaxPca - 1) +
                             " (max " + std::to_string(kMaxPca) + " PCA9685)");
+                if (s.i2cBus > 1)
+                    err(tag + ".i2cBus", "I2C bus must be 0 or 1");
                 if (s.channel > 15)
                     err(tag + ".channel", "PCA channel must be 0..15");
-                std::pair<int, int> key{s.pcaBoard, s.channel};
+                // A board is (bus, address): the same board+channel on DIFFERENT buses
+                // is a different chip and allowed, so the bus is part of the key.
+                int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
+                std::pair<int, int> key{bus * kMaxPca + s.pcaBoard, s.channel};
                 for (auto& u : usedPcaChannels)
                     if (u == key)
                         err(tag + ".channel",
-                            "PCA board " + std::to_string(s.pcaBoard) + " channel " +
+                            "PCA bus " + std::to_string(bus) + " board " +
+                                std::to_string(s.pcaBoard) + " channel " +
                                 std::to_string(s.channel) + " is already used by another servo");
                 usedPcaChannels.push_back(key);
             } else {  // DirectGpio

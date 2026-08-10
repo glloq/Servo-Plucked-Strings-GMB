@@ -164,8 +164,9 @@ GPIO38/39). You can also **separate the `/OE` safety line per bus** (a *Separate
 /OE per bus* toggle adds `SERVO_OE2`, default GPIO21) or keep a single shared `/OE`.
 Each I²C bus addresses **up to 8 boards** (0x40–0x47), so two buses reach **16 boards
 / 256 channels**. Assignment is per physical board and is preserved when the wiring
-is regenerated. *(Firmware note: the current firmware drives a single `Wire` bus;
-using bus 1 needs the matching `Wire1` support in `ServoBank`.)*
+is regenerated. The firmware drives **both controllers** (`Wire` = bus 0, `Wire1` =
+bus 1), routing each board to its own bus and holding every configured `/OE` line in
+the safe state — so bus 1 (and a split `/OE2`) work on real hardware.
 
 The system works with **no PCA at all** (every servo on a direct GPIO) or any mix.
 Per-string servos get their `stringIndex` set automatically. Each servo carries its
