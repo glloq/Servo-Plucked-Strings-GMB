@@ -12,8 +12,8 @@ bool startsWith(const std::string& s, const char* p) {
 
 SignalKind signalKindFromName(const std::string& signal) {
     if (startsWith(signal, "ENABLE")) return SignalKind::Enable;
-    if (signal == "SDA") return SignalKind::I2cSda;
-    if (signal == "SCL") return SignalKind::I2cScl;
+    if (signal == "SDA" || signal == "SDA2") return SignalKind::I2cSda;   // SDA2 = 2nd I2C bus
+    if (signal == "SCL" || signal == "SCL2") return SignalKind::I2cScl;   // SCL2 = 2nd I2C bus
     if (startsWith(signal, "SERVO_OE") || signal == "OE") return SignalKind::ServoOe;
     return SignalKind::Generic;
 }

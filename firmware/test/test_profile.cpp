@@ -61,3 +61,75 @@ TEST(instrument_view_from_profile) {
     CHECK_EQ((int)v.openNotes[0], 40);
     CHECK_EQ((int)v.openNotes[5], 64);
 }
+
+// ---- two I2C buses -------------------------------------------------------
+static void addPin(Profile& p, const char* sig, SignalKind kind, int8_t gpio) {
+    PinAssignment a;
+    a.signal = sig;
+    a.kind = kind;
+    a.gpio = gpio;
+    p.pins.push_back(a);
+}
+
+// A PCA board placed on the second I2C bus (i2cBus = 1) needs its own SDA2/SCL2,
+// otherwise the profile cannot activate; adding them makes it valid again.
+TEST(second_bus_requires_sda2_scl2) {
+    Profile p = guitarProfile();
+    for (auto& s : p.servos)
+        if (s.source == ServoSource::Pca && s.pcaBoard == 0) s.i2cBus = 1;
+    CHECK(!ProfileValidator::isActivatable(p));  // missing SDA2/SCL2
+    addPin(p, "SDA2", SignalKind::I2cSda, 38);
+    addPin(p, "SCL2", SignalKind::I2cScl, 39);
+    auto issues = ProfileValidator::validate(p);
+    for (auto& i : issues)
+        if (i.severity == ValidationIssue::Severity::Error)
+            std::printf("  unexpected error: %s: %s\n", i.field.c_str(), i.message.c_str());
+    CHECK(ProfileValidator::isActivatable(p));  // now valid
+}
+
+// The same board+channel on DIFFERENT buses is a different chip (allowed); on the
+// SAME bus it is a real collision (rejected).
+TEST(same_channel_on_different_buses_is_allowed) {
+    Profile p = guitarProfile();
+    addPin(p, "SDA2", SignalKind::I2cSda, 38);
+    addPin(p, "SCL2", SignalKind::I2cScl, 39);
+    int a = -1, b = -1;
+    for (size_t i = 0; i < p.servos.size(); ++i)
+        if (p.servos[i].source == ServoSource::Pca && p.servos[i].pcaBoard == 0) {
+            if (a < 0) a = (int)i;
+            else { b = (int)i; break; }
+        }
+    CHECK(a >= 0 && b >= 0);
+    p.servos[b].channel = p.servos[a].channel;  // same channel...
+    p.servos[b].i2cBus = 1;                      // ...but a different bus -> OK
+    CHECK(ProfileValidator::isActivatable(p));
+    p.servos[b].i2cBus = 0;                      // same bus now -> collision
+    CHECK(!ProfileValidator::isActivatable(p));
+}
+
+TEST(i2c_bus_out_of_range_is_error) {
+    Profile p = guitarProfile();
+    p.servos[0].i2cBus = 2;  // only 0 and 1 exist on the ESP32-S3
+    CHECK(!ProfileValidator::isActivatable(p));
+}
+
+// If EVERY board is on the second bus, only SDA2/SCL2 are required — the empty
+// primary bus needs no SDA/SCL (regression guard against over-strict validation;
+// the runtime only brings up the controller that carries a board).
+TEST(all_boards_on_second_bus_needs_only_sda2_scl2) {
+    Profile p = guitarProfile();
+    for (auto& s : p.servos)
+        if (s.source == ServoSource::Pca) s.i2cBus = 1;  // everything on bus 1
+    std::vector<PinAssignment> keep;                     // drop the unused bus-0 SDA/SCL
+    for (auto& a : p.pins)
+        if (a.signal != "SDA" && a.signal != "SCL") keep.push_back(a);
+    p.pins = keep;
+    CHECK(!ProfileValidator::isActivatable(p));           // still missing SDA2/SCL2
+    addPin(p, "SDA2", SignalKind::I2cSda, 38);
+    addPin(p, "SCL2", SignalKind::I2cScl, 39);
+    auto issues = ProfileValidator::validate(p);
+    for (auto& i : issues)
+        if (i.severity == ValidationIssue::Severity::Error)
+            std::printf("  unexpected error: %s: %s\n", i.field.c_str(), i.message.c_str());
+    CHECK(ProfileValidator::isActivatable(p));            // bus 0 empty -> no SDA/SCL needed
+}

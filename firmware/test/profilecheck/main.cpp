@@ -149,6 +149,50 @@ int main(int argc, char** argv) {
         CHECK(ProfileValidator::isActivatable(p), "auto-wired profile is activatable");
     }
 
+    // Second I2C bus: a board moved to i2cBus=1 must round-trip and, with its
+    // SDA2/SCL2 pins, stay activatable — and be rejected without them.
+    {
+        std::printf("second-i2c-bus round-trip\n");
+        std::string base = slurp(root + "/instrument-profiles/ukulele-gcea.json");
+        JsonDocument doc;
+        deserializeJson(doc, base);
+        for (JsonObject s : doc["servos"].as<JsonArray>())
+            if (static_cast<int>(s["pcaBoard"] | 0) == 0) s["i2cBus"] = 1;  // board 0 -> bus 1
+        JsonArray pins = doc["pins"].as<JsonArray>();
+        { JsonObject o = pins.add<JsonObject>(); o["signal"] = "SDA2"; o["gpio"] = 38; }
+        { JsonObject o = pins.add<JsonObject>(); o["signal"] = "SCL2"; o["gpio"] = 39; }
+        std::string body;
+        serializeJson(doc, body);
+        Profile p;
+        CHECK(parse(body, p), "second-bus profile parses");
+        int bus1 = 0;
+        for (auto& sv : p.servos) if (sv.enabled && sv.i2cBus == 1) ++bus1;
+        CHECK(bus1 > 0, "i2cBus=1 survives the parse");
+        CHECK(ProfileValidator::isActivatable(p), "second-bus profile is activatable");
+
+        JsonDocument out;  // round-trip: i2cBus survives re-serialisation
+        ProfileStorage::toJson(p, out);
+        std::string reser;
+        serializeJson(out, reser);
+        Profile p3;
+        CHECK(parse(reser, p3), "second-bus profile re-parses");
+        int bus1b = 0;
+        for (auto& sv : p3.servos) if (sv.enabled && sv.i2cBus == 1) ++bus1b;
+        CHECK(bus1b == bus1, "i2cBus round-trips through toJson");
+
+        // Without SDA2/SCL2 the same second-bus profile must be rejected.
+        JsonDocument doc2;
+        deserializeJson(doc2, base);
+        for (JsonObject s : doc2["servos"].as<JsonArray>())
+            if (static_cast<int>(s["pcaBoard"] | 0) == 0) s["i2cBus"] = 1;
+        std::string body2;
+        serializeJson(doc2, body2);
+        Profile p2;
+        CHECK(parse(body2, p2), "second-bus profile (no SDA2) parses");
+        CHECK(!ProfileValidator::isActivatable(p2),
+              "second bus without SDA2/SCL2 is rejected");
+    }
+
     std::printf(g_fail ? "\nPROFILECHECK FAILED (%d)\n" : "\nprofilecheck OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

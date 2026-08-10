@@ -27,37 +27,45 @@ uint16_t clampPulse(const ServoConfig& s, uint16_t us) {
 }  // namespace
 
 void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t scl,
-                      int8_t oePin) {
+                      int8_t oePin, int8_t sda2, int8_t scl2, int8_t oePin2) {
     servos_ = servos;
     rt_.assign(servos.size(), Rt{});
     ledcCh_.assign(servos.size(), -1);
     attached_.assign(servos.size(), false);
     oePin_ = oePin;
+    oePin2_ = oePin2;
     directCount_ = 0;
     pcaUsed_ = false;
     directAttachFault_ = false;
     pcaAttachFault_ = false;
-    for (int i = 0; i < kMaxPca; ++i) pcaPresent_[i] = false;
+    for (int b = 0; b < 2; ++b)
+        for (int i = 0; i < kMaxPca; ++i) pcaPresent_[b][i] = false;
 
+    bool busUsed[2] = {false, false};
     for (const auto& s : servos_) {
         if (s.enabled && s.source == ServoSource::Pca && s.pcaBoard < kMaxPca) {
-            pcaPresent_[s.pcaBoard] = true;
+            int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
+            pcaPresent_[bus][s.pcaBoard] = true;
             pcaUsed_ = true;
+            busUsed[bus] = true;
         }
     }
 
 #if defined(ARDUINO)
-    if (oePin_ >= 0) {
-        pinMode(oePin_, OUTPUT);
-        digitalWrite(oePin_, HIGH);  // /OE high = PCA outputs disabled (safe boot)
+    // /OE lines high (outputs disabled) for a safe boot, on both buses' safety pins.
+    for (int8_t oe : {oePin_, oePin2_}) {
+        if (oe >= 0) { pinMode(oe, OUTPUT); digitalWrite(oe, HIGH); }
     }
-    if (pcaUsed_ && sda >= 0 && scl >= 0) {
-        Wire.begin(sda, scl);
+    // Bring up each I2C controller that actually carries a board (Wire = bus 0,
+    // Wire1 = bus 1), then initialise every present board's driver on its own bus.
+    if (busUsed[0] && sda >= 0 && scl >= 0) Wire.begin(sda, scl);
+    if (busUsed[1] && sda2 >= 0 && scl2 >= 0) Wire1.begin(sda2, scl2);
+    for (int b = 0; b < 2; ++b) {
         for (int i = 0; i < kMaxPca; ++i) {
-            if (!pcaPresent_[i]) continue;
-            // begin() returns false if the board does not ACK on I2C.
-            if (!pca_[i].begin()) pcaAttachFault_ = true;
-            pca_[i].setPWMFreq(kServoFreqHz);
+            if (!pcaPresent_[b][i]) continue;
+            // begin() returns false if the board does not ACK on its I2C bus.
+            if (!pca_[b][i].begin()) pcaAttachFault_ = true;
+            pca_[b][i].setPWMFreq(kServoFreqHz);
         }
     }
     // Attach direct-GPIO servos to LEDC channels (max 8 on the ESP32-S3).
@@ -67,8 +75,7 @@ void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t
             attachDirect(static_cast<int>(i));
     }
 #else
-    (void)sda;
-    (void)scl;
+    (void)sda; (void)scl; (void)sda2; (void)scl2;
 #endif
     neutraliseAll();
 }
@@ -116,8 +123,9 @@ bool ServoBank::writeMicros(int index, uint16_t us) {
     if (s.inverted) us = static_cast<uint16_t>(s.pulseMinUs + s.pulseMaxUs - us);
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
-        if (s.pcaBoard >= kMaxPca || !pcaPresent_[s.pcaBoard]) return false;
-        pca_[s.pcaBoard].writeMicroseconds(s.channel, us);
+        int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
+        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard]) return false;
+        pca_[bus][s.pcaBoard].writeMicroseconds(s.channel, us);
     } else if (s.gpio >= 0) {
         if (!attached_[index] && !attachDirect(index)) return false;  // reattach failed
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -141,8 +149,9 @@ void ServoBank::writeOff(int index) {
     const ServoConfig& s = servos_[index];
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
-        if (s.pcaBoard < kMaxPca && pcaPresent_[s.pcaBoard])
-            pca_[s.pcaBoard].setPWM(s.channel, 0, 0);  // full off, no pulse
+        int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
+        if (s.pcaBoard < kMaxPca && pcaPresent_[bus][s.pcaBoard])
+            pca_[bus][s.pcaBoard].setPWM(s.channel, 0, 0);  // full off, no pulse
     } else if (s.gpio >= 0) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
         ledcWrite(s.gpio, 0);
@@ -251,7 +260,9 @@ void ServoBank::update(uint32_t nowMs) {
 
 void ServoBank::outputEnable(bool on) {
 #if defined(ARDUINO)
-    if (oePin_ >= 0) digitalWrite(oePin_, on ? LOW : HIGH);  // /OE active-low
+    // Drive every configured /OE line together (both buses when the /OE is split).
+    for (int8_t oe : {oePin_, oePin2_})
+        if (oe >= 0) digitalWrite(oe, on ? LOW : HIGH);  // /OE active-low
 #else
     (void)on;
 #endif
@@ -260,12 +271,15 @@ void ServoBank::outputEnable(bool on) {
 bool ServoBank::pcaHealthy() const {
 #if defined(ARDUINO)
     if (!pcaUsed_) return true;
-    for (int i = 0; i < kMaxPca; ++i) {
-        if (!pcaPresent_[i]) continue;
-        // The PCA9685 base address is 0x40 + board index. A board that has been
-        // unplugged / lost power no longer ACKs its address.
-        Wire.beginTransmission(static_cast<uint8_t>(0x40 + i));
-        if (Wire.endTransmission() != 0) return false;
+    for (int b = 0; b < 2; ++b) {
+        TwoWire& w = (b == 0) ? Wire : Wire1;
+        for (int i = 0; i < kMaxPca; ++i) {
+            if (!pcaPresent_[b][i]) continue;
+            // The PCA9685 base address is 0x40 + board index (per bus). A board that
+            // has been unplugged / lost power no longer ACKs its address.
+            w.beginTransmission(static_cast<uint8_t>(0x40 + i));
+            if (w.endTransmission() != 0) return false;
+        }
     }
     return true;
 #else

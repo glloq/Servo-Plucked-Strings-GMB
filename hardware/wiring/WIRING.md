@@ -8,6 +8,12 @@ be reassigned from the web interface.
 There are **no stepper drivers, no HOME/LIMIT sensors and no 24 V motor rail** —
 fingers and pluckers are servos, driven over a PCA9685 or directly from a GPIO.
 
+> 💡 The web interface renders this harness **live for your own configuration**:
+> open the **Wiring** tab for a graphical, adaptive map of the ESP32, every
+> PCA9685 (at its I²C address) and its 16 channels, the shared I²C / `/OE` /
+> power buses and any direct-GPIO servos — with wiring-conflict checks and an
+> SVG export. This page is the static reference behind that diagram.
+
 > ⚠️ Wire and power-check the machine unpowered, with the PCA9685 `/OE` **high**
 > (servos off). The firmware boots into a safe state: `/OE` high, servos
 > neutralised (§21.1).
@@ -35,6 +41,18 @@ ESP32-S3.
 
 Up to **eight** boards at addresses **0x40 … 0x47** (set by the A0–A2 solder
 jumpers). Recommended: **one board per string**.
+
+> 🔀 **Two I²C buses (optional).** The ESP32-S3 exposes two hardware I²C
+> controllers, so the boards can be split across a **second bus** (`Wire1`, pins
+> **SDA2/SCL2**, default GPIO38/39) to halve the traffic per bus and refresh the
+> servos faster on large instruments. Each bus addresses its own 0x40–0x47 range,
+> so two buses reach **16 boards / 256 channels**. Assign a board to a bus in the
+> web interface (Setup Wizard → *Wiring & capacity*, or per servo in Advanced) and
+> give SDA2/SCL2 their own pull-ups. The `/OE` safety line can stay **shared** across
+> both buses or be **split per bus** (a second `SERVO_OE2` GPIO, default GPIO21) if
+> you want independent output-enable control. The firmware drives both controllers
+> (`Wire` = bus 0, `Wire1` = bus 1), routing each board to its bus and holding every
+> configured `/OE` line safe, so the second bus works on real hardware.
 
 | PCA9685 pin | Connect to | Notes |
 | ----------- | ---------- | ----- |

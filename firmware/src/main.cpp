@@ -211,7 +211,8 @@ void applyProfile() {
             g_profile.pluck.liftEngage == LiftEngage::RaiseToPlay)
             s.disableAtRest = false;
     }
-    g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
+    g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"),
+                   pinOf("SDA2"), pinOf("SCL2"), pinOf("SERVO_OE2"));
     g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
 
     // The E-stop pin belongs to the (possibly new) profile.

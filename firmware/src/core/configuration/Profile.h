@@ -109,7 +109,12 @@ struct ServoConfig {
 
     // Signal source.
     ServoSource source = ServoSource::Pca;
-    uint8_t pcaBoard = 0;         // 0..7 : up to eight PCA9685 (0x40..0x47)
+    uint8_t pcaBoard = 0;         // 0..7 : PCA9685 address 0x40..0x47 within its bus
+    // Which of the ESP32-S3's two hardware I2C controllers the board hangs off.
+    // 0 = primary bus (Wire, SDA/SCL); 1 = secondary bus (Wire1, SDA2/SCL2). A board
+    // is identified by (i2cBus, pcaBoard), so each bus has its own 0x40..0x47 range —
+    // splitting the boards over two buses halves the traffic and refreshes faster.
+    uint8_t i2cBus = 0;           // 0 | 1
     uint8_t channel = 0;          // PCA9685 channel 0..15 (source == Pca)
     int8_t gpio = -1;             // ESP32 GPIO           (source == DirectGpio)
 

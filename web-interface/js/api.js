@@ -132,6 +132,7 @@
   // output pins for direct-GPIO servos.
   var RECOMMENDED = {
     SDA: 40, SCL: 41, SERVO_OE: 47,
+    SDA2: 38, SCL2: 39, SERVO_OE2: 21,  // optional second I2C bus (Wire1) + its /OE
     SERVO: [4, 5, 6, 7, 15, 16, 17, 18]
   };
   GMB.RECOMMENDED = RECOMMENDED;
@@ -176,7 +177,8 @@
       fret: opts.fret === undefined ? -1 : opts.fret,        // finger: fret 1..24
       fretB: opts.fretB === undefined ? -1 : opts.fretB,     // geared finger: 2nd fret (-1 = plain)
       source: opts.source || 'pca',   // "pca" | "gpio"
-      pcaBoard: opts.pcaBoard || 0,   // 0..7 (0x40..0x47)
+      pcaBoard: opts.pcaBoard || 0,   // 0..7 (0x40..0x47) — address within its I2C bus
+      i2cBus: opts.i2cBus === 1 ? 1 : 0, // 0 | 1 — which ESP32 I2C controller the board is on
       channel: opts.channel === undefined ? 0 : opts.channel, // 0..15 (source == pca)
       gpio: opts.gpio === undefined ? -1 : opts.gpio,         // ESP32 GPIO (source == gpio)
       pulseMinUs: opts.pulseMinUs || 500,

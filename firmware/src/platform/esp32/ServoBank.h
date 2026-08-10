@@ -1,9 +1,12 @@
-// Servo bank supporting PCA9685 (up to four boards) AND direct-GPIO servos,
-// mixable per servo (user requirement: work with or without a PCA). Roles:
-// finger / pluck / strum / strumLift / damper per string, plus a shared damper
-// and aux actuators. There is no shared strummer — strumming is per string.
-// The PCA /OE line is tied to a safety pin so all PCA servos can be neutralised
-// instantly (spec §21.2); direct servos are detached on stop.
+// Servo bank supporting PCA9685 AND direct-GPIO servos, mixable per servo (user
+// requirement: work with or without a PCA). Boards live on one or BOTH of the
+// ESP32-S3's two hardware I2C controllers (Wire = bus 0, Wire1 = bus 1), up to
+// eight boards per bus (0x40..0x47); splitting boards over two buses halves the
+// traffic. Roles: finger / pluck / strum / strumLift / damper per string, plus a
+// shared damper and aux actuators. There is no shared strummer — strumming is per
+// string. The PCA /OE line(s) are tied to a safety pin (one shared, or one per bus)
+// so all PCA servos can be neutralised instantly (spec §21.2); direct servos are
+// detached on stop.
 #pragma once
 
 #include <cstdint>
@@ -15,6 +18,7 @@
 #if defined(ARDUINO)
 #include <Adafruit_PWMServoDriver.h>
 #include <Arduino.h>
+#include <Wire.h>
 #endif
 
 namespace gmb {
@@ -23,10 +27,12 @@ class ServoBank {
 public:
     static constexpr int kMaxPca = gmb::kMaxPca;  // 0x40..0x47 (up to 8 boards)
 
-    // sda/scl select the I2C pins; oePin drives /OE (active-low). Any of them may
-    // be -1 when unused (e.g. no PCA at all — all servos on direct GPIO).
+    // Bus 0 uses (sda/scl) on Wire and oePin for /OE. A second I2C bus (Wire1) is
+    // brought up when any board sits on i2cBus 1: (sda2/scl2) drive it and oePin2 is
+    // its /OE — pass oePin2 = -1 to share the single /OE line across both buses. Any
+    // pin may be -1 when unused (e.g. no PCA at all — every servo on a direct GPIO).
     void begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t scl,
-               int8_t oePin);
+               int8_t oePin, int8_t sda2 = -1, int8_t scl2 = -1, int8_t oePin2 = -1);
 
     void toRest(int index);
     void toActive(int index);
@@ -133,20 +139,26 @@ private:
     std::vector<int8_t> ledcCh_;  // LEDC channel per direct servo (Arduino 2.x)
     std::vector<bool> attached_;  // direct-servo LEDC attach state
     int8_t oePin_ = -1;
+    int8_t oePin2_ = -1;          // /OE for the second I2C bus (-1 = shared with oePin_)
     int directCount_ = 0;         // number of LEDC channels handed out
     bool pcaUsed_ = false;
-    bool pcaPresent_[kMaxPca] = {false};
+    bool pcaPresent_[2][kMaxPca] = {{false}};  // [i2cBus][board]
     bool directAttachFault_ = false;
     bool pcaAttachFault_ = false;
     static constexpr int kMaxDirectServos = 8;  // ESP32-S3 has 8 LEDC channels
 #if defined(ARDUINO)
-    // One driver per board at 0x40 + index (up to eight boards). The "one PCA per
-    // string" wiring convention puts a string's fret fingers + its plucker on one.
-    Adafruit_PWMServoDriver pca_[kMaxPca] = {
-        Adafruit_PWMServoDriver(0x40), Adafruit_PWMServoDriver(0x41),
-        Adafruit_PWMServoDriver(0x42), Adafruit_PWMServoDriver(0x43),
-        Adafruit_PWMServoDriver(0x44), Adafruit_PWMServoDriver(0x45),
-        Adafruit_PWMServoDriver(0x46), Adafruit_PWMServoDriver(0x47)};
+    // One driver per (bus, board): bus 0 on Wire, bus 1 on Wire1, each 0x40..0x47.
+    // The "one PCA per string" convention puts a string's fret fingers + its plucker
+    // on one board; boards can be spread over the two buses to cut I2C traffic.
+    Adafruit_PWMServoDriver pca_[2][kMaxPca] = {
+        {Adafruit_PWMServoDriver(0x40, Wire), Adafruit_PWMServoDriver(0x41, Wire),
+         Adafruit_PWMServoDriver(0x42, Wire), Adafruit_PWMServoDriver(0x43, Wire),
+         Adafruit_PWMServoDriver(0x44, Wire), Adafruit_PWMServoDriver(0x45, Wire),
+         Adafruit_PWMServoDriver(0x46, Wire), Adafruit_PWMServoDriver(0x47, Wire)},
+        {Adafruit_PWMServoDriver(0x40, Wire1), Adafruit_PWMServoDriver(0x41, Wire1),
+         Adafruit_PWMServoDriver(0x42, Wire1), Adafruit_PWMServoDriver(0x43, Wire1),
+         Adafruit_PWMServoDriver(0x44, Wire1), Adafruit_PWMServoDriver(0x45, Wire1),
+         Adafruit_PWMServoDriver(0x46, Wire1), Adafruit_PWMServoDriver(0x47, Wire1)}};
 #endif
     bool writeMicros(int index, uint16_t us);  // false if the write couldn't apply
     void writeOff(int index);
