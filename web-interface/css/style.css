@@ -33,6 +33,22 @@
   --shadow: 0 1px 3px rgba(20, 30, 50, .08), 0 4px 16px rgba(20, 30, 50, .06);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  /* Fretboard (playable neck) — wood tones read the same in both themes. */
+  --fb-neck-a: #4a3320;
+  --fb-neck-b: #6d4c2c;
+  --fb-body-a: #c89a56;
+  --fb-body-b: #a97c39;
+  --fb-headstock: #3f2c1c;
+  --fb-nut: #ece3d0;
+  --fb-fret: #c9ccd2;
+  --fb-inlay: #efe6d0;
+  --fb-string: #454b55;
+  --fb-string-active: var(--accent);
+  --fb-pad: #9fb4c9;
+  --fb-pad-ink: #2a3646;
+  --fb-pad-press: #ffce3a;
+  --fb-hole: #241812;
+  --fb-peg: #d8d2c4;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -58,6 +74,18 @@
     --used: #8593a5;
     --used-bg: #232d3a;
     --shadow: 0 1px 3px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .35);
+    /* Slightly deeper wood + brighter strings on the dark surface. */
+    --fb-neck-a: #38271a;
+    --fb-neck-b: #573c24;
+    --fb-body-a: #9c7538;
+    --fb-body-b: #78591f;
+    --fb-headstock: #2c1f14;
+    --fb-fret: #aeb4bf;
+    --fb-string: #c2c9d4;
+    --fb-pad: #8aa0b8;
+    --fb-pad-ink: #0d1520;
+    --fb-hole: #160f0a;
+    --fb-peg: #b7b1a3;
   }
 }
 
@@ -510,3 +538,80 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .summary strong { font-size: 14px; }
 .card.inset { background: var(--surface-2); box-shadow: none; margin-top: 10px; padding: 12px 14px; }
 .fret-warn { display: inline-flex; margin: 2px 0; }
+
+/* ---- Fretboard (playable neck visualization) ---------------------------- */
+.fb-arm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.fb-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.fb-modewrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fb-lbl { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.fb-modes { display: inline-flex; background: var(--surface-2); border-radius: 8px; padding: 3px; gap: 2px; }
+.fb-mode {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  padding: 6px 12px; border-radius: 6px; font: inherit; font-size: 13px; font-weight: 600;
+}
+.fb-mode:hover { color: var(--text); }
+.fb-mode.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.fb-modehint { font-size: 11px; }
+.fb-nowlabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.fb-readout {
+  font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent);
+  min-width: 168px; padding: 5px 10px; background: var(--surface-2); border-radius: 8px; text-align: center;
+}
+
+.fb-card { padding: 10px; }
+.fb-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.fb-svg { display: block; width: 100%; min-width: 660px; height: auto; touch-action: none; }
+
+/* Wood + body (gradient stops themed via classes). */
+.fb-neck-a { stop-color: var(--fb-neck-a); }
+.fb-neck-b { stop-color: var(--fb-neck-b); }
+.fb-body-a { stop-color: var(--fb-body-a); }
+.fb-body-b { stop-color: var(--fb-body-b); }
+.fb-body { stroke: rgba(0, 0, 0, .25); stroke-width: 1.5; }
+.fb-hole { fill: var(--fb-hole); }
+.fb-hole-ring { fill: none; stroke: rgba(0, 0, 0, .35); stroke-width: 3; }
+.fb-headstock { fill: var(--fb-headstock); stroke: rgba(0, 0, 0, .3); stroke-width: 1.5; }
+.fb-neck { stroke: rgba(0, 0, 0, .28); stroke-width: 1.5; }
+.fb-nut { fill: var(--fb-nut); }
+.fb-peg { fill: var(--fb-peg); stroke: rgba(0, 0, 0, .35); stroke-width: 1; }
+
+.fb-fret { stroke: var(--fb-fret); stroke-width: 3; stroke-linecap: round; }
+.fb-fretnum { fill: var(--muted); font-size: 13px; font-weight: 700; font-family: var(--mono); }
+.fb-inlay { fill: var(--fb-inlay); opacity: .8; }
+.fb-opennote { fill: var(--text); font-size: 14px; font-weight: 700; font-family: var(--mono); }
+.fb-strnum { fill: var(--fb-headstock); font-size: 11px; font-weight: 700; }
+
+.fb-rowhi { fill: transparent; transition: fill .12s; }
+.fb-rowhi.active { fill: color-mix(in srgb, var(--accent) 20%, transparent); }
+
+.fb-string { stroke: var(--fb-string); stroke-linecap: round; transition: stroke .08s; }
+.fb-string.active { stroke: var(--fb-string-active); filter: drop-shadow(0 0 4px var(--fb-string-active)); }
+.fb-string.vibrate { animation: fb-vibe .09s linear 0s 4; }
+@keyframes fb-vibe { 0%, 100% { transform: translateY(0); } 25% { transform: translateY(-1.3px); } 75% { transform: translateY(1.3px); } }
+
+/* Finger-servo pads: a rectangle on the string, just before the fret wire. */
+.fb-pad { fill: var(--fb-pad); stroke: var(--fb-pad-ink); stroke-width: 1; transition: fill .06s, transform .06s; }
+.fb-pad.geared { stroke-dasharray: 3 2; }
+.fb-pad.pressed { fill: var(--fb-pad-press); stroke: var(--fb-pad-press); }
+
+.fb-open { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.5; }
+.fb-open.pressed { fill: var(--fb-pad-press); stroke: var(--fb-pad-press); }
+
+/* Interactive cells sit on top; transparent but pointer-catching. */
+.fb-cell { fill: transparent; pointer-events: all; cursor: pointer; outline: none; }
+.fb-cell:hover { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.fb-cell:focus-visible { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: var(--accent); stroke-width: 1.5; }
+.fb-cell.empty { pointer-events: none; cursor: default; }
+
+.fb-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.fb-lg { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.fb-swatch { width: 15px; height: 15px; border-radius: 4px; display: inline-block; border: 1px solid var(--border); }
+.fb-swatch.fb-lg-pad { background: var(--fb-pad); border-color: var(--fb-pad-ink); }
+.fb-swatch.fb-lg-geared { background: var(--fb-pad); border: 1px dashed var(--fb-pad-ink); }
+.fb-swatch.fb-lg-empty { background: transparent; }
+.fb-swatch.fb-lg-active { background: var(--fb-string-active); border-color: var(--fb-string-active); }
+
+@media (max-width: 760px) {
+  .fb-controls { align-items: flex-start; }
+  .fb-readout { min-width: 0; flex: 1; }
+}

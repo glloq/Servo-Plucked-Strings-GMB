@@ -117,6 +117,7 @@
   // ---- routing --------------------------------------------------------------
   var TABS = [
     { id: 'dashboard', label: 'Dashboard', icon: 'D' },
+    { id: 'fretboard', label: 'Fretboard', icon: 'B' },
     { id: 'wizard', label: 'Setup Wizard', icon: 'W' },
     { id: 'pins', label: 'GPIO Pins', icon: 'P' },
     { id: 'midi', label: 'MIDI', icon: 'M' },
@@ -162,14 +163,23 @@
   }
   GMB.navigate = navigate;
 
+  var mountedView = null;   // id of the view currently in the DOM (for teardown)
+
   function render() {
     var host = document.getElementById('view');
     if (!host) return;
+    // Let the outgoing view release anything live (sockets, servo holds, timers)
+    // before it is torn out of the DOM. Runs on every re-render, so a view's
+    // teardown must be idempotent — its render then re-establishes what it needs.
+    if (mountedView && GMB.views[mountedView] && GMB.views[mountedView].teardown) {
+      try { GMB.views[mountedView].teardown(); } catch (e) {}
+    }
+    mountedView = null;
     host.innerHTML = '';
     if (!state.profile) { host.appendChild(h('div.card', 'Loading configuration…')); return; }
     var view = GMB.views[state.current];
     if (view && view.render) {
-      try { view.render(host); }
+      try { view.render(host); mountedView = state.current; }
       catch (e) { host.appendChild(h('div.card', [h('h2', 'View error'), h('pre', String(e && e.stack || e))])); }
     } else {
       host.appendChild(h('div.card', 'Unknown view: ' + state.current));

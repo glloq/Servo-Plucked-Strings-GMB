@@ -71,6 +71,7 @@ web-interface/
 │   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
 │   ├── app.js            shell, routing, DOM helpers, draft-profile state, mode toggle
 │   ├── dashboard.js      dashboard (§19)
+│   ├── fretboard.js      playable fretboard visualization (press-and-hold to play)
 │   ├── pins.js           GPIO assignment grid (§11)
 │   ├── wizard.js         7-step wizard — mechanical Instrument Builder + separate Frets/Plucking (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
@@ -156,6 +157,38 @@ The system works with **no PCA at all** (every servo on a direct GPIO) or any mi
 Per-string servos get their `stringIndex` set automatically. Each servo carries its
 calibration (rest/active µs, pulse min/max, inverted, travelMs, settleMs,
 disableAtRest).
+
+## Playable fretboard (Fretboard tab)
+
+Once the instrument is defined and calibrated, the **Fretboard** tab turns it into a
+clickable **keyboard**. It draws the neck as a stylised instrument (headstock with
+tuning pegs, wood fretboard, body with a soundhole) and lays out the strings and
+fret wires **to scale**: the spacing between frets follows equal temperament (the
+luthier's *rule of 18*, `d(n) = 1 − 2^(−n/12)`), so the neck compresses toward the
+body exactly like a real fretboard.
+
+- **Servos as pads** — every equipped fret shows its finger servo as a small
+  rectangle on the string, just on the nut side of the fret wire (where a finger
+  presses). A geared finger (one servo → two frets) shows a dashed pad on both frets.
+  Frets with no servo are drawn but inert.
+- **Press-and-hold to play** — pressing a fret with a servo drives its **finger servo**
+  to the calibrated contact pulse and **sounds the string**; the played string lights
+  up (colour change). **Releasing** lifts the finger back to rest. The zone left of the
+  nut plays the **open string** (fret 0, no finger). Only one finger is held per string
+  at a time (mirrors the firmware). Multi-touch plays several strings at once.
+- **Play mode** — a selector exposes only the sounding options the wiring can perform:
+  **Pluck** always; **Up-stroke** and **Alternate** when the string has a *strum* servo
+  (with its up-stroke pulse); **Muted** when a *damper* is present (strike then damp for
+  a short, staccato note). A *strum lift*, when present, is lowered for the stroke and
+  raised again.
+
+It drives the hardware through the same one-servo-at-a-time `POST /api/test/servo`
+endpoint the wizard uses, so it works on the real device **once armed** (an Arm control
+and armed/not-armed badge sit at the top) and fully **stand-alone** against the mock
+backend. It reads the working **draft** profile, so an in-progress calibration can be
+tried immediately. Leaving the tab (or a re-render) always lifts any held finger and
+cancels pending strokes. An **All fingers up** button and the **STOP (panic)** button
+provide a manual safety net.
 
 ## Testing one servo or a whole group
 
