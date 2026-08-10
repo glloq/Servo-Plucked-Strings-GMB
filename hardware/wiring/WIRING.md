@@ -48,9 +48,11 @@ jumpers). Recommended: **one board per string**.
 > servos faster on large instruments. Each bus addresses its own 0x40–0x47 range,
 > so two buses reach **16 boards / 256 channels**. Assign a board to a bus in the
 > web interface (Setup Wizard → *Wiring & capacity*, or per servo in Advanced) and
-> give SDA2/SCL2 their own pull-ups. *(Firmware note: the reference firmware
-> currently drives a single `Wire` bus; the second bus needs matching `Wire1`
-> support in `firmware/src/platform/esp32/ServoBank.cpp`.)*
+> give SDA2/SCL2 their own pull-ups. The `/OE` safety line can stay **shared** across
+> both buses or be **split per bus** (a second `SERVO_OE2` GPIO, default GPIO21) if
+> you want independent output-enable control. *(Firmware note: the reference firmware
+> currently drives a single `Wire` bus; the second bus needs matching `Wire1` support
+> in `firmware/src/platform/esp32/ServoBank.cpp`.)*
 
 | PCA9685 pin | Connect to | Notes |
 | ----------- | ---------- | ----- |

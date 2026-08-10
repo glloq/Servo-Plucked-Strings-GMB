@@ -708,8 +708,23 @@
       if (!has('SDA2')) p.pins.push({ signal: 'SDA2', kind: 'sda', gpio: R.SDA2 != null ? R.SDA2 : 38 });
       if (!has('SCL2')) p.pins.push({ signal: 'SCL2', kind: 'scl', gpio: R.SCL2 != null ? R.SCL2 : 39 });
     } else {
-      p.pins = p.pins.filter(function (x) { return x.signal !== 'SDA2' && x.signal !== 'SCL2'; });
+      // No board on bus 1 → drop the second bus's signals (incl. its /OE).
+      p.pins = p.pins.filter(function (x) { return x.signal !== 'SDA2' && x.signal !== 'SCL2' && x.signal !== 'SERVO_OE2'; });
     }
+  }
+  // Split /OE per bus (adds SERVO_OE2) or keep it shared (removes it).
+  function hasOe2() { return (GMB.state.profile.pins || []).some(function (x) { return x.signal === 'SERVO_OE2'; }); }
+  function setSplitOe(on) {
+    var p = GMB.state.profile; p.pins = p.pins || [];
+    if (on) {
+      if (!hasOe2()) {
+        var R = GMB.RECOMMENDED || {};
+        p.pins.push({ signal: 'SERVO_OE2', kind: 'servoOe', gpio: R.SERVO_OE2 != null ? R.SERVO_OE2 : 21 });
+      }
+    } else {
+      p.pins = p.pins.filter(function (x) { return x.signal !== 'SERVO_OE2'; });
+    }
+    GMB.markDirty();
   }
   // Distribute the boards evenly across the two buses (first half → bus 0).
   function autoSplitBuses() {
@@ -748,6 +763,11 @@
           'Assign the SDA2 / SCL2 pins on the GPIO Pins tab (default GPIO' +
           (R.SDA2 != null ? R.SDA2 : 38) + ' / GPIO' + (R.SCL2 != null ? R.SCL2 : 39) + ').')
       ]));
+      var oeToggle = h('input', { type: 'checkbox', checked: hasOe2() });
+      oeToggle.addEventListener('change', function () { setSplitOe(oeToggle.checked); drawStep(); });
+      kids.push(h('label.inline.builder-opt', [oeToggle,
+        h('span', 'Separate the /OE safety line per bus (adds SERVO_OE2, default GPIO' +
+          (R.SERVO_OE2 != null ? R.SERVO_OE2 : 21) + ') — otherwise both buses share the single /OE line')]));
     }
     return h('div.bus-topology', kids);
   }

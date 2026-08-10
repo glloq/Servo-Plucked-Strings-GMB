@@ -66,13 +66,7 @@
     return a && a.gpio >= 0 ? a.gpio : -1;
   }
 
-  // The lower code inside a channel pad: fret number for a finger (both frets if
-  // geared), else a one-letter role tag.
-  function padCode(sv) {
-    if (sv.function === 'finger') return sv.fretB >= 1 ? (sv.fret + '/' + sv.fretB) : String(sv.fret);
-    return { pluck: 'P', strum: 'S', strumLift: 'L', damper: 'D', aux: 'A' }[sv.function] || '?';
-  }
-  // The upper tag inside a channel pad: which string the servo belongs to, so a
+  // The tag inside a channel pad: which string the servo belongs to, so a
   // PCA9685 shared across several strings stays unambiguous. Global aux = "GLB".
   function stringTag(sv) { return sv.stringIndex >= 0 ? 'S' + (sv.stringIndex + 1) : 'GLB'; }
   // The strings a board hosts (board-level "shared across strings" readout).
@@ -132,7 +126,7 @@
     var byGpio = {};
     var auxSeen = 0;
     function claim(gpio, label) { if (gpio < 0) return; (byGpio[gpio] = byGpio[gpio] || []).push(label); }
-    ['SDA', 'SCL', 'SDA2', 'SCL2', 'SERVO_OE'].forEach(function (sig) { claim(signalGpio(p, sig), sig); });
+    ['SDA', 'SCL', 'SDA2', 'SCL2', 'SERVO_OE', 'SERVO_OE2'].forEach(function (sig) { claim(signalGpio(p, sig), sig); });
     // Aux servos need a stable index for their label; number them in profile order.
     var auxOrder = {};
     servos.forEach(function (s) { if (s.function === 'aux') auxOrder[servos.indexOf(s)] = auxSeen++; });
@@ -140,14 +134,17 @@
       claim(s.gpio, servoLabel(s, auxOrder[servos.indexOf(s)] || 0));
     });
 
+    var useBus1 = boards.some(function (b) { return b.bus === 1; });
+    var hasOe2 = (p.pins || []).some(function (x) { return x.signal === 'SERVO_OE2'; });
     return {
       servos: servos, pca: pca, direct: direct, boards: boards,
       byBoard: byBoard, byGpio: byGpio, auxOrder: auxOrder,
       sda: signalGpio(p, 'SDA'), scl: signalGpio(p, 'SCL'),
       sda2: signalGpio(p, 'SDA2'), scl2: signalGpio(p, 'SCL2'),
-      oe: signalGpio(p, 'SERVO_OE'),
-      usePca: boards.length > 0,
-      useBus1: boards.some(function (b) { return b.bus === 1; })
+      oe: signalGpio(p, 'SERVO_OE'), oe2: signalGpio(p, 'SERVO_OE2'),
+      usePca: boards.length > 0, useBus1: useBus1,
+      // A separate /OE per bus is active when a second-bus /OE (OE2) is configured.
+      splitOe: useBus1 && hasOe2
     };
   }
 
@@ -178,6 +175,7 @@
       if (m.sda2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SDA (SDA2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
       if (m.scl2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SCL (SCL2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
     }
+    if (m.splitOe && m.oe2 < 0) out.push({ sev: 'warning', msg: 'The second-bus /OE (OE2) is unassigned — bus 1 outputs cannot be force-disabled.' });
     // Firmware capacity limits (max 8 addresses per bus).
     [0, 1].forEach(function (bus) {
       var n = m.boards.filter(function (b) { return b.bus === bus; }).length;
@@ -188,14 +186,14 @@
   }
 
   // ---- geometry -------------------------------------------------------------
-  var BOARD_W = 172, BOARD_GAP = 26, ROW_X0 = 24;
-  var BOARD_TOP = 208, BOARD_H = 240;
+  var BOARD_W = 200, BOARD_GAP = 26, ROW_X0 = 24;
+  var BOARD_H = 250;
   var ESP_X = 24, TOP_Y = 14;
-  // The ESP box grows to fit the extra SDA2/SCL2 pins when a second bus is used.
-  function espWidth(m) { return m.useBus1 ? 210 : 150; }
-  var BUS_TOP = 112, BUS_STEP = 14;           // horizontal buses stacked from here
-  // Every possible bus (top→bottom). SDA/SCL are I²C bus 0; SDA2/SCL2 are the
-  // optional second I²C bus. V+, GND, 3V3 and /OE are shared by both.
+  // Buses sit in a band from BUS_TOP; boards start a clear BAND_GAP below the band
+  // so the taps are visible and never overlap the boards.
+  var BUS_TOP = 116, BUS_STEP = 13, BAND_GAP = 44;
+  // Every possible bus (top→bottom). SDA/SCL are I²C bus 0, SDA2/SCL2 the optional
+  // second bus; V+, GND, 3V3 are shared; /OE is shared unless split per bus (/OE2).
   var BUSES = [
     { key: 'vplus', label: 'V+ 5–6V', cls: 'vplus' },
     { key: 'gnd',   label: 'GND',     cls: 'gnd' },
@@ -204,14 +202,27 @@
     { key: 'scl',   label: 'SCL',     cls: 'scl' },
     { key: 'sda2',  label: 'SDA2',    cls: 'sda2' },
     { key: 'scl2',  label: 'SCL2',    cls: 'scl2' },
-    { key: 'oe',    label: '/OE',     cls: 'oe' }
+    { key: 'oe',    label: '/OE',     cls: 'oe' },
+    { key: 'oe2',   label: '/OE2',    cls: 'oe2' }
   ];
-  // The rails actually drawn for a given model (skips bus-1 signals and, for a
-  // direct-only rig, the I²C / logic rails), and their stacked Y positions.
+  // The ESP pins that drop onto buses (GND-only for a direct-only rig).
+  function espPins(m) {
+    if (!m.usePca) return [{ key: 'gnd', label: 'GND' }];
+    var a = [{ key: 'v3', label: '3V3' }, { key: 'gnd', label: 'GND' },
+      { key: 'sda', label: 'SDA', gpio: m.sda }, { key: 'scl', label: 'SCL', gpio: m.scl }];
+    if (m.useBus1) a = a.concat([{ key: 'sda2', label: 'SDA2', gpio: m.sda2 }, { key: 'scl2', label: 'SCL2', gpio: m.scl2 }]);
+    a.push({ key: 'oe', label: '/OE', gpio: m.oe });
+    if (m.splitOe) a.push({ key: 'oe2', label: '/OE2', gpio: m.oe2 });
+    return a;
+  }
+  function espWidth(m) { return Math.max(150, espPins(m).length * 30 + 16); }
+
+  // The rails actually drawn for a given model (skips unused buses), stacked.
   function activeRails(m) {
     return BUSES.filter(function (b) {
       if (!m.usePca && (b.key === 'sda' || b.key === 'scl' || b.key === 'oe' || b.key === 'v3')) return false;
       if (!m.useBus1 && (b.key === 'sda2' || b.key === 'scl2')) return false;
+      if (b.key === 'oe2' && !m.splitOe) return false;
       return true;
     });
   }
@@ -221,16 +232,34 @@
     return map;
   }
   function railY(m, key) { return m.railY && m.railY[key] != null ? m.railY[key] : BUS_TOP; }
-  // A board's SDA/SCL tap the rails of its own bus.
+  function boardTopFor(m) { return BUS_TOP + activeRails(m).length * BUS_STEP + BAND_GAP; }
+
+  // A board taps SDA/SCL of its own I²C bus, and /OE of its bus when /OE is split.
   function sdaKey(bus) { return bus === 1 ? 'sda2' : 'sda'; }
   function sclKey(bus) { return bus === 1 ? 'scl2' : 'scl'; }
+  function oeKey(m, bus) { return (m.splitOe && bus === 1) ? 'oe2' : 'oe'; }
+
+  // The compact role shown on a channel pad (fret for a finger, else a short word
+  // — Lift/Damp make the strum-lift and damper unmistakable).
+  function roleWord(sv) {
+    switch (sv.function) {
+      case 'finger': return 'f' + (sv.fretB >= 1 ? sv.fret + '/' + sv.fretB : sv.fret);
+      case 'pluck': return 'Pluck';
+      case 'strum': return 'Strum';
+      case 'strumLift': return 'Lift';
+      case 'damper': return 'Damp';
+      case 'aux': return 'Aux';
+      default: return String(sv.function);
+    }
+  }
 
   // The GPIO carried by a signal rail, whether it is required-but-missing, and the
   // rail's right-hand label (signal buses append their GPIO, e.g. "SDA2·38").
-  function railGpio(m, key) { return ({ sda: m.sda, scl: m.scl, sda2: m.sda2, scl2: m.scl2, oe: m.oe })[key]; }
+  function railGpio(m, key) { return ({ sda: m.sda, scl: m.scl, sda2: m.sda2, scl2: m.scl2, oe: m.oe, oe2: m.oe2 })[key]; }
   function railMissing(m, key) {
     if (key === 'sda' || key === 'scl') return m.usePca && railGpio(m, key) < 0;
     if (key === 'sda2' || key === 'scl2') return m.useBus1 && railGpio(m, key) < 0;
+    if (key === 'oe2') return m.splitOe && m.oe2 < 0;
     return false;
   }
   function railLabel(m, b) {
@@ -242,7 +271,8 @@
 
   // ---- diagram construction -------------------------------------------------
   function buildDiagram(p, m) {
-    m.railY = computeRailY(m);   // rail Y positions for THIS model (skips unused buses)
+    m.railY = computeRailY(m);        // rail Y positions for THIS model (skips unused buses)
+    m.boardTop = boardTopFor(m);      // boards start below the whole bus band
 
     // Row items left→right: a Direct-GPIO group (if any) then one box per chip.
     var items = [];
@@ -250,10 +280,11 @@
     m.boards.forEach(function (b) { items.push({ type: 'board', b: b }); });
 
     // A right gutter holds the bus labels (SDA2·38 …) so they never clip.
-    var LABEL_GUTTER = 78;
+    var LABEL_GUTTER = 82;
     var rowCore = items.length ? ROW_X0 + items.length * (BOARD_W + BOARD_GAP) - BOARD_GAP + ROW_X0 : 340;
-    var VB_W = Math.max(rowCore, 340) + LABEL_GUTTER;
-    var VB_H = BOARD_TOP + BOARD_H + 30;
+    var topZoneRight = ESP_X + espWidth(m) + 16 + 132 + 8;   // ESP + gap + PSU
+    var VB_W = Math.max(rowCore, topZoneRight, 340) + LABEL_GUTTER;
+    var VB_H = m.boardTop + BOARD_H + 30;
     var busRight = VB_W - LABEL_GUTTER + 4;
 
     var root = svg('svg', {
@@ -292,17 +323,9 @@
     g.appendChild(svg('text', { class: 'wire-sub light', x: x + 12, y: y + 38,
       text: 'DevKitC-1 · 3.3 V logic' + (m.useBus1 ? ' · 2× I²C' : '') }));
 
-    // ESP pins that drop onto buses. The GND tie (common ground) is always drawn;
-    // the logic 3V3 and the I²C / OE signals only when a PCA9685 is present, and
-    // SDA2 / SCL2 only when a board sits on the second bus.
-    var all = [ { key: 'gnd', label: 'GND' } ];
-    if (m.usePca) {
-      all = [ { key: 'v3', label: '3V3' }, { key: 'gnd', label: 'GND' },
-        { key: 'sda', label: 'SDA', gpio: m.sda }, { key: 'scl', label: 'SCL', gpio: m.scl } ];
-      if (m.useBus1) all = all.concat([
-        { key: 'sda2', label: 'SDA2', gpio: m.sda2 }, { key: 'scl2', label: 'SCL2', gpio: m.scl2 } ]);
-      all.push({ key: 'oe', label: '/OE', gpio: m.oe });
-    }
+    // ESP pins that drop onto buses (GND tie always; 3V3 / I²C / OE with a PCA;
+    // SDA2/SCL2 with a second bus; /OE2 when the /OE line is split per bus).
+    var all = espPins(m);
     var slot = w / (all.length + 1);
     all.forEach(function (pin, i) {
       var px = x + slot * (i + 1);
@@ -333,38 +356,39 @@
     return g;
   }
 
-  // One PCA9685 breakout: taps the buses at its top edge (SDA/SCL on its own bus),
-  // lays out 16 channels, and names the string(s) it serves.
+  // One PCA9685 breakout: taps the buses at its top edge (SDA/SCL — and /OE when
+  // split — on its own bus), lays out 16 channels, and names the string(s) it serves.
   function buildBoard(p, m, bd, x) {
     var g = svg('g', { class: 'wire-mod' });
-    var key = bd.key, used = 0;
+    var key = bd.key, top = m.boardTop, used = 0;
     m.byBoard[key].forEach(function (l) { if (l.length) used++; });
 
-    // Top-edge input pins (six); SDA/SCL tap this board's own I²C bus rails.
-    var pinKeys = ['vplus', 'gnd', 'v3', sdaKey(bd.bus), sclKey(bd.bus), 'oe'];
+    // Top-edge input pins; SDA/SCL (and /OE when split) tap this board's own bus.
+    var pinKeys = ['vplus', 'gnd', 'v3', sdaKey(bd.bus), sclKey(bd.bus), oeKey(m, bd.bus)];
     var pinSlot = BOARD_W / (pinKeys.length + 1);
     pinKeys.forEach(function (pk, i) {
       var px = x + pinSlot * (i + 1);
       var by = railY(m, pk);
-      g.appendChild(svg('line', { class: 'wire-lead ' + pk, x1: px, y1: BOARD_TOP, x2: px, y2: by }));
+      g.appendChild(svg('line', { class: 'wire-lead ' + pk, x1: px, y1: top, x2: px, y2: by }));
       g.appendChild(junction(pk, px, by));
     });
 
-    g.appendChild(svg('rect', { class: 'wire-board', x: x, y: BOARD_TOP, width: BOARD_W, height: BOARD_H, rx: 9 }));
-    g.appendChild(svg('text', { class: 'wire-title', x: x + 12, y: BOARD_TOP + 22, text: 'PCA9685 #' + bd.board }));
-    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 22, 'text-anchor': 'end', text: hex2(0x40 + bd.board) }));
+    g.appendChild(svg('rect', { class: 'wire-board', x: x, y: top, width: BOARD_W, height: BOARD_H, rx: 9 }));
+    g.appendChild(svg('text', { class: 'wire-title', x: x + 12, y: top + 22, text: 'PCA9685 #' + bd.board }));
+    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: top + 22, 'text-anchor': 'end', text: hex2(0x40 + bd.board) }));
     // Which bus + string(s) this board serves (a board may be shared across strings).
-    g.appendChild(svg('text', { class: 'wire-sub host', x: x + 12, y: BOARD_TOP + 39,
+    g.appendChild(svg('text', { class: 'wire-sub host', x: x + 12, y: top + 39,
       text: (m.useBus1 ? 'Bus ' + bd.bus + ' · ' : '') + hostedStrings(m, key) }));
-    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 39, 'text-anchor': 'end', text: used + '/16' }));
+    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: top + 39, 'text-anchor': 'end', text: used + '/16' }));
 
-    // 16 channels as a 4×4 grid; each pad shows its channel/pin, string and fret.
-    var gx0 = x + 12, gy0 = BOARD_TOP + 52;
-    var pw = 34, ph = 34, gapx = 4, gapy = 12;
+    // 16 channels in two columns of eight: pin/channel at the left, string·role at
+    // the right (so "0 → S1·Lift" reads at a glance, with no overlapping text).
+    var padW = (BOARD_W - 24 - 8) / 2, padH = 20, gapx = 8, gapy = 5;
+    var gx0 = x + 12, gy0 = top + 50;
     for (var ch = 0; ch < 16; ch++) {
-      var c = ch % 4, r = (ch / 4) | 0;
-      var px = gx0 + c * (pw + gapx), py = gy0 + r * (ph + gapy);
-      g.appendChild(buildChannel(m, key, ch, px, py, pw, ph));
+      var col = ch < 8 ? 0 : 1, row = ch % 8;
+      var px = gx0 + col * (padW + gapx), py = gy0 + row * (padH + gapy);
+      g.appendChild(buildChannel(m, key, ch, px, py, padW, padH));
     }
     return g;
   }
@@ -382,12 +406,11 @@
     }
     var cell = svg('g', { class: 'wire-cell' });
     cell.appendChild(svg('rect', { class: cls, x: px, y: py, width: pw, height: ph, rx: 5 }));
-    // Corner = the PCA pin/channel number; centre = string tag over fret/role code.
-    cell.appendChild(svg('text', { class: 'wire-chnum' + (sv ? ' on' : ''), x: px + 3.5, y: py + 10, text: ch }));
-    if (sv) {
-      cell.appendChild(svg('text', { class: 'wire-chstr', x: px + pw / 2, y: py + 19, 'text-anchor': 'middle', text: stringTag(sv) }));
-      cell.appendChild(svg('text', { class: 'wire-chcode', x: px + pw / 2, y: py + ph - 5, 'text-anchor': 'middle', text: padCode(sv) }));
-    }
+    var midY = py + ph / 2 + 3.5;
+    // Left = the PCA pin/channel number; right = string·role (e.g. S1·Lift).
+    cell.appendChild(svg('text', { class: 'wire-chpin' + (sv ? ' on' : ''), x: px + 7, y: midY, text: ch }));
+    if (sv) cell.appendChild(svg('text', { class: 'wire-chlabel', x: px + pw - 7, y: midY,
+      'text-anchor': 'end', text: stringTag(sv) + '·' + roleWord(sv) }));
     // Native SVG tooltip: full description on hover.
     var tip = 'Channel ' + ch + ' — ' + (sv
       ? servoLabel(sv, m.auxOrder[m.servos.indexOf(sv)] || 0) + (sv.enabled === false ? ' (disabled)' : '') +
@@ -401,18 +424,19 @@
   // from the shared V+/GND buses).
   function buildDirectBox(p, m, x) {
     var g = svg('g', { class: 'wire-mod' });
+    var top = m.boardTop;
     // Tap only V+ and GND (these servos take power from the servo rail too).
     ['vplus', 'gnd'].forEach(function (key, i) {
       var px = x + BOARD_W * (i ? 0.66 : 0.34);
       var by = railY(m, key);
-      g.appendChild(svg('line', { class: 'wire-lead ' + key, x1: px, y1: BOARD_TOP, x2: px, y2: by }));
+      g.appendChild(svg('line', { class: 'wire-lead ' + key, x1: px, y1: top, x2: px, y2: by }));
       g.appendChild(junction(key, px, by));
     });
-    g.appendChild(svg('rect', { class: 'wire-board direct', x: x, y: BOARD_TOP, width: BOARD_W, height: BOARD_H, rx: 9 }));
-    g.appendChild(svg('text', { class: 'wire-title', x: x + 12, y: BOARD_TOP + 22, text: 'Direct GPIO' }));
-    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 22, 'text-anchor': 'end', text: '×' + m.direct.length }));
+    g.appendChild(svg('rect', { class: 'wire-board direct', x: x, y: top, width: BOARD_W, height: BOARD_H, rx: 9 }));
+    g.appendChild(svg('text', { class: 'wire-title', x: x + 12, y: top + 22, text: 'Direct GPIO' }));
+    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: top + 22, 'text-anchor': 'end', text: '×' + m.direct.length }));
 
-    var y = BOARD_TOP + 44, lh = 22, shown = 0, max = 8;
+    var y = top + 46, lh = 24, shown = 0, max = 9;
     m.direct.forEach(function (s) {
       if (shown >= max) return;
       shown++;
@@ -445,12 +469,12 @@
         rail('vplus', 'V+ 5–6 V servo rail'), rail('gnd', 'GND (common)'), rail('v3', '3V3 logic'),
         rail('sda', 'I²C bus 0 SDA'), rail('scl', 'I²C bus 0 SCL'),
         rail('sda2', 'I²C bus 1 SDA (SDA2)'), rail('scl2', 'I²C bus 1 SCL (SCL2)'),
-        rail('oe', 'PCA9685 /OE safety')
+        rail('oe', '/OE safety (bus 0)'), rail('oe2', '/OE bus 1 (OE2)')
       ]),
-      h('p.muted', 'Each labelled channel is where one servo plugs in (signal + V+ + GND). On a pad the corner is the ' +
-        'PCA pin/channel, the top tag is the string (S1…, GLB = global auxiliary) and the number below is the fret ' +
-        '(P plucker, S strum, L lift, D damper, A auxiliary). A single PCA9685 can host several strings — each pin is ' +
-        'labelled with its own string and fret, and the board header lists the strings it serves. Hover a channel for the full description.')
+      h('p.muted', 'Each labelled channel is where one servo plugs in (signal + V+ + GND). On a pad the left is the ' +
+        'PCA pin/channel and the right is its string·role: a fret (S1·f3), or Pluck / Strum / Lift (strum-lift) / ' +
+        'Damp (damper) / Aux (GLB = global auxiliary). A single PCA9685 can host several strings — each pin carries ' +
+        'its own string, and the board header lists the strings it serves. Hover a channel for the full description.')
     ]);
   }
 
@@ -480,7 +504,8 @@
       cells.push(stat('I²C addresses', busAddrs(0)));
       cells.push(stat('SDA / SCL', gp(m.sda) + ' / ' + gp(m.scl)));
     }
-    cells.push(stat('/OE safety', gp(m.oe)));
+    if (m.splitOe) { cells.push(stat('/OE bus 0', gp(m.oe))); cells.push(stat('/OE bus 1 (OE2)', gp(m.oe2))); }
+    else cells.push(stat('/OE safety', gp(m.oe)));
     var grid = h('div.grid', cells);
     var kids = [h('div.card-head', [h('h2', 'Harness summary'),
       h('span.muted', 'derived live from the current configuration')]), grid];

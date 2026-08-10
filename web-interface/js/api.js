@@ -132,7 +132,7 @@
   // output pins for direct-GPIO servos.
   var RECOMMENDED = {
     SDA: 40, SCL: 41, SERVO_OE: 47,
-    SDA2: 38, SCL2: 39,                 // optional second I2C bus (Wire1)
+    SDA2: 38, SCL2: 39, SERVO_OE2: 21,  // optional second I2C bus (Wire1) + its /OE
     SERVO: [4, 5, 6, 7, 15, 16, 17, 18]
   };
   GMB.RECOMMENDED = RECOMMENDED;

@@ -116,7 +116,8 @@
       specs.push({ signal: 'SDA2', kind: 'sda', label: 'I2C bus 1 SDA (SDA2)' });
       specs.push({ signal: 'SCL2', kind: 'scl', label: 'I2C bus 1 SCL (SCL2)' });
     }
-    specs.push({ signal: 'SERVO_OE', kind: 'servoOe', label: 'PCA9685 /OE (safety)' });
+    specs.push({ signal: 'SERVO_OE', kind: 'servoOe', label: has('SERVO_OE2') ? 'PCA9685 /OE bus 0 (safety)' : 'PCA9685 /OE (safety)' });
+    if (has('SERVO_OE2')) specs.push({ signal: 'SERVO_OE2', kind: 'servoOe', label: 'PCA9685 /OE bus 1 (OE2)' });
     return specs;
   }
 
