@@ -143,6 +143,14 @@ historical behaviour (an absent block changes nothing):
 | Note-Off mute source | `muteSource` | `auto` / `plectrum` / `damper` / `lift` / `none` |
 | Mute hold | `muteHoldMs` | how long the mute is engaged before releasing |
 | Lift doubles as damper | `liftMuteOnNoteOff` | press the strum lift onto the string at Note Off |
+| Lift engagement direction | `liftEngage` | `lowerToPlay` (rest = clear) / `raiseToPlay` (rest = on the string) |
+
+**Lift direction (`liftEngage`).** `lowerToPlay` (default) is the historical lift:
+it rests clear of the string and lowers onto it for the stroke. `raiseToPlay` is the
+opposite mechanism — the lift rests with the plectrum **on** the string (an idle
+string is muted), a Note On **raises** it to play, it **stays up** for the whole note,
+and it **falls back** onto the string at Note Off to mute. In `raiseToPlay` the lift
+itself is the damper, so a lifted string needs no `muteUs` / `damper`.
 
 The fixed Note-On→sound latency (`midi.noteExecutionDelayMs`) and the strum-lift
 anticipation (`midi.strumLeadMs`) stay in `MidiConfig`.

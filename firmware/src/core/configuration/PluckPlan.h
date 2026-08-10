@@ -30,6 +30,15 @@ inline bool strikerCanPlectrumMute(const ServoConfig& striker) {
     return striker.muteUs != 0;
 }
 
+// In RaiseToPlay mode a strum lift RESTS ON the string, so letting it fall back to
+// rest at Note Off mutes the note — the lift itself is the damper and no other mute
+// action is needed (nor wanted: pressing anything else would fight it). In the
+// default LowerToPlay mode the lift rests clear, so muting comes from elsewhere.
+// Only meaningful on a string that actually has a lift.
+inline bool liftMutesAtRest(const PluckConfig& pk, bool hasLift) {
+    return pk.liftEngage == LiftEngage::RaiseToPlay && hasLift;
+}
+
 // Resolve the abstract mute policy to the CONCRETE actuator to use at Note Off,
 // given what the string has wired (a damper servo? a striker with a mute angle? a
 // strum lift?). `Auto` reproduces the historical rule exactly — a damper mutes if

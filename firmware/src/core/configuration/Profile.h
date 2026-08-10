@@ -164,6 +164,16 @@ struct PowerConfig {
 // plectrum leans on the string. `None` never actively mutes (natural decay).
 enum class MuteSource : uint8_t { Auto = 0, Plectrum = 1, Damper = 2, Lift = 3, None = 4 };
 
+// How a strum lift engages the plectrum with the string — which end of the lift's
+// travel plays and which end rests:
+//   LowerToPlay : rest = plectrum CLEAR of the string; the lift LOWERS it onto the
+//                 string to strike, then raises it back after (historical behaviour).
+//   RaiseToPlay : rest = plectrum DOWN ON the string (so an idle string is muted);
+//                 the lift RAISES it to play, HOLDS it up for the whole note, then
+//                 lets it fall back onto the string at Note Off — the lift is the
+//                 damper, so no separate mute is needed on a lifted string.
+enum class LiftEngage : uint8_t { LowerToPlay = 0, RaiseToPlay = 1 };
+
 // Plucking ("grattage") settings that are COMMON to every string, so the whole
 // gesture and its timing are set in one place instead of servo by servo. Every
 // field defaults to the historical behaviour, so a profile with no `pluck` block
@@ -185,6 +195,7 @@ struct PluckConfig {
     MuteSource muteSource = MuteSource::Auto;
     uint16_t muteHoldMs = 60;
     bool liftMuteOnNoteOff = false;
+    LiftEngage liftEngage = LiftEngage::LowerToPlay;
 };
 
 struct Profile {

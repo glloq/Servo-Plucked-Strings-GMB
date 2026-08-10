@@ -76,6 +76,31 @@ TEST(striker_can_plectrum_mute_flag) {
     CHECK(strikerCanPlectrumMute(s));
 }
 
+// ---- PluckPlan: lift engagement direction --------------------------------
+
+TEST(lift_default_is_lower_to_play) {
+    Profile p = uke();
+    CHECK(p.pluck.liftEngage == LiftEngage::LowerToPlay);
+}
+
+// A raise-to-play lift damps by resting ON the string; lower-to-play rests clear,
+// and a string with no lift never mutes via the lift whatever the mode.
+TEST(lift_raise_mutes_at_rest_only_with_lift) {
+    PluckConfig pk;
+    CHECK(!liftMutesAtRest(pk, true));   // lower-to-play, has lift -> no
+    pk.liftEngage = LiftEngage::RaiseToPlay;
+    CHECK(liftMutesAtRest(pk, true));    // raise-to-play + lift -> the lift is the damper
+    CHECK(!liftMutesAtRest(pk, false));  // raise-to-play but no lift -> nothing rests on it
+}
+
+TEST(lift_engage_both_directions_valid) {
+    Profile p = uke();
+    p.pluck.liftEngage = LiftEngage::RaiseToPlay;
+    CHECK(ProfileValidator::isActivatable(p));
+    p.pluck.liftEngage = LiftEngage::LowerToPlay;
+    CHECK(ProfileValidator::isActivatable(p));
+}
+
 // ---- Validator: muteUs + muteSource --------------------------------------
 
 // A bare profile keeps the historical defaults and is activatable.

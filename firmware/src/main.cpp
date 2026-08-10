@@ -505,38 +505,43 @@ void tickString(size_t i, uint32_t nowMs) {
             int di = g_servos.damperIndex(static_cast<int>(i));
             int pi = perStringStrikeIndex(i);
             int li = g_servos.strumLiftIndex(static_cast<int>(i));
-            bool strikerHasMute = pi >= 0 && g_servos.muteUs(pi) != 0;
-            MuteSource action =
-                resolvePluckMute(g_profile.pluck, di >= 0, strikerHasMute, li >= 0);
             uint32_t muteWaitMs = 0;
-            switch (action) {
-                case MuteSource::Damper:
-                    if (di >= 0) { g_servos.strike(di); muteWaitMs = g_servos.travelMs(di); }
-                    break;
-                case MuteSource::Plectrum:
-                    // Bring the plectrum to rest against the string to damp it, then
-                    // release it to rest once the mute hold has elapsed.
-                    if (pi >= 0 && g_servos.muteHold(pi)) {
-                        sch.muteIndex = pi;
-                        muteWaitMs = g_profile.pluck.muteHoldMs;
-                    }
-                    break;
-                case MuteSource::Lift:
-                    if (li >= 0 && g_servos.press(li)) {
-                        sch.muteIndex = li;
-                        muteWaitMs = g_profile.pluck.muteHoldMs;
-                    }
-                    break;
-                default:  // None: let the string ring / decay naturally.
-                    break;
-            }
-            // A lift that doubles as an étouffoir: lean it on the string at Note Off
-            // even when the primary mute came from elsewhere (unless something is
-            // already being held, so only one actuator is ever left to release).
-            if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
-                action != MuteSource::Lift && li >= 0 && g_servos.press(li)) {
-                sch.muteIndex = li;
-                if (g_profile.pluck.muteHoldMs > muteWaitMs) muteWaitMs = g_profile.pluck.muteHoldMs;
+            // Raise-to-play: the lift already rests ON the string, so releasing it
+            // (just above) mutes — no other actuator should move, and pressing one
+            // would fight it. Otherwise damp via the resolved mute source.
+            if (!liftMutesAtRest(g_profile.pluck, li >= 0)) {
+                bool strikerHasMute = pi >= 0 && g_servos.muteUs(pi) != 0;
+                MuteSource action =
+                    resolvePluckMute(g_profile.pluck, di >= 0, strikerHasMute, li >= 0);
+                switch (action) {
+                    case MuteSource::Damper:
+                        if (di >= 0) { g_servos.strike(di); muteWaitMs = g_servos.travelMs(di); }
+                        break;
+                    case MuteSource::Plectrum:
+                        // Bring the plectrum to rest against the string to damp it,
+                        // then release it to rest once the mute hold has elapsed.
+                        if (pi >= 0 && g_servos.muteHold(pi)) {
+                            sch.muteIndex = pi;
+                            muteWaitMs = g_profile.pluck.muteHoldMs;
+                        }
+                        break;
+                    case MuteSource::Lift:
+                        if (li >= 0 && g_servos.press(li)) {
+                            sch.muteIndex = li;
+                            muteWaitMs = g_profile.pluck.muteHoldMs;
+                        }
+                        break;
+                    default:  // None: let the string ring / decay naturally.
+                        break;
+                }
+                // A lift that doubles as an étouffoir (lower-to-play): lean it on the
+                // string at Note Off even when the primary mute came from elsewhere
+                // (unless something is already held, so only one is left to release).
+                if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
+                    action != MuteSource::Lift && li >= 0 && g_servos.press(li)) {
+                    sch.muteIndex = li;
+                    if (g_profile.pluck.muteHoldMs > muteWaitMs) muteWaitMs = g_profile.pluck.muteHoldMs;
+                }
             }
             if (muteWaitMs > sch.releaseWaitMs) sch.releaseWaitMs = muteWaitMs;
             sch.phase = StringSched::WaitStopped;
@@ -745,9 +750,18 @@ void tickString(size_t i, uint32_t nowMs) {
             break;
         case StringSched::StrumLiftHold:
             if (nowMs - sch.phaseStartMs >= g_servos.travelMs(sch.strikeIndex)) {
-                g_servos.release(sch.liftIndex);
-                sch.liftIndex = -1;
-                sch.strikeIndex = -1;
+                if (g_profile.pluck.liftEngage == LiftEngage::RaiseToPlay) {
+                    // Raise-to-play: KEEP the plectrum lifted (string free to ring)
+                    // for the whole note; it falls back onto the string — muting —
+                    // only when the lift returns to rest at Note Off.
+                    sch.strikeIndex = -1;
+                } else {
+                    // Lower-to-play: retract the lift now so the plectrum clears the
+                    // ringing string.
+                    g_servos.release(sch.liftIndex);
+                    sch.liftIndex = -1;
+                    sch.strikeIndex = -1;
+                }
                 sch.phase = StringSched::Ready;
             }
             break;

@@ -325,7 +325,7 @@
       power: { maxConcurrentMoves: 3, staggerMs: 8 },
       pluck: {
         strokeMs: 0, fretToPluckMs: 0, muteSource: 'auto', muteHoldMs: 60,
-        liftMuteOnNoteOff: false
+        liftMuteOnNoteOff: false, liftEngage: 'lowerToPlay'
       },
       midi: {
         globalChannel: 0, omni: false, transpose: 0, chordWindowMs: 3,

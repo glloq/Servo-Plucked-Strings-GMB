@@ -1267,6 +1267,7 @@
     if (pk.muteSource === undefined) pk.muteSource = 'auto';
     if (pk.muteHoldMs === undefined) pk.muteHoldMs = 60;
     if (pk.liftMuteOnNoteOff === undefined) pk.liftMuteOnNoteOff = false;
+    if (pk.liftEngage === undefined) pk.liftEngage = 'lowerToPlay';
     if (!p.midi) p.midi = {};
     if (p.midi.noteExecutionDelayMs === undefined) p.midi.noteExecutionDelayMs = 0;
     if (p.midi.strumLeadMs === undefined) p.midi.strumLeadMs = 0;
@@ -1299,9 +1300,19 @@
       }), 'qui coupe la note à la fin — le plectre peut muter sans servo dédié'),
       GMB.field('Tenue de l’étouffement (ms)', GMB.input(pk, 'muteHoldMs', { type: 'number', min: 0, max: 2000 }))
     ];
-    if (anyRole('strumLift'))
-      mute.push(GMB.field('Le levage étouffe aussi', GMB.input(pk, 'liftMuteOnNoteOff', { type: 'checkbox' }),
-        'pose le plectre sur la corde au Note Off, en plus'));
+    if (anyRole('strumLift')) {
+      mute.push(GMB.field('Sens du levage', GMB.input(pk, 'liftEngage', {
+        type: 'select', options: [
+          { value: 'lowerToPlay', label: 'Abaisse pour jouer (repos = plectre écarté)' },
+          { value: 'raiseToPlay', label: 'Lève pour jouer (repos = plectre posé → étouffe)' }
+        ], onChange: drawStep
+      }), 'à la réception d’une note : le levage abaisse ou lève le plectre vers la corde'));
+      // In raise-to-play the resting lift already mutes, so the extra "lift also
+      // mutes" toggle is moot — only offer it in lower-to-play.
+      if (pk.liftEngage !== 'raiseToPlay')
+        mute.push(GMB.field('Le levage étouffe aussi', GMB.input(pk, 'liftMuteOnNoteOff', { type: 'checkbox' }),
+          'pose le plectre sur la corde au Note Off, en plus'));
+    }
     return h('div.card', [
       h('div.card-head', [h('h3', 'Grattage — commun à toutes les cordes'),
         h('span.muted', 'un seul réglage pour tout l’instrument')]),
@@ -1414,8 +1425,12 @@
     var damp = perStringServo(activeStr, 'damper');
     var hasStriker = !!striker;
     var opt = [];
-    if (lift) opt.push(actuatorBlock('Strum lift', lift,
-      { rest: 'raised — plucker off the string', active: 'lowered — plucker engaged' }));
+    var liftHints = p.pluck.liftEngage === 'raiseToPlay'
+      ? { rest: 'baissé — plectre posé sur la corde (repos = étouffe)',
+          active: 'levé — plectre au plan de frappe (jeu)' }
+      : { rest: 'levé — plectre écarté de la corde (repos)',
+          active: 'baissé — plectre engagé pour la frappe' };
+    if (lift) opt.push(actuatorBlock('Strum lift', lift, liftHints));
     else opt.push(h('div.row', [
       h('span.muted', 'Strum lift — lowers the plucker onto the string for a stroke, then raises it.'),
       hasStriker

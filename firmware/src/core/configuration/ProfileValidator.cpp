@@ -366,6 +366,7 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     enumOk(static_cast<int>(p.midi.velocityCurve), 4, "midi.velocityCurve");
     enumOk(static_cast<int>(p.midi.saturationStrategy), 5, "midi.saturationStrategy");
     enumOk(static_cast<int>(p.pluck.muteSource), 4, "pluck.muteSource");
+    enumOk(static_cast<int>(p.pluck.liftEngage), 1, "pluck.liftEngage");
     enumOk(static_cast<int>(p.selector.mode), 2, "selector.mode");
     enumOk(static_cast<int>(p.selector.notePositionPolicy), 2, "selector.notePositionPolicy");
     enumOk(static_cast<int>(p.selector.fret.invalidValuePolicy), 3, "selector.fret.invalidValuePolicy");

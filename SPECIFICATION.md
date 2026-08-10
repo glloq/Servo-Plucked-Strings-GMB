@@ -615,6 +615,11 @@ muteSource         who damps at Note Off:
                      none     - let the string ring
 muteHoldMs         how long the mute is engaged before releasing to rest
 liftMuteOnNoteOff  also press the strum lift onto the string at Note Off
+liftEngage         strum-lift direction:
+                     lowerToPlay - rest = plectrum clear; lower to strike (historical)
+                     raiseToPlay - rest = plectrum ON the string (idle = muted); raise
+                                   to play, hold up for the note, fall back at Note Off
+                                   to mute (the lift is the damper)
 ```
 
 Every field defaults to the historical behaviour, so a profile with no `pluck` block plays exactly as before. The fixed Note-On→sound latency (`noteExecutionDelayMs`) and the strum-lift anticipation (`strumLeadMs`) remain in the MIDI parameters (§18); combined, they let the lift raise/lower the plucker so it contacts the string at the right instant, and let the plucker itself damp the note at the end.

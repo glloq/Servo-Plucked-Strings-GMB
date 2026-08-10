@@ -95,6 +95,23 @@ MuteSource muteSourceFrom(JsonVariantConst v, bool* ok) {
     return MuteSource::Auto;
 }
 
+// Strum-lift engagement direction. Absent -> LowerToPlay (historical behaviour).
+const char* liftEngageName(LiftEngage e) {
+    return e == LiftEngage::RaiseToPlay ? "raiseToPlay" : "lowerToPlay";
+}
+LiftEngage liftEngageFrom(JsonVariantConst v, bool* ok) {
+    if (v.isNull()) return LiftEngage::LowerToPlay;
+    if (v.is<const char*>()) {
+        std::string s = v.as<const char*>();
+        if (s == "lowerToPlay") return LiftEngage::LowerToPlay;
+        if (s == "raiseToPlay") return LiftEngage::RaiseToPlay;
+        *ok = false; return LiftEngage::LowerToPlay;
+    }
+    if (v.is<int>()) { int i = v.as<int>(); if (i < 0 || i > 1) *ok = false;
+                       return static_cast<LiftEngage>(i < 0 ? 0 : i > 1 ? 1 : i); }
+    return LiftEngage::LowerToPlay;
+}
+
 const char* saturationName(SaturationStrategy s) {
     switch (s) {
         case SaturationStrategy::IgnoreExtra: return "ignoreExtra";
@@ -273,6 +290,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     pl["muteSource"] = muteSourceName(p.pluck.muteSource);
     pl["muteHoldMs"] = p.pluck.muteHoldMs;
     pl["liftMuteOnNoteOff"] = p.pluck.liftMuteOnNoteOff;
+    pl["liftEngage"] = liftEngageName(p.pluck.liftEngage);
 
     JsonArray strings = doc["strings"].to<JsonArray>();
     for (size_t i = 0; i < p.strings.size(); ++i) {
@@ -416,6 +434,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.pluck.muteSource = muteSourceFrom(pl["muteSource"], &enumsOk);
     out.pluck.muteHoldMs = pl["muteHoldMs"] | 60;
     out.pluck.liftMuteOnNoteOff = pl["liftMuteOnNoteOff"] | false;
+    out.pluck.liftEngage = liftEngageFrom(pl["liftEngage"], &enumsOk);
 
     out.strings.clear();
     for (JsonObjectConst o : doc["strings"].as<JsonArrayConst>()) {

@@ -135,6 +135,13 @@ une seule fois (étape *Grattage* de l'assistant), au lieu de refaire chaque ple
 - `muteHoldMs` : durée d'appui de l'étouffement avant retour au repos.
 - `liftMuteOnNoteOff` : le `strumLift` se pose aussi sur la corde au Note Off (levage
   qui sert d'étouffoir).
+- `liftEngage` : **sens du levage** —
+  `lowerToPlay` (repos = plectre **écarté** ; à la note le levage **abaisse** le plectre
+  sur la corde puis le relève — comportement historique) ou
+  `raiseToPlay` (repos = plectre **posé sur la corde**, donc corde à l'arrêt **étouffée** ;
+  à la note le levage **lève** le plectre au plan de frappe, le **maintient levé** toute
+  la note, puis le laisse **redescendre** au Note Off pour étouffer — **le levage est
+  l'étouffoir**, pas besoin de `muteUs` ni de `damper` sur cette corde).
 
 **`MidiConfig`** (latence & anticipation) :
 
