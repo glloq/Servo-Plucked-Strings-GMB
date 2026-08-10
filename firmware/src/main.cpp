@@ -198,9 +198,11 @@ void applyProfile() {
     std::vector<ServoConfig> servos = g_profile.servos;
     for (auto& s : servos) {
         if (s.function == "pluck" || s.function == "strum") {
-            if (g_profile.pluck.strokeMs != 0) s.strokeMs = g_profile.pluck.strokeMs;
-            if (g_profile.pluck.minStrikePct != 0)
-                s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
+            // Overlay the global gesture via the unit-tested PluckPlan helpers so the
+            // runtime and the tests can never drift (both are no-ops when the global
+            // fields are zero, preserving the historical per-servo values) — audit P-B9.
+            s.strokeMs = effectivePluckStrokeMs(g_profile.pluck, s);
+            s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
         }
         // A raise-to-play strum lift damps by resting ON the string, so it must stay
         // energised at rest for the mute to hold — override disableAtRest regardless

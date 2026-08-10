@@ -132,6 +132,23 @@ int main(int argc, char** argv) {
         CHECK(!parse(bad, p), "unknown velocityCurve is rejected");
     }
 
+    // A PCA profile imported with an empty pin list + automaticPinAssignment must be
+    // auto-wired on load, not rejected for missing SDA/SCL/OE (audit P-B4).
+    {
+        std::printf("auto-pin-assignment on import\n");
+        std::string base = slurp(root + "/instrument-profiles/ukulele-gcea.json");
+        JsonDocument doc;
+        deserializeJson(doc, base);
+        doc.remove("pins");                               // ship no pins
+        doc["board"]["automaticPinAssignment"] = true;
+        std::string body;
+        serializeJson(doc, body);
+        Profile p;
+        CHECK(parse(body, p), "PCA profile with empty pins parses");
+        CHECK(!p.pins.empty(), "pins were auto-assigned on import");
+        CHECK(ProfileValidator::isActivatable(p), "auto-wired profile is activatable");
+    }
+
     std::printf(g_fail ? "\nPROFILECHECK FAILED (%d)\n" : "\nprofilecheck OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

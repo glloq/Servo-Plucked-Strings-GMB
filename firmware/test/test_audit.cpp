@@ -109,6 +109,40 @@ TEST(validator_rejects_rest_equals_active) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
+// An absurd motion/global time is a typo that would stall a note for tens of
+// seconds; the validator rejects it (audit P-B3).
+TEST(validator_rejects_absurd_timing) {
+    Profile p = uke();
+    p.servos[0].travelMs = 60000;  // ~60 s finger move
+    CHECK(!ProfileValidator::isActivatable(p));
+    Profile q = uke();
+    q.midi.noteExecutionDelayMs = 60000;
+    CHECK(!ProfileValidator::isActivatable(q));
+    Profile r = uke();
+    r.power.staggerMs = 5000;
+    CHECK(!ProfileValidator::isActivatable(r));
+}
+
+// An alternate up-stroke whose implicit mirror (2*rest-active) falls outside the
+// pulse window is silently clamped — the validator warns (audit P-B7).
+TEST(validator_warns_alternate_mirror_out_of_window) {
+    Profile p = uke();
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) {
+            s.function = "strum";
+            s.alternateDirection = true;
+            s.activeAltUs = 0;                     // use the implicit mirror
+            s.restUs = 600; s.activeUs = 2400;     // mirror = -1200 -> out of window
+        }
+    bool warned = false;
+    for (const auto& is : ProfileValidator::validate(p))
+        if (is.field.find("activeAltUs") != std::string::npos &&
+            is.severity == ValidationIssue::Severity::Warning)
+            warned = true;
+    CHECK(warned);
+    CHECK(ProfileValidator::isActivatable(p));  // warning only
+}
+
 // A raise-to-play strum lift holds its mute AT REST, so disableAtRest would cut the
 // PWM that keeps it damping — the validator warns (still activatable) (audit P-B5).
 TEST(validator_warns_raise_to_play_lift_disable_at_rest) {

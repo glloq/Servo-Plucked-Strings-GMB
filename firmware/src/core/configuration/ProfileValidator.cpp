@@ -8,6 +8,10 @@ namespace gmb {
 
 using Sev = ValidationIssue::Severity;
 
+// A single servo move / stroke / delay never legitimately takes this long; a value
+// beyond it is a typo that would stall a note for tens of seconds (audit P-B3).
+static constexpr uint16_t kMaxServoTimeMs = 5000;
+
 std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     std::vector<ValidationIssue> issues;
     auto err = [&](const std::string& f, const std::string& m) {
@@ -193,6 +197,18 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 (s.activeAltUs < s.pulseMinUs || s.activeAltUs > s.pulseMaxUs))
                 err(tag + ".activeAltUs",
                     "Alternate active pulse is outside the servo's min/max range");
+            // Alternate up-stroke with no explicit endpoint uses the implicit mirror
+            // 2*rest-active; if that lands outside the pulse window it is silently
+            // clamped, so the "symmetric" up-stroke is weaker than intended — warn so
+            // the user sets an explicit activeAltUs (audit P-B7).
+            if (s.alternateDirection && s.activeAltUs == 0) {
+                int mirror = 2 * static_cast<int>(s.restUs) - static_cast<int>(s.activeUs);
+                if (mirror < static_cast<int>(s.pulseMinUs) ||
+                    mirror > static_cast<int>(s.pulseMaxUs))
+                    warn(tag + ".activeAltUs",
+                         "Alternate up-stroke mirror (2*rest-active) is out of the pulse "
+                         "window and will be clamped; set an explicit activeAltUs");
+            }
             if (s.minStrikeUs != 0 &&
                 (s.minStrikeUs < s.pulseMinUs || s.minStrikeUs > s.pulseMaxUs))
                 err(tag + ".minStrikeUs",
@@ -210,6 +226,18 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 warn(tag + ".disableAtRest",
                      "A raise-to-play strum lift holds its mute at rest; disableAtRest "
                      "should be off so the plectrum keeps damping the string");
+            // Timing sanity: a mis-typed motion time would stall a note for tens of
+            // seconds while the FSM believes it is still moving/striking (audit P-B3).
+            auto boundServoMs = [&](uint16_t v, const char* field) {
+                if (v > kMaxServoTimeMs)
+                    err(tag + "." + field,
+                        std::string(field) + " exceeds the sane servo-timing bound (" +
+                            std::to_string(kMaxServoTimeMs) + " ms)");
+            };
+            boundServoMs(s.travelMs, "travelMs");
+            boundServoMs(s.settleMs, "settleMs");
+            boundServoMs(s.strokeMs, "strokeMs");
+            boundServoMs(s.engageDelayMs, "engageDelayMs");
 
             if (s.source == ServoSource::Pca) {
                 if (s.pcaBoard > kMaxPca - 1)
@@ -325,6 +353,22 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     if (p.power.maxConcurrentMoves == 0)
         err("power.maxConcurrentMoves",
             "At least one servo must be allowed to move at a time");
+    if (p.power.staggerMs > 1000)
+        err("power.staggerMs", "Servo start stagger exceeds a sane bound (1000 ms)");
+
+    // Global timing sanity (audit P-B3): a huge value stalls notes for tens of
+    // seconds. chordWindowMs is a small grouping window — a large one merges
+    // unrelated notes into one chord, so it is only a warning.
+    if (p.midi.noteExecutionDelayMs > kMaxServoTimeMs)
+        err("midi.noteExecutionDelayMs", "Note-execution delay exceeds 5000 ms");
+    if (p.midi.strumLeadMs > kMaxServoTimeMs)
+        err("midi.strumLeadMs", "Strum lead exceeds 5000 ms");
+    if (p.pluck.muteHoldMs > kMaxServoTimeMs)
+        err("pluck.muteHoldMs", "Mute hold exceeds 5000 ms");
+    if (p.pluck.fretToPluckMs > kMaxServoTimeMs)
+        err("pluck.fretToPluckMs", "Fret-to-pluck delay exceeds 5000 ms");
+    if (p.midi.chordWindowMs > 100)
+        warn("midi.chordWindowMs", "Chord window over 100 ms may merge unrelated notes");
 
     // String/fret selection CC configuration (selection spec section 18). The
     // string/fret CCs are only consumed when selection is enabled and not in the

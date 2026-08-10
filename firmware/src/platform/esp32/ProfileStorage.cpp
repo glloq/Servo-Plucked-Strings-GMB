@@ -479,6 +479,29 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
         s.minStrikeUs = o["minStrikeUs"] | 0;
         out.servos.push_back(s);
     }
+
+    // Honour automaticPinAssignment on import: a PCA-based profile that ships no pin
+    // list would otherwise fail validation ("SDA/SCL/OE required") instead of being
+    // auto-wired, exactly as Profile::makeDefault does (audit P-B4). Only runs when
+    // the board actually needs assigned pins (a PCA servo exists) so an all-GPIO
+    // instrument keeps its empty list untouched.
+    if (out.automaticPinAssignment && out.pins.empty()) {
+        bool usesPca = false;
+        for (const auto& sv : out.servos)
+            if (sv.enabled && sv.source == ServoSource::Pca) { usesPca = true; break; }
+        if (usesPca) {
+            if (const BoardProfile* board = builtinBoardProfile(out.boardIdentifier)) {
+                PinManager pm(*board);
+                PinRequest req;
+                req.stringCount = out.instrument.stringCount;
+                req.useI2cServos = true;
+                req.servoSafetyOe = true;
+                req.reserveUsb = out.reserveUsb;
+                if (pm.autoAssign(req)) out.pins = pm.assignments();
+            }
+        }
+    }
+
     // Reject the whole profile if any enum string was unknown (never silently map
     // an unrecognised value to a default — audit P0-1 / P0-7).
     return enumsOk;
