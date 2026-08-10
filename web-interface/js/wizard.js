@@ -720,8 +720,10 @@
         GMB.field('Description', GMB.input(p.instrument, 'description'))
       ]),
       GMB.isAdvanced() ? h('div.grid3', [
-        GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 })),
-        GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 })),
+        GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 }),
+          'décalage virtuel (agit comme transpose) — laisser à 0 : pas de barre physique'),
+        GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 }),
+          'décalage global en demi-tons (à privilégier au capo)'),
         GMB.field('GM program', GMB.input(p.instrument, 'gmProgram', { type: 'number', min: 0, max: 127 })),
         GMB.field('GMB type id', GMB.input(p.instrument, 'typeId', { type: 'number', min: 0, max: 127 }))
       ]) : null
