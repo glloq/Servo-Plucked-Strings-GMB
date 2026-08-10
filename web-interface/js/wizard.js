@@ -597,6 +597,7 @@
       builderRef = p;
       var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
       p.servos = GMB.buildInstrument(effectiveSpec, p.strings, []).concat(aux);
+      ensureBusPins();   // a preset is single-bus: drop any stale SDA2/SCL2/OE2 pins
       syncSelection();
       GMB.markDirty();
     }

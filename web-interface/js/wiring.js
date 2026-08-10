@@ -142,7 +142,9 @@
       sda: signalGpio(p, 'SDA'), scl: signalGpio(p, 'SCL'),
       sda2: signalGpio(p, 'SDA2'), scl2: signalGpio(p, 'SCL2'),
       oe: signalGpio(p, 'SERVO_OE'), oe2: signalGpio(p, 'SERVO_OE2'),
-      usePca: boards.length > 0, useBus1: useBus1,
+      usePca: boards.length > 0,
+      useBus0: boards.some(function (b) { return b.bus === 0; }),
+      useBus1: useBus1,
       // A separate /OE per bus is active when a second-bus /OE (OE2) is configured.
       splitOe: useBus1 && hasOe2
     };
@@ -165,16 +167,19 @@
       if (who.length > 1) out.push({ sev: 'error',
         msg: 'GPIO' + g + ' is shared by ' + who.join(' and ') + ' — one pin cannot drive two.' });
     });
-    // Missing bus signals while that bus is used.
-    if (m.usePca) {
-      if (m.sda < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SDA is unassigned but a PCA9685 is in use — assign it on the GPIO Pins tab.' });
-      if (m.scl < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SCL is unassigned but a PCA9685 is in use — assign it on the GPIO Pins tab.' });
-      if (m.oe < 0) out.push({ sev: 'warning', msg: 'PCA9685 /OE is unassigned — without the safety line the outputs cannot be force-disabled.' });
+    // Missing bus signals — only for a bus that actually carries a board.
+    var useBus0 = m.boards.some(function (b) { return b.bus === 0; });
+    if (useBus0) {
+      if (m.sda < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SDA is unassigned but a PCA9685 is on the primary bus — assign it on the GPIO Pins tab.' });
+      if (m.scl < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SCL is unassigned but a PCA9685 is on the primary bus — assign it on the GPIO Pins tab.' });
     }
     if (m.useBus1) {
       if (m.sda2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SDA (SDA2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
       if (m.scl2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SCL (SCL2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
     }
+    // The shared /OE covers a board unless it is a bus-1 board with a split /OE2.
+    var needSharedOe = useBus0 || (m.useBus1 && !m.splitOe);
+    if (needSharedOe && m.oe < 0) out.push({ sev: 'warning', msg: 'PCA9685 /OE is unassigned — without the safety line the outputs cannot be force-disabled.' });
     if (m.splitOe && m.oe2 < 0) out.push({ sev: 'warning', msg: 'The second-bus /OE (OE2) is unassigned — bus 1 outputs cannot be force-disabled.' });
     // Firmware capacity limits (max 8 addresses per bus).
     [0, 1].forEach(function (bus) {
@@ -212,25 +217,34 @@
     { key: 'oe',    label: '/OE',     cls: 'oe' },
     { key: 'oe2',   label: '/OE2',    cls: 'oe2' }
   ];
-  // The ESP pins that drop onto buses (GND-only for a direct-only rig).
+  // The shared /OE line is drawn/exposed when a board relies on it: any bus-0 board,
+  // or a bus-1 board with no split /OE2.
+  function needSharedOe(m) { return m.useBus0 || (m.useBus1 && !m.splitOe); }
+
+  // The ESP pins that drop onto buses (GND-only for a direct-only rig). Only the
+  // buses actually carrying a board appear, so an empty bus adds no pins/rails.
   function espPins(m) {
     if (!m.usePca) return [{ key: 'gnd', label: 'GND' }];
-    var a = [{ key: 'v3', label: '3V3' }, { key: 'gnd', label: 'GND' },
-      { key: 'sda', label: 'SDA', gpio: m.sda }, { key: 'scl', label: 'SCL', gpio: m.scl }];
-    if (m.useBus1) a = a.concat([{ key: 'sda2', label: 'SDA2', gpio: m.sda2 }, { key: 'scl2', label: 'SCL2', gpio: m.scl2 }]);
-    a.push({ key: 'oe', label: '/OE', gpio: m.oe });
+    var a = [{ key: 'v3', label: '3V3' }, { key: 'gnd', label: 'GND' }];
+    if (m.useBus0) a.push({ key: 'sda', label: 'SDA', gpio: m.sda }, { key: 'scl', label: 'SCL', gpio: m.scl });
+    if (m.useBus1) a.push({ key: 'sda2', label: 'SDA2', gpio: m.sda2 }, { key: 'scl2', label: 'SCL2', gpio: m.scl2 });
+    if (needSharedOe(m)) a.push({ key: 'oe', label: '/OE', gpio: m.oe });
     if (m.splitOe) a.push({ key: 'oe2', label: '/OE2', gpio: m.oe2 });
     return a;
   }
   function espWidth(m) { return Math.max(172, 2 * TAP_PAD + (espPins(m).length - 1) * PITCH); }
 
-  // The rails actually drawn for a given model (skips unused buses), stacked.
+  // The rails actually drawn for a given model (only buses that carry a board).
   function activeRails(m) {
     return BUSES.filter(function (b) {
-      if (!m.usePca && (b.key === 'sda' || b.key === 'scl' || b.key === 'oe' || b.key === 'v3')) return false;
-      if (!m.useBus1 && (b.key === 'sda2' || b.key === 'scl2')) return false;
-      if (b.key === 'oe2' && !m.splitOe) return false;
-      return true;
+      switch (b.key) {
+        case 'v3': return m.usePca;
+        case 'sda': case 'scl': return m.useBus0;
+        case 'sda2': case 'scl2': return m.useBus1;
+        case 'oe': return needSharedOe(m);
+        case 'oe2': return m.splitOe;
+        default: return true;  // vplus, gnd
+      }
     });
   }
   function computeRailY(m) {
@@ -264,7 +278,7 @@
   // rail's right-hand label (signal buses append their GPIO, e.g. "SDA2·38").
   function railGpio(m, key) { return ({ sda: m.sda, scl: m.scl, sda2: m.sda2, scl2: m.scl2, oe: m.oe, oe2: m.oe2 })[key]; }
   function railMissing(m, key) {
-    if (key === 'sda' || key === 'scl') return m.usePca && railGpio(m, key) < 0;
+    if (key === 'sda' || key === 'scl') return m.useBus0 && railGpio(m, key) < 0;
     if (key === 'sda2' || key === 'scl2') return m.useBus1 && railGpio(m, key) < 0;
     if (key === 'oe2') return m.splitOe && m.oe2 < 0;
     return false;

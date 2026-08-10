@@ -43,33 +43,31 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
             if (a.signal == sig && a.gpio >= 0) return true;
         return false;
     };
-    bool anyPca = false;
+    bool anyBus0 = false;
     bool anyBus1 = false;
     int directServos = 0;
     for (const auto& s : p.servos) {
         if (!s.enabled) continue;
         if (s.source == ServoSource::Pca) {
-            anyPca = true;
             if (s.i2cBus == 1) anyBus1 = true;
+            else anyBus0 = true;
         } else {
             ++directServos;
         }
     }
-    // The only mandatory pins are the PCA9685 I2C bus and its /OE safety line, and
-    // only when at least one servo is driven through a PCA. Direct-GPIO servos carry
-    // their own pin in the servo entry (validated below). There is no stepper
-    // ENABLE / STEP / DIR / HOME any more.
-    if (anyPca) {
-        if (!hasPin("SDA") || !hasPin("SCL"))
-            err("pins.i2c", "SDA and SCL are required when a PCA9685 is used");
-        if (!hasPin("SERVO_OE"))
-            err("pins.SERVO_OE", "The PCA9685 /OE safety pin is required");
-    }
-    // A board on the second I2C bus needs its own SDA2/SCL2; its /OE may be shared
-    // with bus 0 (SERVO_OE) or split onto SERVO_OE2, so /OE2 is not required here.
+    // Each I2C bus that actually carries a board needs its own SDA/SCL (an empty bus
+    // needs nothing). Direct-GPIO servos carry their own pin in the servo entry
+    // (validated below). There is no stepper ENABLE / STEP / DIR / HOME any more.
+    if (anyBus0 && (!hasPin("SDA") || !hasPin("SCL")))
+        err("pins.i2c", "SDA and SCL are required when a PCA9685 is on the primary I2C bus");
     if (anyBus1 && (!hasPin("SDA2") || !hasPin("SCL2")))
         err("pins.i2c2",
             "SDA2 and SCL2 are required when a PCA9685 is on the second I2C bus");
+    // /OE safety line: shared (SERVO_OE) unless split per bus (SERVO_OE2). A board
+    // relies on the shared line when it is on bus 0, or on bus 1 with no split OE2.
+    bool needSharedOe = anyBus0 || (anyBus1 && !hasPin("SERVO_OE2"));
+    if (needSharedOe && !hasPin("SERVO_OE"))
+        err("pins.SERVO_OE", "The PCA9685 /OE safety pin is required");
     // ESP32-S3 has 8 LEDC channels; a direct servo consumes one.
     if (directServos > 8)
         err("servos.direct",
