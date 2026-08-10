@@ -1,0 +1,58 @@
+// Pure plucking-plan resolution (unit-tested on the host).
+//
+// The plucking "gesture" and the Note-Off mute behaviour are configured ONCE in a
+// global PluckConfig (common to every string) instead of servo by servo. These
+// helpers turn that global intent into the concrete per-string decision the servo
+// scheduler acts on, given what each string actually has wired. Kept out of
+// ServoBank / main.cpp (platform code) so the logic is unit-tested natively without
+// the Arduino runtime — the same split as ServoStroke.h / FingerTarget.h.
+//
+// Every rule keeps a bare profile (no `pluck` block, PluckConfig at its defaults)
+// byte-for-byte identical to the historical behaviour.
+#pragma once
+
+#include <cstdint>
+
+#include "Profile.h"
+
+namespace gmb {
+
+// Effective stroke-engage time for a striker: the global PluckConfig.strokeMs when
+// it is set (non-zero), otherwise the servo's own strokeMs (which itself falls back
+// to travelMs inside ServoBank). A zero global therefore leaves each striker exactly
+// as it was.
+inline uint16_t effectivePluckStrokeMs(const PluckConfig& pk, const ServoConfig& striker) {
+    return pk.strokeMs != 0 ? pk.strokeMs : striker.strokeMs;
+}
+
+// True when a striker can damp with its own plectrum (a mute position is calibrated).
+inline bool strikerCanPlectrumMute(const ServoConfig& striker) {
+    return striker.muteUs != 0;
+}
+
+// Resolve the abstract mute policy to the CONCRETE actuator to use at Note Off,
+// given what the string has wired (a damper servo? a striker with a mute angle? a
+// strum lift?). `Auto` reproduces the historical rule exactly — a damper mutes if
+// present, otherwise the string is left to ring. Explicit choices degrade safely
+// when their actuator is missing (e.g. Plectrum with no mute angle falls back to a
+// damper if there is one, else to None) so a half-configured instrument never hangs.
+inline MuteSource resolvePluckMute(const PluckConfig& pk, bool hasDamper,
+                                   bool strikerHasMute, bool hasLift) {
+    switch (pk.muteSource) {
+        case MuteSource::Auto:
+            return hasDamper ? MuteSource::Damper : MuteSource::None;
+        case MuteSource::Damper:
+            return hasDamper ? MuteSource::Damper : MuteSource::None;
+        case MuteSource::Plectrum:
+            if (strikerHasMute) return MuteSource::Plectrum;
+            return hasDamper ? MuteSource::Damper : MuteSource::None;
+        case MuteSource::Lift:
+            if (hasLift) return MuteSource::Lift;
+            return hasDamper ? MuteSource::Damper : MuteSource::None;
+        case MuteSource::None:
+        default:
+            return MuteSource::None;
+    }
+}
+
+}  // namespace gmb

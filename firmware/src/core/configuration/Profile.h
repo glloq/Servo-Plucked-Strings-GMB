@@ -113,6 +113,12 @@ struct ServoConfig {
     uint16_t pulseMaxUs = 2500;
     uint16_t restUs = 1000;
     uint16_t activeUs = 1800;
+    // Plectrum-as-mute position: the pulse at which a pluck/strum plectrum comes to
+    // REST AGAINST the string to damp it at Note Off, so a string can be muted with
+    // no dedicated damper servo (spec: "put the pluck servo against the string to
+    // mute the note"). 0 = no mute position (the string rings / a damper is used).
+    // Only meaningful on a pluck/strum servo; must sit in the pulse window when set.
+    uint16_t muteUs = 0;
     bool inverted = false;
     uint16_t travelMs = 120;
     uint16_t settleMs = 30;
@@ -150,6 +156,37 @@ struct PowerConfig {
     uint16_t staggerMs = 8;          // spacing between successive start permits
 };
 
+// Where a Note Off's damping comes from. `Auto` keeps the historical behaviour: a
+// per-string `damper` servo mutes if one exists, otherwise the string is left to
+// ring — so an absent PluckConfig changes nothing. `Plectrum` drives the string's
+// own pluck/strum servo to its `muteUs` (rest against the string) with no dedicated
+// damper. `Damper` forces the damper servo. `Lift` presses the strum-lift so the
+// plectrum leans on the string. `None` never actively mutes (natural decay).
+enum class MuteSource : uint8_t { Auto = 0, Plectrum = 1, Damper = 2, Lift = 3, None = 4 };
+
+// Plucking ("grattage") settings that are COMMON to every string, so the whole
+// gesture and its timing are set in one place instead of servo by servo. Every
+// field defaults to the historical behaviour, so a profile with no `pluck` block
+// plays exactly as before:
+//   strokeMs       : global stroke engage time; 0 = each servo keeps its own strokeMs.
+//   fretToPluckMs  : extra settle inserted BETWEEN the fret being ready and the
+//                    strike, on top of the finger's settleMs — the "delay between
+//                    fret action and plucking". 0 = none.
+//   muteSource     : who damps at Note Off (see MuteSource); Auto = historical.
+//   muteHoldMs     : how long the mute stays engaged before releasing to rest.
+//   liftMuteOnNoteOff : also press the strum-lift at Note Off so the plectrum leans
+//                    on the string (a lift that doubles as a damper).
+// The fixed Note-On->sound latency and the strum-lift anticipation stay in
+// MidiConfig (noteExecutionDelayMs / strumLeadMs); this block adds the gesture and
+// the mute behaviour that had no home.
+struct PluckConfig {
+    uint16_t strokeMs = 0;
+    uint16_t fretToPluckMs = 0;
+    MuteSource muteSource = MuteSource::Auto;
+    uint16_t muteHoldMs = 60;
+    bool liftMuteOnNoteOff = false;
+};
+
 struct Profile {
     std::string project = "Servo-Plucked-Strings-GMB";
     uint16_t profileVersion = 1;
@@ -165,6 +202,7 @@ struct Profile {
     MidiConfig midi;
     SelectorConfig selector;
     PowerConfig power;
+    PluckConfig pluck;
 
     std::vector<StringConfig> strings;
     std::vector<ServoConfig> servos;

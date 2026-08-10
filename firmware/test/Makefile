@@ -34,6 +34,7 @@ TEST_SRC := \
   test_integration.cpp \
   test_midiparser.cpp \
   test_servos.cpp \
+  test_pluck.cpp \
   test_governor.cpp \
   test_fretservo.cpp \
   test_geared.cpp \

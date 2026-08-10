@@ -374,9 +374,9 @@ A clickable **coverage strip** shows which frets are equipped, geared and calibr
 
 ## Step 3 — Plucking (grattage)
 
-The **plucking mechanism only** — the part that sounds the string. Per string:
+The **plucking mechanism only** — the part that sounds the string. The plucking **gesture, delays and Note-Off mute behaviour are set once, common to every string** (`PluckConfig`, §15.4): stroke time, the fret→pluck delay, the strum-lift anticipation, and who mutes at Note Off (a damper, the plectrum itself, the lift, or nothing). Per string, only the wiring and the physical angles remain:
 
-* one **pluck** or **strum** servo (rest/strike pulses, inversion);
+* one **pluck** or **strum** servo (rest/strike pulses, inversion), with an optional **mute angle** (`muteUs`) so the plectrum can damp the string itself;
 * optional **strum lift** (lowers the plucker for a stroke) and **damper** (mutes the string);
 * optional global **auxiliary** actuators (`stringIndex = -1`);
 * per servo: **source** (a PCA9685 channel or a direct GPIO).
@@ -577,6 +577,7 @@ gpio                     source = gpio
 pulseMinUs, pulseMaxUs
 restUs                   rest / neutral position
 activeUs                 pressed / stroke position
+muteUs                   plectrum-as-mute rest-against-string pulse (pluck/strum; 0 = none)
 inverted
 travelMs, settleMs
 disableAtRest
@@ -592,11 +593,31 @@ Raised = `restUs`, pressed = `activeUs`; `travelMs` / `settleMs` time the motion
 
 ## 15.2 Pluck / strum
 
-`restUs` ↔ `activeUs` define the stroke; `strokeMs` sets how long it stays engaged (independent of the return timing); `alternateDirection` / `activeAltUs` alternate down- and up-strokes; `minStrikeUs` guarantees a minimum strike so a low-velocity note still catches the string; a strum lift uses `engageDelayMs` to pause once lowered, before the stroke fires.
+`restUs` ↔ `activeUs` define the stroke; `strokeMs` sets how long it stays engaged (independent of the return timing); `alternateDirection` / `activeAltUs` alternate down- and up-strokes; `minStrikeUs` guarantees a minimum strike so a low-velocity note still catches the string; a strum lift uses `engageDelayMs` to pause once lowered, before the stroke fires. `muteUs` is the pulse at which the plectrum comes to rest **against** the string, so a note can be damped at Note Off with **no dedicated damper servo** (see §15.4).
 
 ## 15.3 Open string
 
 For the open string (fret 0) there is no finger servo: every finger stays lifted and the string is plucked directly. An advanced option may fit a fret-0 finger for a specific mechanism.
+
+## 15.4 Global plucking (`PluckConfig`)
+
+The plucking gesture and the Note-Off mute behaviour are configured **once for the whole instrument** (common to every string) in a `PluckConfig` (`profile.pluck`), rather than servo by servo:
+
+```text
+strokeMs           common stroke-engage time (0 = each servo keeps its own)
+fretToPluckMs      delay between the fret being ready and the strike
+                   (the "delay between fret action and plucking")
+muteSource         who damps at Note Off:
+                     auto     - a damper servo if present, else nothing (historical)
+                     plectrum - the string's own plucker returns to muteUs
+                     damper   - a dedicated damper servo
+                     lift     - the strum lift leans the plectrum on the string
+                     none     - let the string ring
+muteHoldMs         how long the mute is engaged before releasing to rest
+liftMuteOnNoteOff  also press the strum lift onto the string at Note Off
+```
+
+Every field defaults to the historical behaviour, so a profile with no `pluck` block plays exactly as before. The fixed Note-On→sound latency (`noteExecutionDelayMs`) and the strum-lift anticipation (`strumLeadMs`) remain in the MIDI parameters (§18); combined, they let the lift raise/lower the plucker so it contacts the string at the right instant, and let the plucker itself damp the note at the end.
 
 ---
 

@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "core/configuration/Profile.h"
+#include "core/configuration/PluckPlan.h"
 #include "core/configuration/ProfileValidator.h"
 #include "core/gmb/GmbSysExService.h"
 #include "core/instrument/InstrumentController.h"
@@ -98,7 +99,9 @@ struct StringSched {
     uint32_t dampUntilMs = 0;    // don't press until the damper has acted (replace)
     int liftIndex = -1;          // engaged strum-lift servo during a stroke
     int strikeIndex = -1;        // striker to fire once the lift has lowered
+    int muteIndex = -1;          // plectrum/lift held against the string to damp (Note Off)
     uint32_t executeAtMs = 0;    // earliest time the note may sound (fixed delay)
+    uint32_t readyAtMs = 0;      // when the string became Ready (anchors fretToPluckMs)
     bool executeAnchored = false;
     bool fingerPressStarted = false;  // press begun (after a governor permit)
     bool fingerSweep = false;         // direct A<->B sweep on one geared servo (no neutral)
@@ -188,7 +191,15 @@ void applyProfile() {
     g_currentFinger.assign(g_profile.strings.size(), -1);
     g_stringFaulted.assign(g_profile.strings.size(), false);
 
-    g_servos.begin(g_profile.servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
+    // Overlay the global plucking gesture onto the strikers so the bank drives one
+    // common stroke time for every string. A zero global leaves each servo untouched
+    // (historical behaviour); the profile itself keeps the per-servo values intact.
+    std::vector<ServoConfig> servos = g_profile.servos;
+    if (g_profile.pluck.strokeMs != 0)
+        for (auto& s : servos)
+            if (s.function == "pluck" || s.function == "strum")
+                s.strokeMs = g_profile.pluck.strokeMs;
+    g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
     g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
 
     // The E-stop pin belongs to the (possibly new) profile.
@@ -482,17 +493,58 @@ void tickString(size_t i, uint32_t nowMs) {
     if (!tgt.active) {
         if (sch.phase == StringSched::Idle) return;
         if (sch.phase != StringSched::WaitStopped) {
-            // Note released / cancelled: lift the finger and damp.
+            // Note released / cancelled: lift the finger, then damp per the global
+            // mute policy resolved against what this string actually has wired — a
+            // damper servo, the plectrum's own mute angle (rest against the string,
+            // no dedicated damper), the strum lift, or nothing.
             sch.releaseWaitMs = releaseCurrentFinger(i);
             if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
             sch.liftStarted = false;
+            sch.muteIndex = -1;
+
             int di = g_servos.damperIndex(static_cast<int>(i));
-            if (di >= 0) g_servos.strike(di);
+            int pi = perStringStrikeIndex(i);
+            int li = g_servos.strumLiftIndex(static_cast<int>(i));
+            bool strikerHasMute = pi >= 0 && g_servos.muteUs(pi) != 0;
+            MuteSource action =
+                resolvePluckMute(g_profile.pluck, di >= 0, strikerHasMute, li >= 0);
+            uint32_t muteWaitMs = 0;
+            switch (action) {
+                case MuteSource::Damper:
+                    if (di >= 0) { g_servos.strike(di); muteWaitMs = g_servos.travelMs(di); }
+                    break;
+                case MuteSource::Plectrum:
+                    // Bring the plectrum to rest against the string to damp it, then
+                    // release it to rest once the mute hold has elapsed.
+                    if (pi >= 0 && g_servos.muteHold(pi)) {
+                        sch.muteIndex = pi;
+                        muteWaitMs = g_profile.pluck.muteHoldMs;
+                    }
+                    break;
+                case MuteSource::Lift:
+                    if (li >= 0 && g_servos.press(li)) {
+                        sch.muteIndex = li;
+                        muteWaitMs = g_profile.pluck.muteHoldMs;
+                    }
+                    break;
+                default:  // None: let the string ring / decay naturally.
+                    break;
+            }
+            // A lift that doubles as an étouffoir: lean it on the string at Note Off
+            // even when the primary mute came from elsewhere (unless something is
+            // already being held, so only one actuator is ever left to release).
+            if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
+                action != MuteSource::Lift && li >= 0 && g_servos.press(li)) {
+                sch.muteIndex = li;
+                if (g_profile.pluck.muteHoldMs > muteWaitMs) muteWaitMs = g_profile.pluck.muteHoldMs;
+            }
+            if (muteWaitMs > sch.releaseWaitMs) sch.releaseWaitMs = muteWaitMs;
             sch.phase = StringSched::WaitStopped;
             sch.phaseStartMs = nowMs;
         }
-        // Declare idle once the finger has lifted.
+        // Declare idle once the finger has lifted and any held mute has released.
         if (nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
+            if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
             sc.dampingDone();
             sch.phase = StringSched::Idle;
             sch.commandId = 0;
@@ -512,6 +564,9 @@ void tickString(size_t i, uint32_t nowMs) {
             }
         }
         if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
+        // Drop any Note-Off mute still held from the previous note (plectrum against
+        // the string, or a lift leaning on it) before starting the new one.
+        if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
         sch.executeAtMs = nowMs + g_profile.midi.noteExecutionDelayMs;
         sch.executeAnchored = sc.willArmOnSettle();
         sch.fingerPressStarted = false;
@@ -548,6 +603,7 @@ void tickString(size_t i, uint32_t nowMs) {
                 sc.motionReached();  // ReleasingFinger -> Moving -> Pressing/ReadyToPluck
                 if (sc.openString()) {
                     sch.phase = StringSched::Ready;  // open: no finger press
+                    sch.readyAtMs = nowMs;
                 } else if (sch.fingerIndex < 0) {
                     // Fretted note but this fret has no finger servo (a gap / partial
                     // install). Don't hang: advance the FSM so it still plucks the
@@ -555,6 +611,7 @@ void tickString(size_t i, uint32_t nowMs) {
                     sc.fingerPressed();
                     sc.settled();
                     sch.phase = StringSched::Ready;
+                    sch.readyAtMs = nowMs;
                 } else {
                     sch.phase = StringSched::PressingFinger;
                     sch.phaseStartMs = nowMs;
@@ -615,6 +672,7 @@ void tickString(size_t i, uint32_t nowMs) {
             if (nowMs - sch.phaseStartMs >= settle) {
                 sc.settled();
                 sch.phase = StringSched::Ready;
+                sch.readyAtMs = nowMs;  // anchors the fret->pluck delay
             }
             break;
         }
@@ -624,14 +682,23 @@ void tickString(size_t i, uint32_t nowMs) {
                 sch.executeAnchored = true;
             }
             if (!sc.pluckArmed()) break;
+            // The strike waits for BOTH the fixed Note-On latency (executeAtMs) and
+            // the fret->pluck settle measured from when the string became Ready, so a
+            // freshly fretted string is given time to stabilise before it is plucked
+            // ("delay between fret action and plucking").
+            uint32_t strikeAtMs = sch.executeAtMs;
+            if (g_profile.pluck.fretToPluckMs != 0) {
+                uint32_t floorMs = sch.readyAtMs + g_profile.pluck.fretToPluckMs;
+                if (static_cast<int32_t>(floorMs - strikeAtMs) > 0) strikeAtMs = floorMs;
+            }
             int pi = perStringStrikeIndex(i);
-            // Pre-lower the strum lift DURING the fixed-delay wait so the strike
-            // lands AT executeAtMs even with a lift.
+            // Pre-lower the strum lift DURING the wait so the strike lands AT
+            // strikeAtMs even with a lift — the plectrum is in place at the frappe.
             if (pi >= 0 && !sch.liftStarted) {
                 int li = g_servos.strumLiftIndex(static_cast<int>(i));
                 if (li >= 0) {
                     uint32_t liftMs = g_servos.travelMs(li) + g_servos.engageDelayMs(li);
-                    if (static_cast<int32_t>(nowMs - sch.executeAtMs) +
+                    if (static_cast<int32_t>(nowMs - strikeAtMs) +
                             static_cast<int32_t>(liftMs) >= 0) {
                         if (!g_servos.press(li)) {
                             faultRuntimeAxis(i, "strum lift servo write failed", nowMs);
@@ -644,7 +711,7 @@ void tickString(size_t i, uint32_t nowMs) {
                     }
                 }
             }
-            if (static_cast<int32_t>(nowMs - sch.executeAtMs) < 0) break;
+            if (static_cast<int32_t>(nowMs - strikeAtMs) < 0) break;
             if (!sc.executePluck(tgt.commandId)) break;
             if (pi >= 0) {
                 int li = sch.liftStarted ? sch.liftIndex

@@ -51,6 +51,12 @@ public:
     void release(int index);
     // intensity 0..1 scales the strike depth between rest and active (velocity).
     void strike(int index, double intensity = 1.0);
+    // Drive a plucker to its mute position (plectrum resting against the string to
+    // damp it) and HOLD there, marking it active so the rest-time PWM cut-off does
+    // not release it mid-mute. The caller releases it to rest when the mute hold
+    // elapses. Returns false if no mute position is set (muteUs == 0) or the servo
+    // could not be driven.
+    bool muteHold(int index);
     // Advance scheduled returns and rest-time PWM cut-off. Call from loop().
     void update(uint32_t nowMs);
 
@@ -105,6 +111,10 @@ public:
     // Extra pause after a strum lift is down before the stroke fires (strumLift).
     uint16_t engageDelayMs(int index) const {
         return (index >= 0 && index < (int)servos_.size()) ? servos_[index].engageDelayMs : 0;
+    }
+    // Plectrum-as-mute pulse (0 = this servo has no mute-against-string position).
+    uint16_t muteUs(int index) const {
+        return (index >= 0 && index < (int)servos_.size()) ? servos_[index].muteUs : 0;
     }
 
 private:

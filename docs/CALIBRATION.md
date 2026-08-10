@@ -40,6 +40,7 @@ automatique).
 | `gpio` | broche ESP32 (source GPIO) |
 | `restUs` / `activeUs` | **position de repos / de contact** (µs) — pour un doigt à engrenage, `restUs` = **neutre** (2 doigts levés) et `activeUs` = appui **côté A** |
 | `activeBUs` | (engrenage) impulsion d'appui du **côté B** (`fretB`) |
+| `muteUs` | (grattage) position du **plectre posé sur la corde** pour l'étouffer au Note Off ; `0` = aucune (la corde sonne / un `damper` s'en charge) |
 | `inverted` | **sens de rotation** (miroir dans la fenêtre d'impulsion) |
 | `pulseMinUs` / `pulseMaxUs` | fenêtre mécanique du servo |
 | `travelMs` / `settleMs` | temps de course / stabilisation |
@@ -112,13 +113,37 @@ l'assistant) pour que les tests pilotent le matériel.
 - `minStrikeUs` : profondeur minimale garantie (une note douce accroche quand même).
 - `alternateDirection` (+ `activeAltUs`) : alterne aller/retour à chaque frappe.
 - `strokeMs` : durée d'engagement du geste (indépendante de `travelMs`).
+- `muteUs` : **plectre-étouffoir** — position où le plectre se **pose sur la corde**
+  pour couper la note au Note Off, **sans servo mute dédié**. À régler entre `restUs`
+  (écarté) et `activeUs` : un simple contact suffit. Activé par `pluck.muteSource`.
 - Corde à vide : aucun doigt pressé, grattage direct.
 
-## 6. Latence & anticipation (global, `MidiConfig`)
+## 6. Grattage commun & délais (global, `PluckConfig` + `MidiConfig`)
+
+Le **geste de grattage et son timing sont communs à toutes les cordes** : on les règle
+une seule fois (étape *Grattage* de l'assistant), au lieu de refaire chaque plectre.
+
+**`PluckConfig`** (`profile.pluck`) :
+
+- `strokeMs` : durée du geste, commune à toutes les cordes (`0` = chaque servo garde
+  son propre `strokeMs`).
+- `fretToPluckMs` : **délai entre la mise en place de la frette et le grattage** — laisse
+  la corde frettée se stabiliser avant la frappe.
+- `muteSource` : qui étouffe au Note Off — `auto` (un `damper` si présent, sinon rien :
+  comportement historique) · `plectrum` (le plectre se pose, cf. `muteUs`) · `damper`
+  (servo dédié) · `lift` (le levage pose le plectre) · `none` (laisse sonner).
+- `muteHoldMs` : durée d'appui de l'étouffement avant retour au repos.
+- `liftMuteOnNoteOff` : le `strumLift` se pose aussi sur la corde au Note Off (levage
+  qui sert d'étouffoir).
+
+**`MidiConfig`** (latence & anticipation) :
 
 - `noteExecutionDelayMs` : délai fixe réception → son (latence constante).
-- `strumLeadMs` : abaisse le `strumLift` en avance pour que le plectre soit engagé au
-  moment de la frappe.
+- `strumLeadMs` : abaisse le `strumLift` **en avance** pour que le plectre soit engagé
+  **pile au moment de la frappe**.
+
+> Un profil **sans** bloc `pluck` (ou avec ses valeurs par défaut) joue exactement
+> comme avant : tous ces réglages sont additifs.
 
 ## 7. Gestion du courant (voir aussi [`SAFETY.md`](SAFETY.md))
 
