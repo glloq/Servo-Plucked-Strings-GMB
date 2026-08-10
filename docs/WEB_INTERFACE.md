@@ -74,8 +74,7 @@ the hardware. Full study and calibration procedure:
 write-only Wi-Fi passwords, and a **Start hotspot now** button). Network and Wi-Fi
 changes are saved with the profile and apply after a reboot; the hotspot button
 switches to the access point immediately. See
-[`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md). An audit of the settings & calibration
-UI is in [`WEB_AUDIT.md`](WEB_AUDIT.md).
+[`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
 The per-fret contact-angle calibration on the Frets step is detailed in
 [`CALIBRATION.md`](CALIBRATION.md).
 

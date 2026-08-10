@@ -5,7 +5,7 @@
 > seule quand on rejoint le Wi-Fi de l'ESP32) et **hotspot au bouton BOOT** (repli
 > matériel). Inspiré de [Servo-Flute-GMB](https://github.com/glloq/Servo-Flute-GMB).
 >
-> Liés : [`WEB_INTERFACE.md`](WEB_INTERFACE.md) · [`WEB_AUDIT.md`](WEB_AUDIT.md) ·
+> Liés : [`WEB_INTERFACE.md`](WEB_INTERFACE.md) ·
 > [`SAFETY.md`](SAFETY.md) · [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
 
 ---

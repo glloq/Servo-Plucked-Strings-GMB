@@ -19,5 +19,5 @@ Then upload the filesystem:
   `Ctrl/Cmd+Shift+P ▸ Upload LittleFS to Pico/ESP8266/ESP32`.
 - **PlatformIO** — `pio run -t uploadfs`.
 
-See [`../../docs/ARDUINO_IDE.md`](../../docs/ARDUINO_IDE.md) for the full
+See [`../../docs/ARDUINO_IDE_BUILD.md`](../../docs/ARDUINO_IDE_BUILD.md) for the full
 walkthrough.
