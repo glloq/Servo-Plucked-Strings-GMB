@@ -186,9 +186,16 @@
   }
 
   // ---- geometry -------------------------------------------------------------
-  var BOARD_W = 200, BOARD_GAP = 26, ROW_X0 = 24;
+  var BOARD_W = 200, BOARD_GAP = 26;
   var BOARD_H = 250;
-  var ESP_X = 24, TOP_Y = 14;
+  var ESP_X = 24, TOP_Y = 14, PSU_W = 132;
+  // Uniform vertical-tap pitch. The ESP/PSU (sources) tap on the grid; every board
+  // (load) taps a HALF-PITCH off it, so an ESP lead and a board lead never share an
+  // x — they interleave — while the whole thing stays compact (boards under the ESP).
+  var PITCH = 18, TAP_PAD = 18;
+  function espTapX(i) { return ESP_X + TAP_PAD + i * PITCH; }
+  function boardTapX(bx, k) { return bx + TAP_PAD + PITCH / 2 + k * PITCH; }
+  function snapTapX(x) { return ESP_X + TAP_PAD + Math.round((x - ESP_X - TAP_PAD) / PITCH) * PITCH; }
   // Buses sit in a band from BUS_TOP; boards start a clear BAND_GAP below the band
   // so the taps are visible and never overlap the boards.
   var BUS_TOP = 116, BUS_STEP = 13, BAND_GAP = 44;
@@ -215,7 +222,7 @@
     if (m.splitOe) a.push({ key: 'oe2', label: '/OE2', gpio: m.oe2 });
     return a;
   }
-  function espWidth(m) { return Math.max(150, espPins(m).length * 30 + 16); }
+  function espWidth(m) { return Math.max(172, 2 * TAP_PAD + (espPins(m).length - 1) * PITCH); }
 
   // The rails actually drawn for a given model (skips unused buses), stacked.
   function activeRails(m) {
@@ -281,15 +288,23 @@
 
     // A right gutter holds the bus labels (SDA2·38 …) so they never clip.
     var LABEL_GUTTER = 82;
-    var rowCore = items.length ? ROW_X0 + items.length * (BOARD_W + BOARD_GAP) - BOARD_GAP + ROW_X0 : 340;
-    var topZoneRight = ESP_X + espWidth(m) + 16 + 132 + 8;   // ESP + gap + PSU
-    var VB_W = Math.max(rowCore, topZoneRight, 340) + LABEL_GUTTER;
+    // Compact: boards start at the left, directly under the ESP. Their taps
+    // interleave with the ESP's (half-pitch offset) rather than aligning, so no
+    // horizontal space is wasted shifting the boards aside.
+    var topZoneRight = ESP_X + espWidth(m) + 16 + PSU_W;
+    var boardX0 = ESP_X;
+    var boardsRight = items.length ? boardX0 + items.length * (BOARD_W + BOARD_GAP) - BOARD_GAP : boardX0;
+    var contentRight = Math.max(boardsRight, topZoneRight);
+    var VB_W = contentRight + LABEL_GUTTER;
     var VB_H = m.boardTop + BOARD_H + 30;
-    var busRight = VB_W - LABEL_GUTTER + 4;
+    var busRight = contentRight + 4;
 
     var root = svg('svg', {
       class: 'wire-svg', viewBox: '0 0 ' + VB_W + ' ' + VB_H,
       preserveAspectRatio: 'xMidYMid meet', role: 'group',
+      // Render at natural width and scroll (like the fretboard) so a many-board
+      // harness stays legible instead of shrinking to fit the container.
+      style: 'min-width:' + VB_W + 'px',
       'aria-label': 'Wiring map of the ESP32 and PCA9685 boards'
     });
 
@@ -305,7 +320,7 @@
     root.appendChild(buildPsu(p, m));
 
     items.forEach(function (it, i) {
-      var x = ROW_X0 + i * (BOARD_W + BOARD_GAP);
+      var x = boardX0 + i * (BOARD_W + BOARD_GAP);
       if (it.type === 'direct') root.appendChild(buildDirectBox(p, m, x));
       else root.appendChild(buildBoard(p, m, it.b, x));
     });
@@ -320,21 +335,17 @@
     var x = ESP_X, y = TOP_Y, w = espWidth(m), hh = 82;
     g.appendChild(svg('rect', { class: 'wire-esp', x: x, y: y, width: w, height: hh, rx: 9 }));
     g.appendChild(svg('text', { class: 'wire-title light', x: x + 12, y: y + 22, text: 'ESP32-S3' }));
-    g.appendChild(svg('text', { class: 'wire-sub light', x: x + 12, y: y + 38,
-      text: 'DevKitC-1 · 3.3 V logic' + (m.useBus1 ? ' · 2× I²C' : '') }));
+    g.appendChild(svg('text', { class: 'wire-sub light', x: x + 12, y: y + 38, text: 'DevKitC-1 · 3.3 V logic' }));
 
-    // ESP pins that drop onto buses (GND tie always; 3V3 / I²C / OE with a PCA;
-    // SDA2/SCL2 with a second bus; /OE2 when the /OE line is split per bus).
-    var all = espPins(m);
-    var slot = w / (all.length + 1);
-    all.forEach(function (pin, i) {
-      var px = x + slot * (i + 1);
+    // Colour-coded taps drop onto the buses (GND tie always; 3V3 / I²C / OE with a
+    // PCA; SDA2/SCL2 with a second bus; /OE2 when /OE is split). The pin names live
+    // on the right-hand rail labels, so these closely-spaced taps stay uncluttered.
+    espPins(m).forEach(function (pin, i) {
+      var px = espTapX(i);
       var by = railY(m, pin.key);
       var missing = pin.gpio !== undefined && pin.gpio < 0;
       g.appendChild(svg('line', { class: 'wire-lead ' + pin.key + (missing ? ' missing' : ''), x1: px, y1: y + hh, x2: px, y2: by }));
       g.appendChild(junction(pin.key, px, by));
-      // Name only — the GPIO number lives on the bus label to keep the pins legible.
-      g.appendChild(svg('text', { class: 'wire-pinlabel light' + (missing ? ' missing' : ''), x: px, y: y + hh - 5, 'text-anchor': 'middle', text: pin.label }));
     });
     return g;
   }
@@ -342,12 +353,12 @@
   // Separate 5–6 V servo supply feeding the V+ and GND buses.
   function buildPsu(p, m) {
     var g = svg('g', { class: 'wire-mod' });
-    var x = ESP_X + espWidth(m) + 16, y = TOP_Y, w = 132, hh = 60;
+    var x = ESP_X + espWidth(m) + 16, y = TOP_Y, w = PSU_W, hh = 60;
     g.appendChild(svg('rect', { class: 'wire-psu', x: x, y: y, width: w, height: hh, rx: 9 }));
     g.appendChild(svg('text', { class: 'wire-title light', x: x + 12, y: y + 22, text: 'Servo PSU' }));
     g.appendChild(svg('text', { class: 'wire-sub light', x: x + 12, y: y + 38, text: '5–6 V · separate' }));
     [ { key: 'vplus', label: 'V+' }, { key: 'gnd', label: 'GND' } ].forEach(function (pin, i) {
-      var px = x + w * (i ? 0.7 : 0.3);
+      var px = snapTapX(x + w * (i ? 0.7 : 0.3));   // on the ESP grid → clears board taps
       var by = railY(m, pin.key);
       g.appendChild(svg('line', { class: 'wire-lead ' + pin.key, x1: px, y1: y + hh, x2: px, y2: by }));
       g.appendChild(junction(pin.key, px, by));
@@ -363,11 +374,11 @@
     var key = bd.key, top = m.boardTop, used = 0;
     m.byBoard[key].forEach(function (l) { if (l.length) used++; });
 
-    // Top-edge input pins; SDA/SCL (and /OE when split) tap this board's own bus.
+    // Top-edge input pins on the half-pitch grid (so they interleave with the ESP
+    // taps); SDA/SCL — and /OE when split — tap this board's own bus.
     var pinKeys = ['vplus', 'gnd', 'v3', sdaKey(bd.bus), sclKey(bd.bus), oeKey(m, bd.bus)];
-    var pinSlot = BOARD_W / (pinKeys.length + 1);
     pinKeys.forEach(function (pk, i) {
-      var px = x + pinSlot * (i + 1);
+      var px = boardTapX(x, i);
       var by = railY(m, pk);
       g.appendChild(svg('line', { class: 'wire-lead ' + pk, x1: px, y1: top, x2: px, y2: by }));
       g.appendChild(junction(pk, px, by));
@@ -425,9 +436,9 @@
   function buildDirectBox(p, m, x) {
     var g = svg('g', { class: 'wire-mod' });
     var top = m.boardTop;
-    // Tap only V+ and GND (these servos take power from the servo rail too).
+    // Tap only V+ and GND (on the half-pitch grid like a board).
     ['vplus', 'gnd'].forEach(function (key, i) {
-      var px = x + BOARD_W * (i ? 0.66 : 0.34);
+      var px = boardTapX(x, i);
       var by = railY(m, key);
       g.appendChild(svg('line', { class: 'wire-lead ' + key, x1: px, y1: top, x2: px, y2: by }));
       g.appendChild(junction(key, px, by));

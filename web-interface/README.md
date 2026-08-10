@@ -227,8 +227,10 @@ servo choice made during creation. It shows (SPECIFICATION.md §7 / §11 / §22,
   the board header also lists the string(s) it serves;
 - the shared **power buses**, **one or two I²C buses** (SDA/SCL for bus 0, SDA2/SCL2
   for bus 1) and the **/OE line(s)** (shared, or `/OE` + `/OE2` split per bus) every
-  board taps in a band clearly separated from the boards (junction dots mark a
-  connection; crossings without a dot do not connect);
+  board taps in a band clearly separated from the boards; the ESP and board taps
+  **interleave** (a half-pitch offset) so no two vertical leads coincide (junction
+  dots mark a connection; crossings without a dot do not connect); wide harnesses
+  scroll horizontally so the boards stay full-size instead of shrinking;
 - any **direct-GPIO servos** wired straight to an ESP32 output pin.
 
 It also flags real wiring faults live: a **duplicated `board+channel`**, two
