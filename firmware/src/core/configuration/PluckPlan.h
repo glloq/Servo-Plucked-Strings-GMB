@@ -25,6 +25,21 @@ inline uint16_t effectivePluckStrokeMs(const PluckConfig& pk, const ServoConfig&
     return pk.strokeMs != 0 ? pk.strokeMs : striker.strokeMs;
 }
 
+// Effective minimum strike pulse for a striker: the global PluckConfig.minStrikePct
+// (a percentage of the rest->active span) when set, otherwise the servo's own
+// minStrikeUs. The percentage form is servo-independent — it means the same "soft
+// notes still catch" depth on every string regardless of each plectrum's pulse
+// window. The result lands between rest and active, so it is always inside the pulse
+// window. A zero global leaves each servo's minStrikeUs untouched.
+inline uint16_t effectivePluckMinStrikeUs(const PluckConfig& pk, const ServoConfig& s) {
+    if (pk.minStrikePct == 0) return s.minStrikeUs;
+    int pct = pk.minStrikePct > 100 ? 100 : pk.minStrikePct;
+    int span = static_cast<int>(s.activeUs) - static_cast<int>(s.restUs);
+    int v = static_cast<int>(s.restUs) + span * pct / 100;
+    if (v < 0) v = 0;
+    return static_cast<uint16_t>(v);
+}
+
 // True when a striker can damp with its own plectrum (a mute position is calibrated).
 inline bool strikerCanPlectrumMute(const ServoConfig& striker) {
     return striker.muteUs != 0;

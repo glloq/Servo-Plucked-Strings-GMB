@@ -139,6 +139,7 @@ historical behaviour (an absent block changes nothing):
 | Quantity | Field | Notes |
 | -------- | ----- | ----- |
 | Common stroke time | `strokeMs` | 0 = each servo keeps its own |
+| Common min strike depth | `minStrikePct` | % of rest→active so soft notes catch; 0 = each servo's minStrikeUs |
 | Fret → pluck delay | `fretToPluckMs` | settle between the fret being ready and the strike |
 | Note-Off mute source | `muteSource` | `auto` / `plectrum` / `damper` / `lift` / `none` |
 | Mute hold | `muteHoldMs` | how long the mute is engaged before releasing |

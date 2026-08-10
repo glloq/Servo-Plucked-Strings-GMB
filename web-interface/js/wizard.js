@@ -1263,6 +1263,7 @@
     if (!p.pluck) p.pluck = {};
     var pk = p.pluck;
     if (pk.strokeMs === undefined) pk.strokeMs = 0;
+    if (pk.minStrikePct === undefined) pk.minStrikePct = 0;
     if (pk.fretToPluckMs === undefined) pk.fretToPluckMs = 0;
     if (pk.muteSource === undefined) pk.muteSource = 'auto';
     if (pk.muteHoldMs === undefined) pk.muteHoldMs = 60;
@@ -1278,18 +1279,26 @@
   // the physical angles.
   function pluckGlobalCard() {
     var p = GMB.state.profile, pk = p.pluck, midi = p.midi;
-    var gesture = h('div.grid2', [
-      GMB.field('Stroke time (ms)', GMB.input(pk, 'strokeMs', { type: 'number', min: 0, max: 2000 }),
-        '0 = chaque servo garde son propre réglage'),
-      GMB.field('Délai frette → grattage (ms)', GMB.input(pk, 'fretToPluckMs', { type: 'number', min: 0, max: 1000 }),
-        'attente après la mise en place de la frette, avant de gratter'),
-      GMB.field('Latence Note On → son (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 1000 }),
-        'latence fixe pour un rendu régulier'),
-      GMB.field('Avance du levage (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 1000 }),
-        'abaisse le levage en avance — le plectre est en place pile à la frappe')
+    var hasLift = anyRole('strumLift');
+
+    // Geste & délais — le mouvement commun à toutes les cordes.
+    var gesture = h('div.card.inset', [
+      h('h3', 'Geste & délais'),
+      h('div.grid2', [
+        GMB.field('Durée du geste (ms)', GMB.input(pk, 'strokeMs', { type: 'number', min: 0, max: 2000 }),
+          '0 = chaque servo garde son propre réglage'),
+        GMB.field('Profondeur mini (%)', GMB.input(pk, 'minStrikePct', { type: 'number', min: 0, max: 100 }),
+          'plancher d’attaque pour les notes douces (0 = par servo)'),
+        GMB.field('Délai frette → grattage (ms)', GMB.input(pk, 'fretToPluckMs', { type: 'number', min: 0, max: 1000 }),
+          'attente après la mise en place de la frette, avant de gratter'),
+        GMB.field('Latence Note On → son (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 1000 }),
+          'latence fixe pour un rendu régulier')
+      ])
     ]);
-    var mute = [
-      GMB.field('Étouffement (Note Off)', GMB.input(pk, 'muteSource', {
+
+    // Étouffement — ce qui coupe la note au Note Off.
+    var muteRows = [
+      GMB.field('Source', GMB.input(pk, 'muteSource', {
         type: 'select', options: [
           { value: 'auto', label: 'Auto (servo mute si présent)' },
           { value: 'plectrum', label: 'Plectre — se pose sur la corde' },
@@ -1297,27 +1306,41 @@
           { value: 'lift', label: 'Levage — pose le plectre' },
           { value: 'none', label: 'Aucun (laisse sonner)' }
         ], onChange: drawStep
-      }), 'qui coupe la note à la fin — le plectre peut muter sans servo dédié'),
-      GMB.field('Tenue de l’étouffement (ms)', GMB.input(pk, 'muteHoldMs', { type: 'number', min: 0, max: 2000 }))
+      }), 'le plectre peut muter sans servo dédié')
     ];
-    if (anyRole('strumLift')) {
-      mute.push(GMB.field('Sens du levage', GMB.input(pk, 'liftEngage', {
-        type: 'select', options: [
-          { value: 'lowerToPlay', label: 'Abaisse pour jouer (repos = plectre écarté)' },
-          { value: 'raiseToPlay', label: 'Lève pour jouer (repos = plectre posé → étouffe)' }
-        ], onChange: drawStep
-      }), 'à la réception d’une note : le levage abaisse ou lève le plectre vers la corde'));
-      // In raise-to-play the resting lift already mutes, so the extra "lift also
-      // mutes" toggle is moot — only offer it in lower-to-play.
-      if (pk.liftEngage !== 'raiseToPlay')
-        mute.push(GMB.field('Le levage étouffe aussi', GMB.input(pk, 'liftMuteOnNoteOff', { type: 'checkbox' }),
-          'pose le plectre sur la corde au Note Off, en plus'));
+    if (pk.muteSource !== 'none')
+      muteRows.push(GMB.field('Tenue de l’étouffement (ms)', GMB.input(pk, 'muteHoldMs',
+        { type: 'number', min: 0, max: 2000 }), 'durée d’appui avant retour au repos'));
+    if (hasLift && pk.liftEngage !== 'raiseToPlay')
+      muteRows.push(GMB.field('Le levage étouffe aussi', GMB.input(pk, 'liftMuteOnNoteOff', { type: 'checkbox' }),
+        'pose le plectre sur la corde au Note Off, en plus'));
+    var muteBlock = h('div.card.inset', [h('h3', 'Étouffement (Note Off)'), h('div.grid2', muteRows)]);
+
+    // Levage — sens d’engagement + anticipation (seulement si un strumLift existe).
+    var liftBlock = null;
+    if (hasLift) {
+      var raise = pk.liftEngage === 'raiseToPlay';
+      liftBlock = h('div.card.inset', [
+        h('h3', 'Levage'),
+        h('div.grid2', [
+          GMB.field('Sens', GMB.input(pk, 'liftEngage', {
+            type: 'select', options: [
+              { value: 'lowerToPlay', label: 'Abaisse pour jouer (repos = plectre écarté)' },
+              { value: 'raiseToPlay', label: 'Lève pour jouer (repos = plectre posé → étouffe)' }
+            ], onChange: drawStep
+          }), raise
+            ? 'repos = plectre sur la corde ; à la note il lève, tient, puis redescend étouffer'
+            : 'repos = plectre écarté ; à la note il abaisse pour frapper puis relève'),
+          GMB.field('Avance (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 1000 }),
+            'engage le levage en avance — plectre en place pile à la frappe')
+        ])
+      ]);
     }
+
     return h('div.card', [
       h('div.card-head', [h('h3', 'Grattage — commun à toutes les cordes'),
         h('span.muted', 'un seul réglage pour tout l’instrument')]),
-      gesture,
-      h('div.grid2', mute)
+      gesture, muteBlock, liftBlock
     ]);
   }
 
