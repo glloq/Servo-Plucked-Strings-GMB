@@ -71,11 +71,24 @@
     return a && a.gpio >= 0 ? a.gpio : -1;
   }
 
-  // A short code shown inside a channel pad (fret number for a finger, else a
-  // one-letter role tag). Geared fingers show both frets.
+  // The lower code inside a channel pad: fret number for a finger (both frets if
+  // geared), else a one-letter role tag.
   function padCode(sv) {
     if (sv.function === 'finger') return sv.fretB >= 1 ? (sv.fret + '/' + sv.fretB) : String(sv.fret);
     return { pluck: 'P', strum: 'S', strumLift: 'L', damper: 'D', aux: 'A' }[sv.function] || '?';
+  }
+  // The upper tag inside a channel pad: which string the servo belongs to, so a
+  // PCA9685 shared across several strings stays unambiguous. Global aux = "GLB".
+  function stringTag(sv) { return sv.stringIndex >= 0 ? 'S' + (sv.stringIndex + 1) : 'GLB'; }
+  // The strings a board hosts (board-level "shared across strings" readout).
+  function hostedStrings(m, id) {
+    var set = {}, aux = false;
+    m.byBoard[id].forEach(function (l) {
+      l.forEach(function (s) { if (s.stringIndex >= 0) set[s.stringIndex] = 1; else aux = true; });
+    });
+    var ks = Object.keys(set).map(Number).sort(function (a, b) { return a - b; });
+    if (!ks.length) return aux ? 'Aux only' : '—';
+    return (ks.length > 1 ? 'Str ' : 'String ') + ks.map(function (i) { return i + 1; }).join(', ') + (aux ? ' +aux' : '');
   }
   // A full human label for a servo (channel tooltip, direct-servo row, summary).
   function servoLabel(sv, auxIndex) {
@@ -156,8 +169,8 @@
   }
 
   // ---- geometry -------------------------------------------------------------
-  var BOARD_W = 152, BOARD_GAP = 26, ROW_X0 = 24;
-  var BOARD_TOP = 208, BOARD_H = 232;
+  var BOARD_W = 172, BOARD_GAP = 26, ROW_X0 = 24;
+  var BOARD_TOP = 208, BOARD_H = 240;
   var BUS_TOP = 112, BUS_STEP = 14;           // six horizontal buses stacked here
   // Bus order (top→bottom) and the PCA input pin each represents.
   var BUSES = [
@@ -286,12 +299,14 @@
 
     g.appendChild(svg('rect', { class: 'wire-board', x: x, y: BOARD_TOP, width: BOARD_W, height: BOARD_H, rx: 9 }));
     g.appendChild(svg('text', { class: 'wire-title', x: x + 12, y: BOARD_TOP + 22, text: 'PCA9685 #' + id }));
-    g.appendChild(svg('text', { class: 'wire-sub', x: x + 12, y: BOARD_TOP + 37, text: 'I²C ' + hex2(0x40 + id) }));
-    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 37, 'text-anchor': 'end', text: used + '/16 ch' }));
+    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 22, 'text-anchor': 'end', text: 'I²C ' + hex2(0x40 + id) }));
+    // Which string(s) this board serves (a board may be shared across strings).
+    g.appendChild(svg('text', { class: 'wire-sub host', x: x + 12, y: BOARD_TOP + 39, text: hostedStrings(m, id) }));
+    g.appendChild(svg('text', { class: 'wire-sub', x: x + BOARD_W - 12, y: BOARD_TOP + 39, 'text-anchor': 'end', text: used + '/16' }));
 
-    // 16 channels as a 4×4 grid.
-    var gx0 = x + 12, gy0 = BOARD_TOP + 50;
-    var pw = 29, ph = 30, gapx = 4, gapy = 12;
+    // 16 channels as a 4×4 grid; each pad shows its channel/pin, string and fret.
+    var gx0 = x + 12, gy0 = BOARD_TOP + 52;
+    var pw = 34, ph = 34, gapx = 4, gapy = 12;
     for (var ch = 0; ch < 16; ch++) {
       var c = ch % 4, r = (ch / 4) | 0;
       var px = gx0 + c * (pw + gapx), py = gy0 + r * (ph + gapy);
@@ -313,8 +328,12 @@
     }
     var cell = svg('g', { class: 'wire-cell' });
     cell.appendChild(svg('rect', { class: cls, x: px, y: py, width: pw, height: ph, rx: 5 }));
-    cell.appendChild(svg('text', { class: 'wire-chnum' + (sv ? ' on' : ''), x: px + 4, y: py + 11, text: ch }));
-    if (sv) cell.appendChild(svg('text', { class: 'wire-chcode', x: px + pw / 2, y: py + ph - 8, 'text-anchor': 'middle', text: padCode(sv) }));
+    // Corner = the PCA pin/channel number; centre = string tag over fret/role code.
+    cell.appendChild(svg('text', { class: 'wire-chnum' + (sv ? ' on' : ''), x: px + 3.5, y: py + 10, text: ch }));
+    if (sv) {
+      cell.appendChild(svg('text', { class: 'wire-chstr', x: px + pw / 2, y: py + 19, 'text-anchor': 'middle', text: stringTag(sv) }));
+      cell.appendChild(svg('text', { class: 'wire-chcode', x: px + pw / 2, y: py + ph - 5, 'text-anchor': 'middle', text: padCode(sv) }));
+    }
     // Native SVG tooltip: full description on hover.
     var tip = 'Channel ' + ch + ' — ' + (sv
       ? servoLabel(sv, m.auxOrder[m.servos.indexOf(sv)] || 0) + (sv.enabled === false ? ' (disabled)' : '') +
@@ -372,7 +391,10 @@
         rail('vplus', 'V+ 5–6 V servo rail'), rail('gnd', 'GND (common)'), rail('v3', '3V3 logic'),
         rail('sda', 'I²C SDA'), rail('scl', 'I²C SCL'), rail('oe', 'PCA9685 /OE safety')
       ]),
-      h('p.muted', 'Each labelled channel is where one servo plugs in (signal + V+ + GND). Numbers on a finger channel are the fret; P plucker, S strum, L lift, D damper, A auxiliary. Hover a channel for the full description.')
+      h('p.muted', 'Each labelled channel is where one servo plugs in (signal + V+ + GND). On a pad the corner is the ' +
+        'PCA pin/channel, the top tag is the string (S1…, GLB = global auxiliary) and the number below is the fret ' +
+        '(P plucker, S strum, L lift, D damper, A auxiliary). A single PCA9685 can host several strings — each pin is ' +
+        'labelled with its own string and fret, and the board header lists the strings it serves. Hover a channel for the full description.')
     ]);
   }
 
@@ -446,8 +468,9 @@
         h('span.muted', 'graphical harness — ESP32-S3 + PCA9685(s), adapts to the configuration')]),
       h('p.muted', 'A schematic of how the current instrument is wired: the ESP32-S3, a separate ' +
         '5–6 V servo supply, one PCA9685 per board actually used (at its I²C address), the shared ' +
-        'I²C + /OE + power buses, and any direct-GPIO servos. Every occupied channel is labelled ' +
-        'with the servo it drives. It updates with each change made in the Setup Wizard and GPIO Pins tabs.')
+        'I²C + /OE + power buses, and any direct-GPIO servos. Each occupied channel is labelled with its ' +
+        'string and fret, so a PCA9685 shared across several strings stays unambiguous. It updates with each ' +
+        'change made in the Setup Wizard and GPIO Pins tabs.')
     ]));
 
     if (!servos.length) {

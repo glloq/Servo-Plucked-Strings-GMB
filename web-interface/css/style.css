@@ -701,8 +701,10 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .wire-pad.dup { stroke: var(--error); stroke-width: 2.4; }
 .wire-pad.off { opacity: .45; }
 .wire-chnum { fill: var(--muted); font-size: 8px; font-family: var(--mono); }
-.wire-chnum.on { fill: rgba(255, 255, 255, .92); }
-.wire-chcode { fill: #fff; font-size: 12px; font-weight: 700; font-family: var(--mono); }
+.wire-chnum.on { fill: rgba(255, 255, 255, .85); }
+.wire-chstr { fill: rgba(255, 255, 255, .95); font-size: 9px; font-weight: 600; font-family: var(--mono); }
+.wire-chcode { fill: #fff; font-size: 12.5px; font-weight: 700; font-family: var(--mono); }
+.wire-sub.host { font-weight: 600; }
 
 /* Direct-GPIO rows. */
 .wire-swatch { stroke: rgba(0, 0, 0, .2); }
