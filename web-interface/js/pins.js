@@ -104,11 +104,20 @@
   // its /OE safety line. Every finger/plucker is a PCA channel or a direct GPIO
   // configured per servo in the Setup wizard (not a board-level signal here).
   function signalSpecs() {
-    return [
-      { signal: 'SDA', kind: 'sda', label: 'I2C SDA' },
-      { signal: 'SCL', kind: 'scl', label: 'I2C SCL' },
-      { signal: 'SERVO_OE', kind: 'servoOe', label: 'PCA9685 /OE (safety)' }
+    var specs = [
+      { signal: 'SDA', kind: 'sda', label: 'I2C bus 0 SDA' },
+      { signal: 'SCL', kind: 'scl', label: 'I2C bus 0 SCL' }
     ];
+    // The second I2C bus signals appear once a PCA board is placed on bus 1 (the
+    // Setup Wizard adds SDA2/SCL2 to the profile); they can then be assigned here.
+    var pins = GMB.state.profile.pins || [];
+    var has = function (sig) { return pins.some(function (x) { return x.signal === sig; }); };
+    if (has('SDA2') || has('SCL2')) {
+      specs.push({ signal: 'SDA2', kind: 'sda', label: 'I2C bus 1 SDA (SDA2)' });
+      specs.push({ signal: 'SCL2', kind: 'scl', label: 'I2C bus 1 SCL (SCL2)' });
+    }
+    specs.push({ signal: 'SERVO_OE', kind: 'servoOe', label: 'PCA9685 /OE (safety)' });
+    return specs;
   }
 
   function currentGpio(signal) {

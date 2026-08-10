@@ -570,7 +570,13 @@
     if (overwrite && !confirm('Some strings have hand-edited wiring. Replace it with the chosen mechanics?'))
       return false;
     var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
+    // Preserve each PCA board's I²C-bus assignment across regeneration (bus is a
+    // property of the physical board, not of the mechanical spec being rebuilt).
+    var busByBoard = {};
+    p.servos.forEach(function (s) { if (s.source === 'pca' && s.i2cBus === 1) busByBoard[s.pcaBoard] = 1; });
     p.servos = GMB.buildInstrument(effectiveSpec, p.strings, p.servos).concat(aux);
+    p.servos.forEach(function (s) { if (s.source === 'pca' && busByBoard[s.pcaBoard]) s.i2cBus = 1; });
+    ensureBusPins();
     syncSelection();
     GMB.markDirty();
     return true;
@@ -669,27 +675,117 @@
     ]);
   }
 
-  // PCA9685 channel usage per board + direct-GPIO count vs the firmware limits.
+  // ---- I²C bus topology (creation): assign PCA boards to bus 0 or bus 1 -------
+  // The ESP32-S3 has two hardware I²C controllers; splitting the PCA boards over
+  // both buses halves the traffic and refreshes the servos faster on large rigs.
+
+  function distinctPcaBoards() {
+    var set = {}, out = [];
+    GMB.state.profile.servos.forEach(function (s) {
+      if (s.source === 'pca' && !(s.pcaBoard in set)) { set[s.pcaBoard] = 1; out.push(s.pcaBoard); }
+    });
+    return out.sort(function (a, b) { return a - b; });
+  }
+  function anyBus1() { return GMB.state.profile.servos.some(function (s) { return s.source === 'pca' && s.i2cBus === 1; }); }
+  function boardBus(board) {
+    var s = GMB.state.profile.servos.filter(function (x) { return x.source === 'pca' && x.pcaBoard === board; })[0];
+    return s && s.i2cBus === 1 ? 1 : 0;
+  }
+  function setBoardBus(board, bus) {
+    GMB.state.profile.servos.forEach(function (s) {
+      if (s.source === 'pca' && s.pcaBoard === board) s.i2cBus = bus ? 1 : 0;
+    });
+    ensureBusPins();
+    GMB.markDirty();
+  }
+  // The second-bus signals (SDA2/SCL2) exist in the profile iff a board is on bus 1.
+  function ensureBusPins() {
+    var p = GMB.state.profile;
+    p.pins = p.pins || [];
+    var has = function (sig) { return p.pins.some(function (x) { return x.signal === sig; }); };
+    if (anyBus1()) {
+      var R = GMB.RECOMMENDED || {};
+      if (!has('SDA2')) p.pins.push({ signal: 'SDA2', kind: 'sda', gpio: R.SDA2 != null ? R.SDA2 : 38 });
+      if (!has('SCL2')) p.pins.push({ signal: 'SCL2', kind: 'scl', gpio: R.SCL2 != null ? R.SCL2 : 39 });
+    } else {
+      p.pins = p.pins.filter(function (x) { return x.signal !== 'SDA2' && x.signal !== 'SCL2'; });
+    }
+  }
+  // Distribute the boards evenly across the two buses (first half → bus 0).
+  function autoSplitBuses() {
+    var boards = distinctPcaBoards(), half = Math.ceil(boards.length / 2);
+    boards.forEach(function (b, i) { setBoardBus(b, i >= half ? 1 : 0); });
+  }
+  function setSecondBus(on) {
+    if (on) { if (!anyBus1()) autoSplitBuses(); }
+    else {
+      GMB.state.profile.servos.forEach(function (s) { if (s.source === 'pca') s.i2cBus = 0; });
+      ensureBusPins(); GMB.markDirty();
+    }
+  }
+
+  // The Builder's I²C-bus control: a toggle, per-board bus pickers and auto-split.
+  function busTopology() {
+    var boards = distinctPcaBoards();
+    var two = anyBus1();
+    var R = GMB.RECOMMENDED || {};
+    var toggle = h('input', { type: 'checkbox', checked: two });
+    toggle.addEventListener('change', function () { setSecondBus(toggle.checked); drawStep(); });
+    var kids = [h('label.inline.builder-opt', [toggle,
+      h('span', 'Use a second I²C bus — split the PCA9685 boards across the ESP32-S3’s two I²C controllers ' +
+        '(Wire + Wire1) to cut bus traffic and refresh the servos faster on large instruments')])];
+    if (two) {
+      var n0 = boards.filter(function (b) { return boardBus(b) === 0; }).length;
+      kids.push(h('div.bus-grid', boards.map(function (b) {
+        var sel = GMB.input({ v: boardBus(b) }, 'v', { type: 'select', coerce: Number,
+          options: [{ value: 0, label: 'Bus 0' }, { value: 1, label: 'Bus 1' }],
+          onChange: function (v) { setBoardBus(b, Number(v)); drawStep(); } });
+        return h('div.bus-board', [h('span.bus-board-id', 'PCA #' + b + ' · 0x' + (0x40 + b).toString(16)), sel]);
+      })));
+      kids.push(h('div.row', [
+        GMB.button('Auto-split evenly', function () { autoSplitBuses(); drawStep(); }, 'ghost'),
+        h('span.muted', 'Bus 0: ' + n0 + ' · Bus 1: ' + (boards.length - n0) + ' board(s). ' +
+          'Assign the SDA2 / SCL2 pins on the GPIO Pins tab (default GPIO' +
+          (R.SDA2 != null ? R.SDA2 : 38) + ' / GPIO' + (R.SCL2 != null ? R.SCL2 : 39) + ').')
+      ]));
+    }
+    return h('div.bus-topology', kids);
+  }
+
+  // PCA9685 channel usage per (bus, board) + direct-GPIO count vs firmware limits.
   function capacityReport() {
     var preview = previewServos().concat(auxServos());
-    var byBoard = {}, direct = 0;
+    // Preview servos are regenerated without a bus, so overlay the committed
+    // board→bus assignment (a board's bus is a property of its physical wiring).
+    var busOfBoard = {};
+    GMB.state.profile.servos.forEach(function (s) { if (s.source === 'pca' && s.i2cBus === 1) busOfBoard[s.pcaBoard] = 1; });
+    var byKey = {}, direct = 0;
     preview.forEach(function (s) {
-      if (s.source === 'gpio') direct++;
-      else byBoard[s.pcaBoard] = (byBoard[s.pcaBoard] || 0) + 1;
+      if (s.source === 'gpio') { direct++; return; }
+      var bus = busOfBoard[s.pcaBoard] ? 1 : 0, k = bus + ':' + s.pcaBoard;
+      byKey[k] = byKey[k] || { bus: bus, board: s.pcaBoard, n: 0 };
+      byKey[k].n++;
     });
-    var rows = Object.keys(byBoard).sort(function (a, b) { return a - b; }).map(function (b) {
-      var used = byBoard[b], over = used > 16, pct = Math.min(100, used / 16 * 100);
+    var two = anyBus1();
+    var keys = Object.keys(byKey).sort(function (a, b) {
+      return byKey[a].bus - byKey[b].bus || byKey[a].board - byKey[b].board;
+    });
+    var rows = keys.map(function (k) {
+      var e = byKey[k], over = e.n > 16, pct = Math.min(100, e.n / 16 * 100);
       return h('div.cap-line', [
-        h('span.cap-label', 'PCA board ' + b),
+        h('span.cap-label', (two ? 'Bus ' + e.bus + ' · ' : '') + 'PCA ' + e.board),
         h('div.cap-bar' + (over ? '.over' : ''), h('span', { style: 'width:' + pct + '%' })),
-        h('span.cap-val', used + ' / 16' + (over ? ' — overflow' : ''))
+        h('span.cap-val', e.n + ' / 16' + (over ? ' — overflow' : ''))
       ]);
     });
     var warn = [];
-    if (Object.keys(byBoard).length > 8) warn.push('More than 8 PCA boards — firmware supports up to 8.');
+    [0, 1].forEach(function (bus) {
+      var count = keys.filter(function (k) { return byKey[k].bus === bus; }).length;
+      if (count > 8) warn.push((two ? 'Bus ' + bus + ': ' : '') + count + ' PCA boards — at most 8 per I²C bus.');
+    });
     if (direct > 8) warn.push(direct + ' direct-GPIO servos — at most 8 allowed.');
-    Object.keys(byBoard).forEach(function (b) { if (byBoard[b] > 16)
-      warn.push('PCA board ' + b + ' needs ' + byBoard[b] + ' channels (max 16) — spread servos across more boards.'); });
+    keys.forEach(function (k) { var e = byKey[k]; if (e.n > 16)
+      warn.push('PCA ' + e.board + ' needs ' + e.n + ' channels (max 16) — spread servos across more boards.'); });
     return h('div.capacity-meter', rows.concat(warn.map(function (w) { return h('div.pill.warn', w); })));
   }
 
@@ -782,8 +878,9 @@
 
     // 5 · Wiring & capacity.
     body.appendChild(builderSection('5 · Wiring & capacity', [
-      h('p.muted', 'Default: one PCA9685 board per string (its fingers + striker share the 16 channels). ' +
-        'Switch individual servos to a direct GPIO on the Frets / Plucking steps.'),
+      h('p.muted', 'Default: one PCA9685 board per string (its fingers + striker share the 16 channels), all on ' +
+        'a single I²C bus. Switch individual servos to a direct GPIO on the Frets / Plucking steps.'),
+      busTopology(),
       capacityReport()
     ]));
 
@@ -895,6 +992,9 @@
       fields.push(GMB.field('GPIO', servoGpioSelect(sv), 'output-capable free pins only'));
     } else {
       fields.push(GMB.field('PCA board', GMB.input(sv, 'pcaBoard', { type: 'number', min: 0, max: 7 })));
+      fields.push(GMB.field('I²C bus', GMB.input(sv, 'i2cBus', {
+        type: 'select', coerce: Number, options: [{ value: 0, label: 'Bus 0' }, { value: 1, label: 'Bus 1' }],
+        onChange: function () { ensureBusPins(); drawStep(); } }), 'SDA/SCL (0) or SDA2/SCL2 (1)'));
       fields.push(GMB.field('Channel', GMB.input(sv, 'channel', { type: 'number', min: 0, max: 15 })));
     }
     return fields;

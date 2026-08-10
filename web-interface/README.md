@@ -146,13 +146,24 @@ Builder's choices (open-only → a banner; strum → its stroke controls) and ca
   the open string**.
 
 Each servo picks its signal **source** (shown in Advanced mode):
-- **PCA9685** — choose `pcaBoard` (**0–7**, i.e. up to **8 boards / 128 channels**,
-  addresses 0x40–0x47) and `channel` (0–15). A compact channel-availability map
-  flags a duplicate `board+channel` in red.
+- **PCA9685** — choose `pcaBoard` (**0–7**, addresses 0x40–0x47), the **I²C bus**
+  (`i2cBus` **0** = SDA/SCL, **1** = SDA2/SCL2) and `channel` (0–15). A compact
+  channel-availability map flags a duplicate `board+channel` in red.
 - **Direct GPIO** — choose a free ESP32 pin, filtered with the same green/yellow/red
   capability rules as the pin grid (reserved/USB pins hidden, caution pins
   Advanced-only, pins already used by a board signal or another servo excluded). At
   most **8 direct-GPIO servos** (one LEDC channel each).
+
+**Two I²C buses.** The ESP32-S3 has two hardware I²C controllers, so the PCA9685
+boards can be split across a second bus (`Wire1`, pins **SDA2/SCL2**) to halve the
+bus traffic and refresh the servos faster on large instruments (many strings / many
+boards). The Builder's **Wiring & capacity** step has a *Use a second I²C bus*
+toggle with a **per-board Bus 0 / Bus 1** picker and an **Auto-split evenly** button;
+the second bus's SDA2/SCL2 GPIOs are assigned on the **GPIO Pins** tab (default
+GPIO38/39). Each I²C bus addresses **up to 8 boards** (0x40–0x47), so two buses reach
+**16 boards / 256 channels**. Assignment is per physical board and is preserved when
+the wiring is regenerated. *(Firmware note: the current firmware drives a single
+`Wire` bus; using bus 1 needs the matching `Wire1` support in `ServoBank`.)*
 
 The system works with **no PCA at all** (every servo on a direct GPIO) or any mix.
 Per-string servos get their `stringIndex` set automatically. Each servo carries its
@@ -200,27 +211,31 @@ draft the wizard edits), so the picture updates with each mechanical / pin /
 servo choice made during creation. It shows (SPECIFICATION.md §7 / §11 / §22,
 `hardware/wiring/WIRING.md`):
 
-- the **ESP32-S3** module with its three board-level signals (I²C **SDA**,
-  **SCL** and the PCA9685 **/OE** safety line) read from `profile.pins`;
+- the **ESP32-S3** module with its board-level signals (I²C **SDA**, **SCL**,
+  the optional second-bus **SDA2**/**SCL2**, and the PCA9685 **/OE** safety line)
+  read from `profile.pins`;
 - a **separate 5–6 V servo PSU** feeding the servo rail (never the ESP
   regulator);
-- **one PCA9685 breakout per distinct `pcaBoard`** actually used, at its real
-  I²C address (**0x40 + index**, set by the A0–A2 jumpers), with its **16
-  channels** laid out and every occupied channel labelled with the servo it
-  drives (**fret number** for a finger, **P**/**S**/**L**/**D**/**A** for
-  plucker / strum / lift / damper / auxiliary; a geared finger shows both frets);
-- the shared **I²C + /OE + power buses** every board taps (junction dots mark a
-  connection, crossings without a dot do not connect);
+- **one PCA9685 breakout per distinct `(i2cBus, pcaBoard)` chip** actually used,
+  at its real I²C address (**0x40 + index**, set by the A0–A2 jumpers) with its
+  **bus** shown when two are used, its **16 channels** laid out, and every
+  occupied channel labelled with **string + fret** (or **P**/**S**/**L**/**D**/**A**
+  for plucker / strum / lift / damper / auxiliary; a geared finger shows both
+  frets), so a board shared across strings stays unambiguous — the board header
+  also lists the string(s) it serves;
+- the shared **power + /OE buses** and **one or two I²C buses** every board taps
+  (SDA/SCL for bus 0, SDA2/SCL2 for bus 1; junction dots mark a connection,
+  crossings without a dot do not connect);
 - any **direct-GPIO servos** wired straight to an ESP32 output pin.
 
 It also flags real wiring faults live: a **duplicated `board+channel`**, two
 servos (or a servo and a board signal) on the **same GPIO**, an **unassigned
-SDA/SCL/OE** while a PCA is in use, and the firmware **capacity limits** (8
-boards, 8 direct servos). A **harness summary** (boards, I²C addresses, servo
-counts, signal pins) sits below the diagram. The view is **read-only** — it
-drives no hardware, so there is nothing to arm — and a **Download SVG** button
-saves the diagram (colours inlined) to take to the workbench. Like the
-fretboard, the diagram scrolls horizontally on narrow screens.
+SDA/SCL** (per bus) or **/OE** while in use, and the firmware **capacity limits**
+(**8 boards per I²C bus**, 8 direct servos). A **harness summary** (buses, boards
+and addresses per bus, servo counts, signal pins) sits below the diagram. The
+view is **read-only** — it drives no hardware, so there is nothing to arm — and a
+**Download SVG** button saves the diagram (colours inlined) to take to the
+workbench. Like the fretboard, the diagram scrolls horizontally on narrow screens.
 
 ## Testing one servo or a whole group
 

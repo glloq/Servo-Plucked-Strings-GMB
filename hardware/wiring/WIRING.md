@@ -42,6 +42,16 @@ ESP32-S3.
 Up to **eight** boards at addresses **0x40 … 0x47** (set by the A0–A2 solder
 jumpers). Recommended: **one board per string**.
 
+> 🔀 **Two I²C buses (optional).** The ESP32-S3 exposes two hardware I²C
+> controllers, so the boards can be split across a **second bus** (`Wire1`, pins
+> **SDA2/SCL2**, default GPIO38/39) to halve the traffic per bus and refresh the
+> servos faster on large instruments. Each bus addresses its own 0x40–0x47 range,
+> so two buses reach **16 boards / 256 channels**. Assign a board to a bus in the
+> web interface (Setup Wizard → *Wiring & capacity*, or per servo in Advanced) and
+> give SDA2/SCL2 their own pull-ups. *(Firmware note: the reference firmware
+> currently drives a single `Wire` bus; the second bus needs matching `Wire1`
+> support in `firmware/src/platform/esp32/ServoBank.cpp`.)*
+
 | PCA9685 pin | Connect to | Notes |
 | ----------- | ---------- | ----- |
 | `SDA` | GPIO40 | I²C data (shared bus) |

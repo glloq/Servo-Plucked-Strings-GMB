@@ -61,6 +61,8 @@
   --wire-v3: #c58b12;
   --wire-sda: #1f9d55;
   --wire-scl: #2f6df6;
+  --wire-sda2: #0891b2;
+  --wire-scl2: #db2777;
   --wire-oe: #7c5cff;
   --wire-esp: #26324f;
   --wire-psu: #5a2f34;
@@ -117,6 +119,8 @@
     --wire-v3: #e0b24a;
     --wire-sda: #43c884;
     --wire-scl: #4f8bff;
+    --wire-sda2: #22d3ee;
+    --wire-scl2: #f472b6;
     --wire-oe: #a78bfa;
     --wire-esp: #1c2740;
     --wire-psu: #40242a;
@@ -572,6 +576,14 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .cap-bar.over span { background: var(--error); }
 .cap-val { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 96px; text-align: right; }
 
+/* I²C bus topology (second-bus split). */
+.bus-topology { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 10px; }
+.bus-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.bus-board { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.bus-board-id { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bus-board select { width: auto; min-width: 92px; flex: 0 0 auto; }
+
 /* Generate summary + nested strum block + fret guard-rail pills. */
 .summary { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
 .summary strong { font-size: 14px; }
@@ -686,6 +698,8 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .wire-rail.v3,    .wire-lead.v3    { stroke: var(--wire-v3); }    .wire-dot.v3    { fill: var(--wire-v3); }
 .wire-rail.sda,   .wire-lead.sda   { stroke: var(--wire-sda); }   .wire-dot.sda   { fill: var(--wire-sda); }
 .wire-rail.scl,   .wire-lead.scl   { stroke: var(--wire-scl); }   .wire-dot.scl   { fill: var(--wire-scl); }
+.wire-rail.sda2,  .wire-lead.sda2  { stroke: var(--wire-sda2); }  .wire-dot.sda2  { fill: var(--wire-sda2); }
+.wire-rail.scl2,  .wire-lead.scl2  { stroke: var(--wire-scl2); }  .wire-dot.scl2  { fill: var(--wire-scl2); }
 .wire-rail.oe,    .wire-lead.oe    { stroke: var(--wire-oe); }    .wire-dot.oe    { fill: var(--wire-oe); }
 
 /* Channel pads. */
@@ -728,4 +742,5 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .wire-lg-rail.vplus { background: var(--wire-vplus); } .wire-lg-rail.gnd { background: var(--wire-gnd); }
 .wire-lg-rail.v3 { background: var(--wire-v3); } .wire-lg-rail.sda { background: var(--wire-sda); }
 .wire-lg-rail.scl { background: var(--wire-scl); } .wire-lg-rail.oe { background: var(--wire-oe); }
+.wire-lg-rail.sda2 { background: var(--wire-sda2); } .wire-lg-rail.scl2 { background: var(--wire-scl2); }
 .err-item.warn { background: var(--warn-bg); border-color: var(--warn); }
