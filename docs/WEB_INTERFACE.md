@@ -82,6 +82,35 @@ The per-fret contact-angle calibration on the Frets step is detailed in
 
 ## 3. Interface pages
 
+### 3.0 The eight pages at a glance
+
+Overview of every page (standalone **demo data** — a 4-string GCEA ukulele,
+Simplified mode). All views are **adaptive**: they redraw from the active profile.
+
+**Dashboard** — live state, Wi-Fi / MIDI source, per-string status, faults, STOP.
+<p align="center"><img src="../img/screenshots/dashboard.png" alt="Dashboard view" width="100%"/></p>
+
+**Fretboard** — playable neck drawn to scale (equal temperament); press-and-hold a fret to sound the string.
+<p align="center"><img src="../img/screenshots/fretboard.png" alt="Fretboard view" width="100%"/></p>
+
+**Setup Wizard** — mechanical Instrument Builder: type, tuning, fretting, sounding, I²C-bus split, generate wiring.
+<p align="center"><img src="../img/screenshots/wizard.png" alt="Setup Wizard — Builder step" width="100%"/></p>
+
+**GPIO Pins** — board GPIO map + per-signal assignment (I²C SDA/SCL, /OE, and the optional second bus).
+<p align="center"><img src="../img/screenshots/pins.png" alt="GPIO Pins view" width="100%"/></p>
+
+**Wiring** — adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards at their address, per-pin string·role, live conflict checks, SVG export.
+<p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map view" width="100%"/></p>
+
+**MIDI** — string/fret CC selection, playback parameters and the integrated note test.
+<p align="center"><img src="../img/screenshots/midi.png" alt="MIDI page" width="100%"/></p>
+
+**GMB / SysEx** — GMB identity & computed capabilities + the SysEx tester.
+<p align="center"><img src="../img/screenshots/sysex.png" alt="GMB / SysEx page" width="100%"/></p>
+
+**Profiles** — save / load / copy / rename / export / import profile slots.
+<p align="center"><img src="../img/screenshots/profiles.png" alt="Profiles page" width="100%"/></p>
+
 ### 3.1 Dashboard (§19)
 
 Main page — overall status:

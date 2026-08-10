@@ -108,6 +108,19 @@ mapping still stays free per servo.
   instrument's capabilities (note range, polyphony, CCs, tuning) and adapts. See
   [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).
 
+## 🖥️ Web interface
+
+All configuration happens in the browser (served by the ESP32, or by opening
+`web-interface/index.html` in **demo mode**). Eight **adaptive** pages — dashboard,
+playable fretboard, setup wizard, GPIO pins, **wiring**, MIDI, GMB/SysEx and
+profiles. Overview of each:
+[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-eight-pages-at-a-glance).
+
+The **wiring** map draws the current instrument's ESP32 + PCA9685 harness (one or
+two I²C buses, addresses, per-pin string·role, live conflict checks):
+
+<img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/>
+
 ## 🔌 Hardware
 
 <img src="img/Schemas.png" alt="PCA9685 architecture" width="80%"/>
