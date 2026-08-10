@@ -189,6 +189,36 @@ restore, set the startup slot. **JSON** exchange format:
 The Wi-Fi password **never** appears in ordinary exports (unless an explicit
 option is set).
 
+### 3.6 Fretboard — playable neck
+
+Once the instrument is defined and calibrated, the **Fretboard** page turns it into
+a clickable **keyboard**. It draws the neck as a stylised instrument (headstock +
+tuning pegs, wood fretboard, body with a soundhole) with the strings and fret wires
+laid out **to scale** — the fret spacing follows equal temperament
+(`d(n) = 1 − 2^(−n/12)`, the *rule of 18*), so the neck compresses toward the body
+like a real fretboard.
+
+```text
+open note ─┐        fret 1   2    3     …          soundhole
+ (nut)     │  [f1]  [f2]  [f3] …  ← finger-servo pads, just before each wire
+  G4 ●═════╪════●═════●═════●══════════════════════════  ← string (lights up when played)
+```
+
+* **Servos as pads** — each equipped fret shows its finger servo as a rectangle on the
+  string, just on the nut side of the fret wire; a **geared** finger shows a dashed pad
+  on both of its frets; frets with no servo are inert.
+* **Press-and-hold to play** — pressing a fret with a servo drives its **finger servo**
+  to the calibrated contact pulse and **sounds the string** (the played string changes
+  colour); **releasing** lifts the finger. The zone left of the nut plays the **open
+  string** (fret 0). One finger per string at a time; multi-touch plays chords.
+* **Play mode** — only the mechanically-feasible options are offered: **Pluck** always,
+  **Up-stroke** / **Alternate** for a *strum* servo, **Muted** when a *damper* exists.
+  A *strum lift* is lowered for the stroke and raised again.
+* Uses the same `POST /api/test/servo` path as the wizard (works on the device **once
+  armed**, and stand-alone against the mock). Reads the **draft** profile, so an
+  in-progress calibration is playable immediately. Leaving the page lifts any held
+  finger; an **All fingers up** and the **STOP (panic)** button are the safety net.
+
 ---
 
 ## 4. REST / WebSocket API (`platform/esp32/WebApi.cpp`)
