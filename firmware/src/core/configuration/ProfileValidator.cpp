@@ -413,6 +413,12 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
         err("selector.string.range", "String CC minimum must be <= maximum");
     if (s.fret.minimum > s.fret.maximum)
         err("selector.fret.range", "Fret CC minimum must be <= maximum");
+    // Signed CC offsets are transmitted as offset+64 over SysEx, so they must fit
+    // the encodable band -64..63 (audit SX-5).
+    if (s.string.offset < -64 || s.string.offset > 63)
+        err("selector.string.offset", "String CC offset must be within -64..63");
+    if (s.fret.offset < -64 || s.fret.offset > 63)
+        err("selector.fret.offset", "Fret CC offset must be within -64..63");
     // Custom string mapping, when present, must be one entry per string, each
     // referencing a valid axis, AND a permutation (no axis used twice / skipped) —
     // otherwise a CC value would target a duplicate string while another becomes
@@ -451,6 +457,12 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     else if (p.instrument.polyphonyMax > p.instrument.stringCount)
         warn("instrument.polyphonyMax",
              "Polyphony exceeds the string count and will be clamped");
+    // A name over 32 chars is truncated on the SysEx identity/capabilities wire (the
+    // v2 descriptor carries it in full) — warn so the short announced name is not a
+    // surprise (audit SX-6).
+    if (p.instrument.name.size() > 32)
+        warn("instrument.name",
+             "Name longer than 32 characters is truncated on the SysEx wire");
     // Enum-backed fields must be within their defined range: a JSON import does a
     // static_cast, so an out-of-range value would reach a switch and hit an
     // unintended default (audit P1-10).

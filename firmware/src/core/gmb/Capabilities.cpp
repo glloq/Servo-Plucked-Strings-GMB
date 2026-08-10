@@ -16,6 +16,11 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     const uint8_t channel = p.midi.omni ? 0 : p.midi.globalChannel;
     const int capo = p.instrument.capo;
     const int transpose = p.instrument.transpose + p.midi.transpose;
+    // The string/fret selection CCs are only consumed when selection is enabled AND
+    // not in pure Automatic mode — announcing them otherwise advertises CCs the
+    // firmware ignores (spec §7: "a disabled CC must not be announced") — audit SX-7.
+    const bool selectionActive =
+        p.selector.enabled && p.selector.mode != SelectionMode::Automatic;
 
     // ---- Identity ----
     snap.identity.deviceName = p.instrument.name;
@@ -115,7 +120,7 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     // ---- Announced CCs (spec section 7): only activated ones ----
     caps.supportedCc.push_back(7);    // volume
     caps.supportedCc.push_back(11);   // expression
-    if (p.selector.enabled) {
+    if (selectionActive) {            // only when actually consumed (audit SX-7)
         caps.supportedCc.push_back(p.selector.string.ccNumber);
         caps.supportedCc.push_back(p.selector.fret.ccNumber);
     }
@@ -136,7 +141,7 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     sc.fretCount = maxFretGlobal;
     sc.isFretless = 0;
     sc.capo = static_cast<uint8_t>(capo);
-    sc.ccActive = p.selector.enabled ? 1 : 0;
+    sc.ccActive = selectionActive ? 1 : 0;  // audit SX-7
     sc.ccString = p.selector.string.ccNumber;
     sc.ccFret = p.selector.fret.ccNumber;
     sc.tuning = tuning;                  // physical order, transpose folded in
@@ -158,9 +163,12 @@ CapabilitySnapshot buildSnapshot(const Profile& p, int polyphonyOverride) {
     sc.selectionMode = static_cast<uint8_t>(p.selector.mode);
     sc.stringOrder = p.selector.string.reverseOrder ? 1 : 0;
     if (degraded) {
-        // Reduced set: clamp the CC range to what is actually announced and drop
-        // the custom mapping (it references the original physical axes and would
-        // be incoherent against the renumbered set).
+        // Reduced set (some strings disabled/faulted): clamp the CC range to what is
+        // actually announced and drop the custom mapping. A mapping is a permutation
+        // over the FULL configured axis set, so it is genuinely inapplicable to the
+        // renumbered reduced set — announcing an incoherent mapping would be worse
+        // than announcing none. This is intentional for both user-disabled and
+        // runtime-faulted strings (audit SX-8: reviewed, behaviour retained).
         if (sc.ccStringMax > activeStrings) sc.ccStringMax = activeStrings;
         if (sc.ccStringMin > sc.ccStringMax) sc.ccStringMin = sc.ccStringMax;
     } else {

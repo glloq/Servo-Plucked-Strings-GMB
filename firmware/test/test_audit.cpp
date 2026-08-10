@@ -405,6 +405,16 @@ TEST(fret_before_string_cc_order) {
     CHECK_EQ((int)sel.pending().size(), 0);  // exactly one selection consumed
 }
 
+// SX-5: a signed CC offset outside the SysEx-encodable band (-64..63) is rejected.
+TEST(validator_rejects_cc_offset_out_of_band) {
+    Profile p = uke();
+    p.selector.string.offset = 100;  // > 63
+    CHECK(!ProfileValidator::isActivatable(p));
+    Profile q = uke();
+    q.selector.fret.offset = -100;   // < -64
+    CHECK(!ProfileValidator::isActivatable(q));
+}
+
 // --- MIDI robustness (M-C / M-E / M-G) ---
 
 static void setupSel(StringFretSelector& sel) {

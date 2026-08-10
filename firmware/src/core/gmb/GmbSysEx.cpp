@@ -128,8 +128,11 @@ std::vector<uint8_t> GmbSysEx::encodeCapabilities(const CapabilitySnapshot& s) {
     for (uint8_t n : c.discreteNotes) m.push_back(b7(n));
     m.push_back(b7(static_cast<int>(c.supportedCc.size())));
     for (uint8_t cc : c.supportedCc) m.push_back(b7(cc));
-    m.push_back(b7(static_cast<int>(c.name.size())));
-    for (char ch : c.name) m.push_back(b7(static_cast<uint8_t>(ch)));
+    // Cap the name so a >127-char name can't corrupt the 7-bit length byte or push
+    // the message past kMaxMessage (audit SX-6). Matches the 32-byte identity clamp.
+    size_t nameLen = c.name.size() > 32 ? 32 : c.name.size();
+    m.push_back(b7(static_cast<int>(nameLen)));
+    for (size_t i = 0; i < nameLen; ++i) m.push_back(b7(static_cast<uint8_t>(c.name[i])));
     m.push_back(kEnd);
     return m;
 }

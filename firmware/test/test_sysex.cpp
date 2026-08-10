@@ -319,3 +319,38 @@ TEST(v2_service_discovery) {
     CHECK_EQ((int)seg[3], 0x10);
     CHECK_EQ((int)seg[4], 0x01);
 }
+
+// SX-7: the string/fret selection CCs are announced only when selection is active
+// (enabled AND not pure Automatic mode) — never when the firmware would ignore them.
+TEST(sx7_selection_cc_only_when_active) {
+    auto hasCc = [](const CapabilitySnapshot& s, uint8_t cc) {
+        for (uint8_t x : s.capabilities.supportedCc)
+            if (x == cc) return true;
+        return false;
+    };
+    Profile hyb = guitarProfile();  // selector enabled, default Hybrid mode
+    CapabilitySnapshot sh = buildSnapshot(hyb);
+    CHECK(hasCc(sh, 20));
+    CHECK(hasCc(sh, 21));
+    CHECK_EQ((int)sh.stringConfig.ccActive, 1);
+
+    Profile aut = hyb;
+    aut.selector.mode = SelectionMode::Automatic;  // CCs are ignored in this mode
+    CapabilitySnapshot sa = buildSnapshot(aut);
+    CHECK(!hasCc(sa, 20));
+    CHECK(!hasCc(sa, 21));
+    CHECK_EQ((int)sa.stringConfig.ccActive, 0);
+    CHECK(hasCc(sa, 7));    // standard CCs still announced
+    CHECK(hasCc(sa, 120));
+}
+
+// SX-6: a very long instrument name is clamped in the (deprecated) capabilities
+// block, so the 7-bit length byte stays valid and the message stays bounded.
+TEST(sx6_capabilities_name_clamped) {
+    Profile p = guitarProfile();
+    p.instrument.name = std::string(200, 'X');
+    CapabilitySnapshot s = buildSnapshot(p);
+    auto m = GmbSysEx::encodeCapabilities(s);
+    CHECK(GmbSysEx::isWellFormed(m.data(), m.size()));
+    CHECK((int)m.size() <= (int)GmbSysEx::kMaxMessage);
+}
