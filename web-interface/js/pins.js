@@ -15,6 +15,10 @@
   var board = null;
 
   function render(host) {
+    // Clear first: this view can re-enter itself once the board profile resolves
+    // (and is embedded in the Câblage & GPIO page), so the async pass must not
+    // stack real cards under the "Loading…" placeholder.
+    host.innerHTML = '';
     var p = GMB.state.profile;
     if (!board) {
       GMB.api.getBoard(p.board.profile).then(function (b) { board = b; render(host); });
@@ -109,7 +113,7 @@
       { signal: 'SCL', kind: 'scl', label: 'I2C bus 0 SCL' }
     ];
     // The second I2C bus signals appear once a PCA board is placed on bus 1 (the
-    // Setup Wizard adds SDA2/SCL2 to the profile); they can then be assigned here.
+    // config wizard adds SDA2/SCL2 to the profile); they can then be assigned here.
     var pins = GMB.state.profile.pins || [];
     var has = function (sig) { return pins.some(function (x) { return x.signal === sig; }); };
     if (has('SDA2') || has('SCL2')) {

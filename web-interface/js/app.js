@@ -119,22 +119,21 @@
   };
 
   // ---- routing --------------------------------------------------------------
+  // Only three main pages a player needs (UI redesign): the playable instrument,
+  // the servo calibration, and the hardware (wiring + GPIO). Everything else —
+  // the instrument-configuration wizard, MIDI, network, profiles and the SysEx
+  // tooling — lives in the Settings modal (gear button, top-right).
   var TABS = [
-    { id: 'dashboard', label: 'Dashboard', icon: 'D' },
-    { id: 'fretboard', label: 'Fretboard', icon: 'B' },
-    { id: 'wizard', label: 'Setup Wizard', icon: 'W' },
-    { id: 'pins', label: 'GPIO Pins', icon: 'P' },
-    { id: 'wiring', label: 'Wiring', icon: 'C' },
-    { id: 'midi', label: 'MIDI', icon: 'M' },
-    { id: 'sysex', label: 'GMB / SysEx', icon: 'S' },
-    { id: 'profiles', label: 'Profiles', icon: 'F' }
+    { id: 'fretboard', label: 'Instrument', icon: '♪' },
+    { id: 'calibration', label: 'Calibration', icon: '⛭' },
+    { id: 'hardware', label: 'Câblage & GPIO', icon: '⚡' }
   ];
 
   var state = {
     profile: null,      // working draft (edited in place by views)
     mode: 'simplified', // 'simplified' | 'advanced' (spec 9.2)
     dirty: false,
-    current: 'dashboard'
+    current: 'fretboard'
   };
   GMB.state = state;
 
@@ -252,12 +251,12 @@
     var main = h('main.main', [
       h('header.topbar', [
         h('button.hamburger', { onclick: function () { nav.classList.toggle('open'); } }, '≡'),
-        h('div#topbar-title.topbar-title', 'Dashboard'),
+        h('div#topbar-title.topbar-title', 'Instrument'),
         h('div.topbar-right', [
           h('span#mock-badge.badge.mock', { style: 'display:none' }, 'DEMO / MOCK DATA'),
           h('span#conn-badge.badge.ok', 'Local'),
           h('button.icon-btn#settings-btn', {
-            title: 'Settings (network, Wi-Fi, hotspot)',
+            title: 'Réglages — configuration instrument, MIDI, réseau, profils, avancé',
             onclick: function () { if (GMB.openSettings) GMB.openSettings(); }
           }, '⚙')
         ])

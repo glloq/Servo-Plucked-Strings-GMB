@@ -28,15 +28,13 @@
 
     host.appendChild(h('div.card', [
       h('h2', 'Current working profile'),
-      h('p.muted', 'Edited across the Wizard, Pins and MIDI tabs; saved atomically.'),
+      h('p.muted', 'Edited across Configuration, Calibration and the hardware page; saved atomically. (Wi-Fi credentials live in the Réseau tab.)'),
       h('div.form-grid', [
         GMB.field('Name', GMB.input(GMB.state.profile.instrument, 'name')),
         GMB.field('Startup profile', h('span.muted', 'set from the list above'))
       ]),
       h('div.toolbar', [GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')])
     ]));
-
-    host.appendChild(wifiCard());
 
     loadList();
   }
@@ -165,8 +163,9 @@
     GMB.api.loadProfileSlot(pr.slot).then(function (res) {
       if (res && res.ok === false) { GMB.toast('Slot ' + pr.slot + ' is empty.', 'warn'); return; }
       GMB.reloadProfile().then(function () {
-        GMB.toast('Loaded "' + pr.name + '".', 'ok');
-        GMB.navigate('dashboard');
+        GMB.toast('Profil « ' + pr.name + ' » chargé.', 'ok');
+        if (GMB.closeSettings) GMB.closeSettings();
+        GMB.navigate('fretboard');
       });
     }).catch(function (e) { reportErr('Load failed', e); });
   }
@@ -176,29 +175,6 @@
     var body = e && e.body;
     if (body && body.issues && GMB.reportIssues(prefix, body.issues)) return;
     GMB.toast(prefix + ': ' + ((body && body.error) || (e && e.message) || 'error'), 'error');
-  }
-
-  // ---- Wi-Fi credentials (write-only) --------------------------------------
-  var wifi = { stationPassword: '', apPassword: '' };
-  function wifiCard() {
-    return h('div.card', [
-      h('div.card-head', [h('h2', 'Wi-Fi credentials'),
-        h('span.muted', 'write-only — never exported or displayed')]),
-      h('p.muted', 'Passwords are stored on the device and applied after a reboot. Leaving a field blank leaves that password unchanged.'),
-      h('div.form-grid', [
-        GMB.field('Station (client) password', GMB.input(wifi, 'stationPassword', { type: 'password' })),
-        GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' }))
-      ]),
-      h('div.toolbar', [GMB.button('Save Wi-Fi credentials', saveWifi, 'primary')])
-    ]);
-  }
-  function saveWifi() {
-    GMB.api.setWifi({ stationPassword: wifi.stationPassword, apPassword: wifi.apPassword }).then(function (res) {
-      if (res && res.ok === false) { GMB.toast('Could not store Wi-Fi credentials.', 'error'); return; }
-      wifi.stationPassword = ''; wifi.apPassword = '';
-      GMB.toast('Wi-Fi credentials stored' + (res && res.note ? ' — ' + res.note : '') + '.', 'ok');
-      GMB.render();
-    }).catch(function (e) { reportErr('Wi-Fi save failed', e); });
   }
 
   // Export — strips the Wi-Fi password (never present in our schema, but we also
@@ -229,7 +205,8 @@
             GMB.state.profile = obj;
             GMB.markDirty();
             GMB.toast('Profile imported. Review and save to publish.', 'ok');
-            GMB.navigate('dashboard');
+            if (GMB.closeSettings) GMB.closeSettings();
+            GMB.navigate('fretboard');
           }
         } catch (e) { alert('Not valid JSON: ' + e.message); }
       };
