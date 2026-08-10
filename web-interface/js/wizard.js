@@ -1257,14 +1257,81 @@
     ]);
   }
 
+  // Ensure a loaded/older profile carries the global plucking block and the timing
+  // fields the grattage card edits (older exports predate them).
+  function ensurePluckConfig(p) {
+    if (!p.pluck) p.pluck = {};
+    var pk = p.pluck;
+    if (pk.strokeMs === undefined) pk.strokeMs = 0;
+    if (pk.fretToPluckMs === undefined) pk.fretToPluckMs = 0;
+    if (pk.muteSource === undefined) pk.muteSource = 'auto';
+    if (pk.muteHoldMs === undefined) pk.muteHoldMs = 60;
+    if (pk.liftMuteOnNoteOff === undefined) pk.liftMuteOnNoteOff = false;
+    if (pk.liftEngage === undefined) pk.liftEngage = 'lowerToPlay';
+    if (!p.midi) p.midi = {};
+    if (p.midi.noteExecutionDelayMs === undefined) p.midi.noteExecutionDelayMs = 0;
+    if (p.midi.strumLeadMs === undefined) p.midi.strumLeadMs = 0;
+  }
+
+  // The grattage gesture + delays + mute behaviour, configured ONCE for the whole
+  // instrument (common to every string). Per-string tabs below only carry wiring +
+  // the physical angles.
+  function pluckGlobalCard() {
+    var p = GMB.state.profile, pk = p.pluck, midi = p.midi;
+    var gesture = h('div.grid2', [
+      GMB.field('Stroke time (ms)', GMB.input(pk, 'strokeMs', { type: 'number', min: 0, max: 2000 }),
+        '0 = chaque servo garde son propre réglage'),
+      GMB.field('Délai frette → grattage (ms)', GMB.input(pk, 'fretToPluckMs', { type: 'number', min: 0, max: 1000 }),
+        'attente après la mise en place de la frette, avant de gratter'),
+      GMB.field('Latence Note On → son (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 1000 }),
+        'latence fixe pour un rendu régulier'),
+      GMB.field('Avance du levage (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 1000 }),
+        'abaisse le levage en avance — le plectre est en place pile à la frappe')
+    ]);
+    var mute = [
+      GMB.field('Étouffement (Note Off)', GMB.input(pk, 'muteSource', {
+        type: 'select', options: [
+          { value: 'auto', label: 'Auto (servo mute si présent)' },
+          { value: 'plectrum', label: 'Plectre — se pose sur la corde' },
+          { value: 'damper', label: 'Servo mute dédié' },
+          { value: 'lift', label: 'Levage — pose le plectre' },
+          { value: 'none', label: 'Aucun (laisse sonner)' }
+        ], onChange: drawStep
+      }), 'qui coupe la note à la fin — le plectre peut muter sans servo dédié'),
+      GMB.field('Tenue de l’étouffement (ms)', GMB.input(pk, 'muteHoldMs', { type: 'number', min: 0, max: 2000 }))
+    ];
+    if (anyRole('strumLift')) {
+      mute.push(GMB.field('Sens du levage', GMB.input(pk, 'liftEngage', {
+        type: 'select', options: [
+          { value: 'lowerToPlay', label: 'Abaisse pour jouer (repos = plectre écarté)' },
+          { value: 'raiseToPlay', label: 'Lève pour jouer (repos = plectre posé → étouffe)' }
+        ], onChange: drawStep
+      }), 'à la réception d’une note : le levage abaisse ou lève le plectre vers la corde'));
+      // In raise-to-play the resting lift already mutes, so the extra "lift also
+      // mutes" toggle is moot — only offer it in lower-to-play.
+      if (pk.liftEngage !== 'raiseToPlay')
+        mute.push(GMB.field('Le levage étouffe aussi', GMB.input(pk, 'liftMuteOnNoteOff', { type: 'checkbox' }),
+          'pose le plectre sur la corde au Note Off, en plus'));
+    }
+    return h('div.card', [
+      h('div.card-head', [h('h3', 'Grattage — commun à toutes les cordes'),
+        h('span.muted', 'un seul réglage pour tout l’instrument')]),
+      gesture,
+      h('div.grid2', mute)
+    ]);
+  }
+
   function stepPluck(body) {
     var p = GMB.state.profile;
+    ensurePluckConfig(p);
     body.appendChild(h('div.note-box',
       'Plucking (grattage): the plectrum / strum servo that sounds the string, plus an ' +
       'optional strum lift (lowers the plucker onto the string for a stroke) and a damper ' +
-      '(mutes the string). Calibrate each here and test one string or pluck them all from ' +
-      'the test bench.'));
+      '(mutes the string). Le geste et les délais se règlent une seule fois ci-dessous ' +
+      '(communs à toutes les cordes) ; les onglets par corde ne portent que le câblage et ' +
+      'les angles.'));
 
+    body.appendChild(pluckGlobalCard());
     body.appendChild(armToolbar());
     body.appendChild(testBench('Plucking test bench', [
       { label: 'Pluck each open string', build: pluckStringsSteps },
@@ -1304,6 +1371,28 @@
             testPulseBtn('Up-stroke', striker, 'activeAltUs', 'Servo → up-stroke')])
         ]);
       }
+      // Plectrum-as-mute: the plectrum rests AGAINST the string at Note Off to damp
+      // it with no dedicated damper servo. Surfaced when the global mute source uses
+      // the plectrum, or in Advanced mode. The toggle parks muteUs between rest and
+      // strike (a light touch on the string); the slider fine-tunes the contact.
+      var muteBlock = null;
+      if (p.pluck.muteSource === 'plectrum' || GMB.isAdvanced()) {
+        var muteOn = (striker.muteUs | 0) > 0;
+        var muteToggle = h('input', { type: 'checkbox', checked: muteOn });
+        muteToggle.addEventListener('change', function () {
+          striker.muteUs = muteToggle.checked
+            ? Math.round((striker.restUs + striker.activeUs) / 2) : 0;
+          GMB.markDirty();
+          drawStep();
+        });
+        var muteInner = [GMB.field('Plectre-étouffoir', muteToggle,
+          'le plectre se pose sur la corde au Note Off pour l’étouffer (sans servo mute)')];
+        if (muteOn) {
+          muteInner.push(angleSlider(striker, 'muteUs', 'Mute angle', 'plectre posé sur la corde'));
+          muteInner.push(h('div.row', [testPulseBtn('Test mute', striker, 'muteUs', 'Servo → mute')]));
+        }
+        muteBlock = h('div.card.inset', [h('h3', 'Étouffoir (plectre)'), h('div.grid2', muteInner)]);
+      }
       var advRows = [];
       if (GMB.isAdvanced()) {
         advRows = servoSourceEditor(striker).concat([
@@ -1319,6 +1408,7 @@
           GMB.button('Remove', function () { removeServo(striker); drawStep(); }, 'ghost')]),
         h('div.grid2', sk),
         strumBlock,
+        muteBlock,
         advRows.length ? h('div.grid3', advRows) : null,
         h('div.row', [testServoBtn('Test rest', striker, false), testServoBtn('Test strike', striker, true),
           playNoteBtn(activeStr, 0, '▶ Pluck open')])
@@ -1335,8 +1425,12 @@
     var damp = perStringServo(activeStr, 'damper');
     var hasStriker = !!striker;
     var opt = [];
-    if (lift) opt.push(actuatorBlock('Strum lift', lift,
-      { rest: 'raised — plucker off the string', active: 'lowered — plucker engaged' }));
+    var liftHints = p.pluck.liftEngage === 'raiseToPlay'
+      ? { rest: 'baissé — plectre posé sur la corde (repos = étouffe)',
+          active: 'levé — plectre au plan de frappe (jeu)' }
+      : { rest: 'levé — plectre écarté de la corde (repos)',
+          active: 'baissé — plectre engagé pour la frappe' };
+    if (lift) opt.push(actuatorBlock('Strum lift', lift, liftHints));
     else opt.push(h('div.row', [
       h('span.muted', 'Strum lift — lowers the plucker onto the string for a stroke, then raises it.'),
       hasStriker

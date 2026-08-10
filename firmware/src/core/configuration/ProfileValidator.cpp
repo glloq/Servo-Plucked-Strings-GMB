@@ -179,6 +179,10 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 (s.minStrikeUs < s.pulseMinUs || s.minStrikeUs > s.pulseMaxUs))
                 err(tag + ".minStrikeUs",
                     "Minimum strike pulse is outside the servo's min/max range");
+            // Plectrum-as-mute rest position, when set, must sit in the pulse window.
+            if (s.muteUs != 0 && (s.muteUs < s.pulseMinUs || s.muteUs > s.pulseMaxUs))
+                err(tag + ".muteUs",
+                    "Mute pulse is outside the servo's min/max range");
 
             if (s.source == ServoSource::Pca) {
                 if (s.pcaBoard > kMaxPca - 1)
@@ -235,6 +239,26 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 err("servos.strumLift",
                     "String " + std::to_string(i) +
                         " has a strum-lift servo but no pluck/strum servo to lift");
+        // Plectrum-as-mute: if the global policy asks the plectrum to damp at Note
+        // Off, a striker with no mute angle (muteUs == 0) can't — it degrades to a
+        // damper or to no muting. Warn so a half-set instrument is visible, but do
+        // not block (partial setups must still activate).
+        if (p.pluck.muteSource == MuteSource::Plectrum) {
+            auto strikerMuteUs = [&](int strIdx) -> int {
+                for (const auto& s : p.servos)
+                    if (s.enabled && s.stringIndex == strIdx &&
+                        (s.function == "pluck" || s.function == "strum"))
+                        return s.muteUs;
+                return 0;
+            };
+            for (size_t i = 0; i < p.strings.size(); ++i)
+                if (p.strings[i].enabled && strikerMuteUs(static_cast<int>(i)) == 0)
+                    warn("pluck.muteSource",
+                         "String " + std::to_string(i) +
+                             " uses plectrum muting but its plucker has no mute angle "
+                             "(muteUs) — it will not damp");
+        }
+
         // A fretted string that declares reachable frets but has no finger servo
         // can still play its open string safely (the allocator/selector only route
         // frets that carry a servo), so this is a warning, not a blocking error —
@@ -341,6 +365,8 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     };
     enumOk(static_cast<int>(p.midi.velocityCurve), 4, "midi.velocityCurve");
     enumOk(static_cast<int>(p.midi.saturationStrategy), 5, "midi.saturationStrategy");
+    enumOk(static_cast<int>(p.pluck.muteSource), 4, "pluck.muteSource");
+    enumOk(static_cast<int>(p.pluck.liftEngage), 1, "pluck.liftEngage");
     enumOk(static_cast<int>(p.selector.mode), 2, "selector.mode");
     enumOk(static_cast<int>(p.selector.notePositionPolicy), 2, "selector.notePositionPolicy");
     enumOk(static_cast<int>(p.selector.fret.invalidValuePolicy), 3, "selector.fret.invalidValuePolicy");

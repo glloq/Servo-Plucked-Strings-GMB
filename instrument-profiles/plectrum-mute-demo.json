@@ -1,0 +1,154 @@
+{
+  "project": "Servo-Plucked-Strings-GMB",
+  "profileVersion": 1,
+  "capabilitiesRevision": 1,
+  "instrument": {
+    "name": "Plectrum-mute demo",
+    "description": "A compact 1-string plucked instrument on direct GPIO (no PCA) that demonstrates the global plucking config: the plectrum itself damps the string at Note Off (pluck.muteSource = plectrum, per-plucker muteUs) so no dedicated damper servo is needed, plus a fret->pluck settle delay.",
+    "stringCount": 1,
+    "type": "custom",
+    "gmProgram": 24,
+    "typeId": 4,
+    "capo": 0,
+    "transpose": 0
+  },
+  "board": {
+    "profile": "esp32-s3-devkitc-1",
+    "reserveUsb": true,
+    "automaticPinAssignment": true
+  },
+  "pins": [],
+  "network": {
+    "mode": "accessPoint",
+    "ssid": "",
+    "hostname": "gmb-plectrum-mute",
+    "apSsid": "Servo-Plucked-Strings-GMB",
+    "staticIp": false
+  },
+  "midi": {
+    "globalChannel": 0,
+    "omni": false,
+    "transpose": 0,
+    "chordWindowMs": 3,
+    "sustainPedal": true,
+    "sustainCc": 64,
+    "velocityCurve": "linear",
+    "saturationStrategy": "priorityLow",
+    "noteExecutionDelayMs": 0,
+    "strumLeadMs": 0
+  },
+  "stringFretSelection": {
+    "enabled": true,
+    "mode": "hybrid",
+    "perMidiChannel": true,
+    "selectionTimeoutMs": 100,
+    "prepareOnCompleteSelection": true,
+    "queueDepth": 32,
+    "validation": {
+      "notePositionPolicy": "ccPriorityWithWarning",
+      "missingSelectionPolicy": "automaticAllocation",
+      "expiredSelectionPolicy": "automaticAllocation"
+    },
+    "string": {
+      "ccNumber": 20,
+      "minimum": 1,
+      "maximum": 1,
+      "offset": 0,
+      "numbering": "oneBased",
+      "reverseOrder": false,
+      "mapping": []
+    },
+    "fret": {
+      "ccNumber": 21,
+      "minimum": 0,
+      "maximum": 3,
+      "offset": 0,
+      "invalidValuePolicy": "automaticFallback"
+    }
+  },
+  "power": {
+    "maxConcurrentMoves": 3,
+    "staggerMs": 8
+  },
+  "pluck": {
+    "strokeMs": 90,
+    "fretToPluckMs": 20,
+    "muteSource": "plectrum",
+    "muteHoldMs": 60,
+    "liftMuteOnNoteOff": false
+  },
+  "strings": [
+    {
+      "enabled": true,
+      "openNote": 60,
+      "maxFret": 3
+    }
+  ],
+  "servos": [
+    {
+      "enabled": true,
+      "function": "finger",
+      "stringIndex": 0,
+      "fret": 1,
+      "source": "gpio",
+      "gpio": 4,
+      "pulseMinUs": 500,
+      "pulseMaxUs": 2500,
+      "restUs": 1000,
+      "activeUs": 1800,
+      "inverted": false,
+      "travelMs": 120,
+      "settleMs": 30,
+      "disableAtRest": true
+    },
+    {
+      "enabled": true,
+      "function": "finger",
+      "stringIndex": 0,
+      "fret": 2,
+      "source": "gpio",
+      "gpio": 5,
+      "pulseMinUs": 500,
+      "pulseMaxUs": 2500,
+      "restUs": 1000,
+      "activeUs": 1800,
+      "inverted": false,
+      "travelMs": 120,
+      "settleMs": 30,
+      "disableAtRest": true
+    },
+    {
+      "enabled": true,
+      "function": "finger",
+      "stringIndex": 0,
+      "fret": 3,
+      "source": "gpio",
+      "gpio": 6,
+      "pulseMinUs": 500,
+      "pulseMaxUs": 2500,
+      "restUs": 1000,
+      "activeUs": 1800,
+      "inverted": false,
+      "travelMs": 120,
+      "settleMs": 30,
+      "disableAtRest": true
+    },
+    {
+      "enabled": true,
+      "function": "pluck",
+      "stringIndex": 0,
+      "fret": -1,
+      "source": "gpio",
+      "gpio": 7,
+      "pulseMinUs": 500,
+      "pulseMaxUs": 2500,
+      "restUs": 1000,
+      "activeUs": 1800,
+      "muteUs": 1300,
+      "inverted": false,
+      "travelMs": 90,
+      "settleMs": 20,
+      "disableAtRest": true
+    }
+  ]
+}

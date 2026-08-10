@@ -43,9 +43,13 @@ int main(int argc, char** argv) {
         "instrument-profiles/bass-4string.json",
         "instrument-profiles/mandolin-gdae.json",
         "instrument-profiles/banjo-5string.json",
+        "instrument-profiles/plectrum-mute-demo.json",
+        "instrument-profiles/lift-raise-demo.json",
     };
     std::string root = argc > 1 ? argv[1] : ".";
     int gearedFingersSeen = 0;  // geared (paired) fingers that survived a round trip
+    int plectrumMuteSeen = 0;   // strikers with a plectrum-mute angle that survived
+    int raiseToPlaySeen = 0;    // profiles with a raise-to-play lift that survived
     for (const char* rel : files) {
         std::string path = root + "/" + rel;
         std::printf("%s\n", rel);
@@ -75,6 +79,23 @@ int main(int argc, char** argv) {
         CHECK(p2.power.maxConcurrentMoves == p.power.maxConcurrentMoves &&
                   p2.power.staggerMs == p.power.staggerMs,
               "power config round-trips");
+        // Global plucking config: the gesture, the fret->pluck delay and the mute
+        // source (an enum string) must all survive a full round trip.
+        CHECK(p2.pluck.muteSource == p.pluck.muteSource, "pluck.muteSource round-trips");
+        CHECK(p2.pluck.liftEngage == p.pluck.liftEngage, "pluck.liftEngage round-trips");
+        if (p2.pluck.liftEngage == LiftEngage::RaiseToPlay) ++raiseToPlaySeen;
+        CHECK(p2.pluck.strokeMs == p.pluck.strokeMs &&
+                  p2.pluck.fretToPluckMs == p.pluck.fretToPluckMs &&
+                  p2.pluck.muteHoldMs == p.pluck.muteHoldMs,
+              "pluck timings round-trip");
+        // Per-plucker mute angle round-trips (index-aligned, since p2 comes from p).
+        CHECK(p2.servos.size() == p.servos.size(), "servo count round-trips");
+        for (size_t k = 0; k < p2.servos.size() && k < p.servos.size(); ++k) {
+            CHECK(p2.servos[k].muteUs == p.servos[k].muteUs, "servo muteUs round-trips");
+            if (p2.servos[k].enabled && p2.servos[k].muteUs != 0 &&
+                (p2.servos[k].function == "pluck" || p2.servos[k].function == "strum"))
+                ++plectrumMuteSeen;
+        }
         // Servo-per-fret: at least one finger servo carrying a real fret survives.
         int fingersWithFret = 0;
         for (const auto& sv : p2.servos) {
@@ -92,6 +113,10 @@ int main(int argc, char** argv) {
     }
     // The geared sample profile must actually exercise the paired-finger path.
     CHECK(gearedFingersSeen > 0, "geared (paired) fingers round-trip through the parser");
+    // The plectrum-mute demo must actually exercise the plectrum-as-mute path.
+    CHECK(plectrumMuteSeen > 0, "plectrum-mute angle round-trips through the parser");
+    // The raise-to-play demo must actually exercise the raiseToPlay enum string.
+    CHECK(raiseToPlaySeen > 0, "raise-to-play lift round-trips through the parser");
 
     // An unknown enum string must be REJECTED, not silently defaulted.
     {

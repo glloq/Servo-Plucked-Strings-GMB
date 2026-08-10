@@ -68,6 +68,12 @@ An optional per-string **`damper`** servo can mute the string, and one or more
 global **`aux`** servos cover any other auxiliary actuator. Velocity scales the
 strike depth between `restUs` and `activeUs`.
 
+**Muting with the plectrum (no damper).** A pluck/strum servo can carry a `muteUs`
+pulse — the position where its plectrum comes to rest **against** the string. At
+Note Off the plectrum returns to `muteUs` to damp the note, so a string is muted
+with **no dedicated damper servo**. Who mutes is a global choice (`pluck.muteSource`:
+`auto` / `plectrum` / `damper` / `lift` / `none`); see §6.
+
 ## 4. Servo signal source: PCA9685 or direct GPIO
 
 Every servo picks its own source, so an instrument can be built **with or without
@@ -119,11 +125,35 @@ computes millimetres or moves to a position.
 | Direct pin | `gpio` | source = gpio |
 | Pulse window | `pulseMinUs`, `pulseMaxUs` | all |
 | Lifted / pressed pulse | `restUs`, `activeUs`, `activeBUs` (geared side B) | all |
+| Plectrum-as-mute pulse | `muteUs` (rest against the string; 0 = none) | pluck/strum |
 | Direction sense | `inverted` | all |
 | Motion / settle timing | `travelMs`, `settleMs` | all |
 | Cut PWM when idle | `disableAtRest` | all |
 | Stroke shaping | `alternateDirection`, `activeAltUs`, `strokeMs`, `minStrikeUs` | pluck/strum |
 | Strum-lift pause | `engageDelayMs` | strumLift |
+
+**Global plucking (`profile.pluck`, `PluckConfig`) — common to every string** so the
+gesture and its timing are set once, not servo by servo. All fields default to the
+historical behaviour (an absent block changes nothing):
+
+| Quantity | Field | Notes |
+| -------- | ----- | ----- |
+| Common stroke time | `strokeMs` | 0 = each servo keeps its own |
+| Fret → pluck delay | `fretToPluckMs` | settle between the fret being ready and the strike |
+| Note-Off mute source | `muteSource` | `auto` / `plectrum` / `damper` / `lift` / `none` |
+| Mute hold | `muteHoldMs` | how long the mute is engaged before releasing |
+| Lift doubles as damper | `liftMuteOnNoteOff` | press the strum lift onto the string at Note Off |
+| Lift engagement direction | `liftEngage` | `lowerToPlay` (rest = clear) / `raiseToPlay` (rest = on the string) |
+
+**Lift direction (`liftEngage`).** `lowerToPlay` (default) is the historical lift:
+it rests clear of the string and lowers onto it for the stroke. `raiseToPlay` is the
+opposite mechanism — the lift rests with the plectrum **on** the string (an idle
+string is muted), a Note On **raises** it to play, it **stays up** for the whole note,
+and it **falls back** onto the string at Note Off to mute. In `raiseToPlay` the lift
+itself is the damper, so a lifted string needs no `muteUs` / `damper`.
+
+The fixed Note-On→sound latency (`midi.noteExecutionDelayMs`) and the strum-lift
+anticipation (`midi.strumLeadMs`) stay in `MidiConfig`.
 
 A failing servo axis is faulted at runtime without disturbing the others
 (§13.2): the note allocator simply stops routing to it.

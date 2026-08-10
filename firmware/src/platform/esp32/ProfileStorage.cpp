@@ -67,6 +67,51 @@ const char* signalKindName(SignalKind k) {
     }
 }
 
+// Note-Off mute source, as the string name the web UI and profiles use. Absent is
+// allowed and maps to Auto (historical behaviour); an unknown string rejects the
+// profile like every other enum (audit P0-1 / P0-7).
+const char* muteSourceName(MuteSource m) {
+    switch (m) {
+        case MuteSource::Plectrum: return "plectrum";
+        case MuteSource::Damper: return "damper";
+        case MuteSource::Lift: return "lift";
+        case MuteSource::None: return "none";
+        default: return "auto";
+    }
+}
+MuteSource muteSourceFrom(JsonVariantConst v, bool* ok) {
+    if (v.isNull()) return MuteSource::Auto;  // absent -> historical default
+    if (v.is<const char*>()) {
+        std::string s = v.as<const char*>();
+        if (s == "auto") return MuteSource::Auto;
+        if (s == "plectrum") return MuteSource::Plectrum;
+        if (s == "damper") return MuteSource::Damper;
+        if (s == "lift") return MuteSource::Lift;
+        if (s == "none") return MuteSource::None;
+        *ok = false; return MuteSource::Auto;
+    }
+    if (v.is<int>()) { int i = v.as<int>(); if (i < 0 || i > 4) *ok = false;
+                       return static_cast<MuteSource>(i < 0 ? 0 : i > 4 ? 0 : i); }
+    return MuteSource::Auto;
+}
+
+// Strum-lift engagement direction. Absent -> LowerToPlay (historical behaviour).
+const char* liftEngageName(LiftEngage e) {
+    return e == LiftEngage::RaiseToPlay ? "raiseToPlay" : "lowerToPlay";
+}
+LiftEngage liftEngageFrom(JsonVariantConst v, bool* ok) {
+    if (v.isNull()) return LiftEngage::LowerToPlay;
+    if (v.is<const char*>()) {
+        std::string s = v.as<const char*>();
+        if (s == "lowerToPlay") return LiftEngage::LowerToPlay;
+        if (s == "raiseToPlay") return LiftEngage::RaiseToPlay;
+        *ok = false; return LiftEngage::LowerToPlay;
+    }
+    if (v.is<int>()) { int i = v.as<int>(); if (i < 0 || i > 1) *ok = false;
+                       return static_cast<LiftEngage>(i < 0 ? 0 : i > 1 ? 1 : i); }
+    return LiftEngage::LowerToPlay;
+}
+
 const char* saturationName(SaturationStrategy s) {
     switch (s) {
         case SaturationStrategy::IgnoreExtra: return "ignoreExtra";
@@ -238,6 +283,15 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     pw["maxConcurrentMoves"] = p.power.maxConcurrentMoves;
     pw["staggerMs"] = p.power.staggerMs;
 
+    // Global plucking gesture + Note-Off mute behaviour, common to all strings.
+    JsonObject pl = doc["pluck"].to<JsonObject>();
+    pl["strokeMs"] = p.pluck.strokeMs;
+    pl["fretToPluckMs"] = p.pluck.fretToPluckMs;
+    pl["muteSource"] = muteSourceName(p.pluck.muteSource);
+    pl["muteHoldMs"] = p.pluck.muteHoldMs;
+    pl["liftMuteOnNoteOff"] = p.pluck.liftMuteOnNoteOff;
+    pl["liftEngage"] = liftEngageName(p.pluck.liftEngage);
+
     JsonArray strings = doc["strings"].to<JsonArray>();
     for (size_t i = 0; i < p.strings.size(); ++i) {
         const StringConfig& a = p.strings[i];
@@ -264,6 +318,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
         o["restUs"] = s.restUs;
         o["activeUs"] = s.activeUs;
         o["activeBUs"] = s.activeBUs;  // geared finger's side-B press pulse
+        o["muteUs"] = s.muteUs;        // plectrum-as-mute rest-against-string pulse (0 = none)
         o["inverted"] = s.inverted;
         o["travelMs"] = s.travelMs;
         o["settleMs"] = s.settleMs;
@@ -372,6 +427,15 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.power.maxConcurrentMoves = pw["maxConcurrentMoves"] | 3;
     out.power.staggerMs = pw["staggerMs"] | 8;
 
+    // Global plucking config. Absent -> all defaults -> historical behaviour.
+    JsonObjectConst pl = doc["pluck"];
+    out.pluck.strokeMs = pl["strokeMs"] | 0;
+    out.pluck.fretToPluckMs = pl["fretToPluckMs"] | 0;
+    out.pluck.muteSource = muteSourceFrom(pl["muteSource"], &enumsOk);
+    out.pluck.muteHoldMs = pl["muteHoldMs"] | 60;
+    out.pluck.liftMuteOnNoteOff = pl["liftMuteOnNoteOff"] | false;
+    out.pluck.liftEngage = liftEngageFrom(pl["liftEngage"], &enumsOk);
+
     out.strings.clear();
     for (JsonObjectConst o : doc["strings"].as<JsonArrayConst>()) {
         StringConfig a;
@@ -399,6 +463,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
         s.restUs = o["restUs"] | 1000;
         s.activeUs = o["activeUs"] | 1800;
         s.activeBUs = o["activeBUs"] | 0;  // geared finger's side-B press pulse
+        s.muteUs = o["muteUs"] | 0;        // plectrum-as-mute pulse (0 = no mute position)
         s.inverted = o["inverted"] | false;
         s.travelMs = o["travelMs"] | 120;
         s.settleMs = o["settleMs"] | 30;

@@ -193,6 +193,15 @@ bool ServoBank::holdMicros(int index, uint16_t us) {
     return ok;
 }
 
+bool ServoBank::muteHold(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return false;
+    uint16_t m = servos_[index].muteUs;
+    if (m == 0) return false;  // no mute position calibrated for this plectrum
+    bool ok = writeMicros(index, m);  // clamped to the pulse window
+    rt_[index].mode = Mode::Active;   // hold against the string; caller releases later
+    return ok;
+}
+
 void ServoBank::release(int index) {
     if (index < 0 || index >= (int)servos_.size()) return;
     toRest(index);

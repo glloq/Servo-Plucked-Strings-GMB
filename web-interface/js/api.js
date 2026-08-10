@@ -184,6 +184,7 @@
       restUs: opts.restUs || 1000,
       activeUs: opts.activeUs || 1800,
       activeBUs: opts.activeBUs || 0,   // geared finger: side-B press pulse (fretB)
+      muteUs: opts.muteUs || 0,         // pluck/strum: plectrum-as-mute pulse (0 = none)
       inverted: !!opts.inverted,
       travelMs: opts.travelMs || 120,
       settleMs: opts.settleMs || 30,
@@ -322,6 +323,10 @@
         apSsid: 'Servo-Plucked-Strings-GMB', staticIp: false
       },
       power: { maxConcurrentMoves: 3, staggerMs: 8 },
+      pluck: {
+        strokeMs: 0, fretToPluckMs: 0, muteSource: 'auto', muteHoldMs: 60,
+        liftMuteOnNoteOff: false, liftEngage: 'lowerToPlay'
+      },
       midi: {
         globalChannel: 0, omni: false, transpose: 0, chordWindowMs: 3,
         velocityCurve: 'linear', sustainPedal: true, sustainCc: 64,
