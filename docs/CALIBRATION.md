@@ -127,6 +127,9 @@ une seule fois (étape *Grattage* de l'assistant), au lieu de refaire chaque ple
 
 - `strokeMs` : durée du geste, commune à toutes les cordes (`0` = chaque servo garde
   son propre `strokeMs`).
+- `minStrikePct` : profondeur d'attaque **minimale** garantie, en **%** de la course
+  repos→attaque — une note douce accroche quand même. Indépendante du servo (contrairement
+  au `minStrikeUs` par servo) ; `0` = chaque servo garde son `minStrikeUs`.
 - `fretToPluckMs` : **délai entre la mise en place de la frette et le grattage** — laisse
   la corde frettée se stabiliser avant la frappe.
 - `muteSource` : qui étouffe au Note Off — `auto` (un `damper` si présent, sinon rien :

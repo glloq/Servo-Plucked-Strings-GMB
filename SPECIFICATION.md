@@ -605,6 +605,8 @@ The plucking gesture and the Note-Off mute behaviour are configured **once for t
 
 ```text
 strokeMs           common stroke-engage time (0 = each servo keeps its own)
+minStrikePct       common minimum strike depth, as % of rest->active
+                   (0 = each servo keeps its own minStrikeUs)
 fretToPluckMs      delay between the fret being ready and the strike
                    (the "delay between fret action and plucking")
 muteSource         who damps at Note Off:

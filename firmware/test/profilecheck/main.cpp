@@ -85,6 +85,7 @@ int main(int argc, char** argv) {
         CHECK(p2.pluck.liftEngage == p.pluck.liftEngage, "pluck.liftEngage round-trips");
         if (p2.pluck.liftEngage == LiftEngage::RaiseToPlay) ++raiseToPlaySeen;
         CHECK(p2.pluck.strokeMs == p.pluck.strokeMs &&
+                  p2.pluck.minStrikePct == p.pluck.minStrikePct &&
                   p2.pluck.fretToPluckMs == p.pluck.fretToPluckMs &&
                   p2.pluck.muteHoldMs == p.pluck.muteHoldMs,
               "pluck timings round-trip");

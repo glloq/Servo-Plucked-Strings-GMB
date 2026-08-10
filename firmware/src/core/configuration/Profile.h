@@ -179,6 +179,10 @@ enum class LiftEngage : uint8_t { LowerToPlay = 0, RaiseToPlay = 1 };
 // field defaults to the historical behaviour, so a profile with no `pluck` block
 // plays exactly as before:
 //   strokeMs       : global stroke engage time; 0 = each servo keeps its own strokeMs.
+//   minStrikePct   : global minimum strike depth as a PERCENTAGE of each striker's
+//                    rest->active span, so a soft (low-velocity) note still catches
+//                    the string. Servo-independent (unlike the per-servo minStrikeUs);
+//                    0 = each servo keeps its own minStrikeUs.
 //   fretToPluckMs  : extra settle inserted BETWEEN the fret being ready and the
 //                    strike, on top of the finger's settleMs — the "delay between
 //                    fret action and plucking". 0 = none.
@@ -191,6 +195,7 @@ enum class LiftEngage : uint8_t { LowerToPlay = 0, RaiseToPlay = 1 };
 // the mute behaviour that had no home.
 struct PluckConfig {
     uint16_t strokeMs = 0;
+    uint8_t minStrikePct = 0;
     uint16_t fretToPluckMs = 0;
     MuteSource muteSource = MuteSource::Auto;
     uint16_t muteHoldMs = 60;

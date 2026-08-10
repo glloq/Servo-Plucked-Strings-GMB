@@ -76,6 +76,30 @@ TEST(striker_can_plectrum_mute_flag) {
     CHECK(strikerCanPlectrumMute(s));
 }
 
+// A zero global min-strike inherits the servo's own; a percentage maps to a pulse
+// between rest and active, servo-independent.
+TEST(global_min_strike_pct_maps_between_rest_and_active) {
+    PluckConfig pk;
+    ServoConfig s; s.restUs = 1000; s.activeUs = 1800; s.minStrikeUs = 1234;
+    CHECK_EQ((int)effectivePluckMinStrikeUs(pk, s), 1234);  // 0% -> per-servo
+    pk.minStrikePct = 50;
+    CHECK_EQ((int)effectivePluckMinStrikeUs(pk, s), 1400);  // rest + 50% of 800
+    pk.minStrikePct = 25;
+    CHECK_EQ((int)effectivePluckMinStrikeUs(pk, s), 1200);  // rest + 25% of 800
+    // Reversed stroke (active below rest) still lands between the two.
+    ServoConfig r; r.restUs = 1800; r.activeUs = 1000; pk.minStrikePct = 25;
+    CHECK_EQ((int)effectivePluckMinStrikeUs(pk, r), 1600);  // 1800 - 25% of 800
+}
+
+// A minStrikePct above 100 is a hard error.
+TEST(min_strike_pct_over_100_rejected) {
+    Profile p = uke();
+    p.pluck.minStrikePct = 150;
+    CHECK(!ProfileValidator::isActivatable(p));
+    p.pluck.minStrikePct = 100;
+    CHECK(ProfileValidator::isActivatable(p));
+}
+
 // ---- PluckPlan: lift engagement direction --------------------------------
 
 TEST(lift_default_is_lower_to_play) {

@@ -286,6 +286,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     // Global plucking gesture + Note-Off mute behaviour, common to all strings.
     JsonObject pl = doc["pluck"].to<JsonObject>();
     pl["strokeMs"] = p.pluck.strokeMs;
+    pl["minStrikePct"] = p.pluck.minStrikePct;
     pl["fretToPluckMs"] = p.pluck.fretToPluckMs;
     pl["muteSource"] = muteSourceName(p.pluck.muteSource);
     pl["muteHoldMs"] = p.pluck.muteHoldMs;
@@ -430,6 +431,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     // Global plucking config. Absent -> all defaults -> historical behaviour.
     JsonObjectConst pl = doc["pluck"];
     out.pluck.strokeMs = pl["strokeMs"] | 0;
+    out.pluck.minStrikePct = pl["minStrikePct"] | 0;
     out.pluck.fretToPluckMs = pl["fretToPluckMs"] | 0;
     out.pluck.muteSource = muteSourceFrom(pl["muteSource"], &enumsOk);
     out.pluck.muteHoldMs = pl["muteHoldMs"] | 60;

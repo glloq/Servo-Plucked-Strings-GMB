@@ -192,13 +192,16 @@ void applyProfile() {
     g_stringFaulted.assign(g_profile.strings.size(), false);
 
     // Overlay the global plucking gesture onto the strikers so the bank drives one
-    // common stroke time for every string. A zero global leaves each servo untouched
-    // (historical behaviour); the profile itself keeps the per-servo values intact.
+    // common gesture for every string (stroke time + minimum strike depth). A zero
+    // global leaves each servo untouched (historical behaviour); the profile itself
+    // keeps the per-servo values intact.
     std::vector<ServoConfig> servos = g_profile.servos;
-    if (g_profile.pluck.strokeMs != 0)
-        for (auto& s : servos)
-            if (s.function == "pluck" || s.function == "strum")
-                s.strokeMs = g_profile.pluck.strokeMs;
+    for (auto& s : servos)
+        if (s.function == "pluck" || s.function == "strum") {
+            if (g_profile.pluck.strokeMs != 0) s.strokeMs = g_profile.pluck.strokeMs;
+            if (g_profile.pluck.minStrikePct != 0)
+                s.minStrikeUs = effectivePluckMinStrikeUs(g_profile.pluck, s);
+        }
     g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"));
     g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
 

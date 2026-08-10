@@ -259,6 +259,21 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                              "(muteUs) — it will not damp");
         }
 
+        // Raise-to-play lift: a string with a plucker but no strum lift has nothing
+        // to raise/lower — it silently falls back to the mute source. Warn (partial
+        // setups must still activate).
+        if (p.pluck.liftEngage == LiftEngage::RaiseToPlay) {
+            for (size_t i = 0; i < p.strings.size(); ++i)
+                if (p.strings[i].enabled &&
+                    (hasServoRole("pluck", static_cast<int>(i)) ||
+                     hasServoRole("strum", static_cast<int>(i))) &&
+                    !hasServoRole("strumLift", static_cast<int>(i)))
+                    warn("pluck.liftEngage",
+                         "String " + std::to_string(i) +
+                             " uses raise-to-play but has no strum lift — it will mute "
+                             "via the fallback mute source instead");
+        }
+
         // A fretted string that declares reachable frets but has no finger servo
         // can still play its open string safely (the allocator/selector only route
         // frets that carry a servo), so this is a warning, not a blocking error —
@@ -367,6 +382,8 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
     enumOk(static_cast<int>(p.midi.saturationStrategy), 5, "midi.saturationStrategy");
     enumOk(static_cast<int>(p.pluck.muteSource), 4, "pluck.muteSource");
     enumOk(static_cast<int>(p.pluck.liftEngage), 1, "pluck.liftEngage");
+    if (p.pluck.minStrikePct > 100)
+        err("pluck.minStrikePct", "Minimum strike depth must be 0..100 %");
     enumOk(static_cast<int>(p.selector.mode), 2, "selector.mode");
     enumOk(static_cast<int>(p.selector.notePositionPolicy), 2, "selector.notePositionPolicy");
     enumOk(static_cast<int>(p.selector.fret.invalidValuePolicy), 3, "selector.fret.invalidValuePolicy");
