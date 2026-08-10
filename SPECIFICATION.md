@@ -1008,7 +1008,6 @@ Servo-Plucked-Strings-GMB/
 ├── instrument-profiles/
 ├── mechanics/
 ├── docs/
-│   ├── SPEC_INDEX.md
 │   ├── ARCHITECTURE.md
 │   ├── PIN_CONFIGURATION.md
 │   ├── WEB_INTERFACE.md

@@ -147,7 +147,7 @@ pio run -t upload           # flash the firmware
 ```
 
 (Arduino IDE: open `firmware/firmware.ino`; the `src/` folder is compiled
-recursively. See [`docs/ARDUINO_IDE.md`](docs/ARDUINO_IDE.md).)
+recursively. See [`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)
 
 ### 3. First configuration
 
@@ -208,7 +208,7 @@ Servo-Plucked-Strings-GMB/
 | [docs/SAFETY.md](docs/SAFETY.md) | E-stop, /OE, current management — French |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Code organization — English |
 | [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md) | Interface pages — English |
-| [docs/ARDUINO_IDE.md](docs/ARDUINO_IDE.md) | Building the ESP32 firmware from the Arduino IDE — English |
+| [docs/ARDUINO_IDE_BUILD.md](docs/ARDUINO_IDE_BUILD.md) | Building the ESP32 firmware from the Arduino IDE — English |
 
 ## 🎛️ The GMB family
 
