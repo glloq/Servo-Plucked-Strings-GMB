@@ -170,12 +170,12 @@
     // Missing bus signals — only for a bus that actually carries a board.
     var useBus0 = m.boards.some(function (b) { return b.bus === 0; });
     if (useBus0) {
-      if (m.sda < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SDA is unassigned but a PCA9685 is on the primary bus — assign it on the GPIO Pins tab.' });
-      if (m.scl < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SCL is unassigned but a PCA9685 is on the primary bus — assign it on the GPIO Pins tab.' });
+      if (m.sda < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SDA is unassigned but a PCA9685 is on the primary bus — assign it in the GPIO sub-tab.' });
+      if (m.scl < 0) out.push({ sev: 'error', msg: 'I²C bus 0 SCL is unassigned but a PCA9685 is on the primary bus — assign it in the GPIO sub-tab.' });
     }
     if (m.useBus1) {
-      if (m.sda2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SDA (SDA2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
-      if (m.scl2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SCL (SCL2) is unassigned but a board is on bus 1 — assign it on the GPIO Pins tab.' });
+      if (m.sda2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SDA (SDA2) is unassigned but a board is on bus 1 — assign it in the GPIO sub-tab.' });
+      if (m.scl2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SCL (SCL2) is unassigned but a board is on bus 1 — assign it in the GPIO sub-tab.' });
     }
     // The shared /OE covers a board unless it is a bus-1 board with a split /OE2.
     var needSharedOe = useBus0 || (m.useBus1 && !m.splitOe);
@@ -591,13 +591,13 @@
         'power + /OE buses, and any direct-GPIO servos. Boards can be split across the ESP32-S3’s two ' +
         'I²C buses (SDA/SCL and SDA2/SCL2). Each occupied channel is labelled with its string and fret, so a ' +
         'PCA9685 shared across several strings stays unambiguous. It updates with each change made in the ' +
-        'Setup Wizard and GPIO Pins tabs.')
+        'instrument configuration (Réglages) and the GPIO sub-tab.')
     ]));
 
     if (!servos.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No servos configured yet.'),
-        h('p.muted', 'Define the instrument in the Setup Wizard first — the wiring map is built from its servos.'),
-        h('div.row', [GMB.button('Open Setup Wizard', function () { GMB.navigate('wizard'); }, 'primary')])]));
+        h('p.muted', 'Configure the instrument first (Réglages → Configuration) — the wiring map is built from its servos.'),
+        h('div.row', [GMB.button('Ouvrir la configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
       return;
     }
 

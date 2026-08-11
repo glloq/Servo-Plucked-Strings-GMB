@@ -9,23 +9,56 @@
  *   • PLUCK  (grattage) — the plectrum / strum servo that sounds the string, plus
  *                        the optional strum-lift and damper. Step "Plucking".
  *
- * Steps: Builder -> Frets -> Plucking -> MIDI -> Power -> Test -> Validation
- * (the Builder merges the old Instrument + Strings steps). Every actuator step
- * carries an Arm control and a "test bench" that
- * drives ONE servo or a whole GROUP (sweep every fret of a string, pluck every
- * string, test everything…) through the shared GMB.testRunner sequencer, with a
- * live status line and a Stop button. The Simplified / Advanced toggle hides the
- * wiring (source, board, channel) and fine timing in simplified mode.
+ * The step functions are shared by two FLOWS (UI redesign):
+ *   • CONFIG flow (hosted in the Settings modal — GMB.renderConfigWizard):
+ *       Instrument (Builder) -> MIDI -> Power -> Validation. The instrument
+ *       definition — nothing that moves a servo.
+ *   • CALIBRATION flow (a main page — GMB.views.calibration):
+ *       Frets -> Plucking -> Test. The physical servo tuning + test bench.
+ * Each flow keeps its own current step and mount element, so the Calibration page
+ * and the (modal) config wizard can be open at the same time without clashing.
+ *
+ * Every actuator step carries an Arm control and a "test bench" that drives ONE
+ * servo or a whole GROUP (sweep every fret of a string, pluck every string, test
+ * everything…) through the shared GMB.testRunner sequencer, with a live status
+ * line and a Stop button. The Simplified / Advanced toggle hides the wiring
+ * (source, board, channel) and fine timing in simplified mode.
  */
 (function (global) {
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
-  var STEPS = ['Builder', 'Frets', 'Plucking', 'MIDI', 'Power', 'Test', 'Validation'];
-  var step = 0;
+  // Two flows over the same step functions (UI redesign). The CONFIG flow lives in
+  // the Settings modal (instrument definition); the CALIBRATION flow is a main page
+  // (servo tuning + test). Each keeps its own current-step index and host element,
+  // so both can be mounted at once (the page under the open modal) without clashing.
+  var STEP_DEFS = {
+    builder:    { label: 'Instrument',   fn: stepBuilder },
+    midi:       { label: 'MIDI',         fn: stepMidiSettings },
+    power:      { label: 'Alimentation', fn: stepPower },
+    validation: { label: 'Validation',   fn: stepValidation },
+    frets:      { label: 'Frettes',      fn: stepFrets },
+    plucking:   { label: 'Grattage',     fn: stepPluck },
+    test:       { label: 'Test',         fn: stepTest }
+  };
+  var FLOWS = {
+    config: ['builder', 'midi', 'power', 'validation'],
+    calibration: ['frets', 'plucking', 'test']
+  };
+  var flowStep = { config: 0, calibration: 0 };        // current step index per flow
+  var flowHost = { config: null, calibration: null };  // mount element per flow
+  var currentFlow = 'calibration';                     // which flow a bare drawStep() targets
+
   var activeStr = 0;        // per-string steps show one string at a time
   var expandedFrets = {};   // Frets step: which fret rows show their calibration editor
   var calibratedFrets = {}; // Frets step: frets marked calibrated this session
+
+  // Full MIDI settings (params + string/fret selection) as a config-wizard step;
+  // the live monitor + integrated tester stay in the Settings > Advanced tab.
+  function stepMidiSettings(body) {
+    if (GMB.midiSettings && GMB.midiSettings.settings) GMB.midiSettings.settings(body);
+    else body.appendChild(h('div.note-box', 'MIDI settings module not loaded.'));
+  }
 
   // Instrument Builder: a transient mechanical spec. The profile stores no
   // mechanical-choice field, so this is DERIVED from the servo list when the
@@ -406,37 +439,56 @@
 
   // ---- render / nav ---------------------------------------------------------
 
-  function render(host) {
+  function bodyId(flowKey) { return flowKey + '-wizard-body'; }
+
+  // Render a flow's stepper + body + nav into `host`. Same UI for both flows; only
+  // the step list, the current index and the mount element differ.
+  function renderFlow(host, flowKey) {
+    if (!host) return;
     GMB.testRunner.stop();   // never leave a sequence running across a full re-render
+    flowHost[flowKey] = host;
+    currentFlow = flowKey;
+    var steps = FLOWS[flowKey];
+    if (flowStep[flowKey] >= steps.length) flowStep[flowKey] = 0;
+    var step = flowStep[flowKey];
+    host.innerHTML = '';
     host.appendChild(h('div.card.wizard-card', [
-      h('div.stepper', STEPS.map(function (label, i) {
+      h('div.stepper', steps.map(function (id, i) {
+        var d = STEP_DEFS[id];
         return h('button.step' + (i === step ? '.active' : '') + (i < step ? '.done' : ''),
-          { onclick: function () { goto(i); } },
-          [h('span.step-num', String(i + 1)), h('span.step-label', label)]);
+          { onclick: function () { goto(flowKey, i); } },
+          [h('span.step-num', String(i + 1)), h('span.step-label', d.label)]);
       })),
-      h('div#wizard-body.wizard-body'),
+      h('div.wizard-body', { id: bodyId(flowKey) }),
       h('div.wizard-nav', [
-        GMB.button('Back', function () { goto(step - 1); }, 'ghost'),
+        GMB.button('Précédent', function () { goto(flowKey, step - 1); }, 'ghost'),
         h('span.spacer'),
-        h('span.muted', 'Step ' + (step + 1) + ' of ' + STEPS.length),
+        h('span.muted', 'Étape ' + (step + 1) + ' / ' + steps.length),
         h('span.spacer'),
-        step < STEPS.length - 1
-          ? GMB.button('Next', function () { goto(step + 1); }, 'primary')
-          : GMB.button('Finish & save', function () { GMB.saveProfile(); }, 'primary')
+        step < steps.length - 1
+          ? GMB.button('Suivant', function () { goto(flowKey, step + 1); }, 'primary')
+          : GMB.button('Enregistrer & publier', function () { GMB.saveProfile(); }, 'primary')
       ])
     ]));
-    drawStep();
+    drawStep(flowKey);
   }
 
-  function goto(i) { if (i >= 0 && i < STEPS.length) { step = i; GMB.render(); } }
+  function goto(flowKey, i) {
+    var steps = FLOWS[flowKey];
+    if (i >= 0 && i < steps.length) { flowStep[flowKey] = i; renderFlow(flowHost[flowKey], flowKey); }
+  }
 
-  function drawStep() {
+  // Redraw just the current step's body. Bare calls (from field onChange handlers)
+  // target the flow last rendered / interacted, i.e. the one on screen.
+  function drawStep(flowKey) {
+    flowKey = flowKey || currentFlow;
     GMB.testRunner.stop();   // any config edit / step change cancels a running test
-    var body = document.getElementById('wizard-body');
+    var body = document.getElementById(bodyId(flowKey));
     if (!body) return;
+    currentFlow = flowKey;
     body.innerHTML = '';
-    ([stepBuilder, stepFrets, stepPluck, stepMidi, stepPower,
-      stepTest, stepValidation][step])(body);
+    var id = FLOWS[flowKey][flowStep[flowKey]];
+    STEP_DEFS[id].fn(body);
   }
 
   // ---- Step 1: Instrument Builder -------------------------------------------
@@ -761,7 +813,7 @@
       kids.push(h('div.row', [
         GMB.button('Auto-split evenly', function () { autoSplitBuses(); drawStep(); }, 'ghost'),
         h('span.muted', 'Bus 0: ' + n0 + ' · Bus 1: ' + (boards.length - n0) + ' board(s). ' +
-          'Assign the SDA2 / SCL2 pins on the GPIO Pins tab (default GPIO' +
+          'Assign the SDA2 / SCL2 pins in the GPIO sub-tab (Câblage & GPIO) (default GPIO' +
           (R.SDA2 != null ? R.SDA2 : 38) + ' / GPIO' + (R.SCL2 != null ? R.SCL2 : 39) + ').')
       ]));
       var oeToggle = h('input', { type: 'checkbox', checked: hasOe2() });
@@ -934,12 +986,12 @@
         GMB.button('Generate wiring', function () {
           if (applyBuilder()) { GMB.toast('Wiring generated.', 'ok'); drawStep(); }
         }, 'primary'),
-        GMB.button('Next: calibrate frets →', function () { goto(1); }, 'ghost')
+        GMB.button('Aller à la calibration →', function () { if (GMB.openCalibration) GMB.openCalibration(); }, 'ghost')
       ])
     ]));
   }
 
-  // ---- direct-GPIO pin picker (same rules as the GPIO Pins tab) -------------
+  // ---- direct-GPIO pin picker (same rules as the GPIO sub-tab) --------------
 
   // Board capability model. The ESP32-S3-DevKitC-1 is the only supported board and
   // GMB.mockBoard() is a faithful mirror of the firmware BoardProfile, so it is used
@@ -1605,28 +1657,7 @@
     if (GMB.isAdvanced() || auxServos().length) body.appendChild(auxCard());
   }
 
-  // ---- Step 4: MIDI (compact; full CC editor is the MIDI tab) ---------------
-
-  function stepMidi(body) {
-    var p = GMB.state.profile;
-    body.appendChild(h('div.grid2', [
-      GMB.field('Global MIDI channel', GMB.input(p.midi, 'globalChannel', { type: 'number', min: 0, max: 15 })),
-      GMB.field('Omni (all channels)', GMB.input(p.midi, 'omni', { type: 'checkbox' })),
-      GMB.field('Sustain pedal', GMB.input(p.midi, 'sustainPedal', { type: 'checkbox' })),
-      GMB.field('Velocity curve', GMB.input(p.midi, 'velocityCurve',
-        { type: 'select', options: ['linear', 'soft', 'hard', 'exponential'] }))
-    ]));
-    body.appendChild(h('div.card', [
-      h('h3', 'String / fret selection (CC)'),
-      h('p.muted', 'CC20 selects the string and CC21 the fret before a Note On (General-MIDI-Boop ' +
-        'tablature). Configure the full selection behaviour on the MIDI tab.'),
-      h('div.row', [
-        GMB.button('Open MIDI tab', function () { location.hash = '#midi'; }, 'ghost')
-      ])
-    ]));
-  }
-
-  // ---- Step 5: Power / current management -----------------------------------
+  // ---- Step: Power / current management -------------------------------------
 
   function stepPower(body) {
     var p = GMB.state.profile;
@@ -1765,5 +1796,21 @@
     return out;
   };
 
-  GMB.views.wizard = { render: render };
+  // Calibration is a main page; the config-instrument wizard is hosted inside the
+  // Settings modal (GMB.renderConfigWizard). Both drive the same step functions,
+  // each with its own current step and mount element.
+  GMB.views.calibration = {
+    render: function (host) { renderFlow(host, 'calibration'); },
+    teardown: function () { flowHost.calibration = null; }
+  };
+  GMB.renderConfigWizard = function (host) { renderFlow(host, 'config'); };
+  GMB.configWizard = {
+    render: function (host) { renderFlow(host, 'config'); },
+    teardown: function () { flowHost.config = null; }
+  };
+  // Jump from the config wizard (in the modal) to the Calibration page.
+  GMB.openCalibration = function () {
+    if (GMB.closeSettings) GMB.closeSettings();
+    GMB.navigate('calibration');
+  };
 })(window);

@@ -61,6 +61,29 @@ python3 -m http.server -d web-interface 8080
 # then browse http://localhost:8080/
 ```
 
+## Navigation (three pages + a Settings modal)
+
+The UI is deliberately minimal: a player only needs **three main pages** in the
+sidebar, and every other setting is grouped in the **Settings modal** (the gear
+button, top-right).
+
+- **Instrument** (`fretboard.js`) — the default landing page: a prominent
+  **emergency stop** (STOP + reset/re-arm) and the **playable fretboard**.
+- **Calibration** (`wizard.js`, calibration flow) — the physical servo tuning
+  and test bench: **Frettes → Grattage → Test**.
+- **Câblage & GPIO** (`hardware.js`) — the hardware page, with two sub-tabs:
+  the **wiring diagram** (`wiring.js`) and the **GPIO pin grid** (`pins.js`).
+
+The **Settings modal** (`settings.js`) has four tabs:
+
+- **Configuration** — the instrument-configuration wizard with **every page**
+  reachable: **Instrument → MIDI → Alimentation → Validation** (`wizard.js`
+  config flow; the MIDI page is the full string/fret selection + params).
+- **Réseau** — network mode, SSIDs, hostname, Wi-Fi credentials, hotspot switch.
+- **Profils** — saved device profile slots (`profiles.js`).
+- **Avancé** — GMB identity & capabilities + SysEx tester (`sysex.js`) and the
+  live MIDI monitor + integrated tester (`midiselect.js` tools).
+
 ## Structure
 
 ```
@@ -69,16 +92,17 @@ web-interface/
 ├── css/style.css         responsive styling, light/dark via prefers-color-scheme
 ├── js/
 │   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
-│   ├── app.js            shell, routing, DOM helpers, draft-profile state, mode toggle
-│   ├── dashboard.js      dashboard (§19)
-│   ├── fretboard.js      playable fretboard visualization (press-and-hold to play)
+│   ├── app.js            shell, 3-page routing, DOM helpers, draft-profile state, mode toggle
+│   ├── fretboard.js      Instrument page — emergency stop + playable fretboard (press-and-hold)
+│   ├── hardware.js       Câblage & GPIO page — sub-tab switch over wiring.js / pins.js
 │   ├── pins.js           GPIO assignment grid (§11)
 │   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram)
-│   ├── wizard.js         7-step wizard — mechanical Instrument Builder + separate Frets/Plucking (§10)
+│   ├── wizard.js         shared step engine: config flow (Settings modal) + calibration flow (page) (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
-│   ├── midiselect.js     MIDI page: string/fret selection (§14) + params (§18) + test tool (§16)
+│   ├── midiselect.js     MIDI settings (§14/§18) + live monitor/test tools (§16), split for the modal
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
-│   └── profiles.js       profile list/create/copy/rename/delete/export/import/restore (§20)
+│   ├── profiles.js       profile list/create/copy/rename/delete/export/import/restore (§20)
+│   └── settings.js       Settings modal — Configuration / Réseau / Profils / Avancé tabs
 └── README.md
 ```
 
@@ -91,10 +115,11 @@ and **Advanced** (manual GPIO assignment including caution pins, per-servo wirin
 / damper / auxiliary actuators, SysEx block toggles, raw byte views), per
 SPECIFICATION.md §9.2.
 
-## Instrument Builder — mechanical-choice-driven creation (wizard step 1)
+## Instrument Builder — mechanical-choice-driven creation (Settings → Configuration → Instrument)
 
-The **type is cosmetic**; an instrument is defined by its **mechanics**. Step 1 is
-one adaptive **Builder** screen that makes those choices explicit and generates the
+The **type is cosmetic**; an instrument is defined by its **mechanics**. The
+**Instrument** page of the config wizard is one adaptive **Builder** screen that
+makes those choices explicit and generates the
 servo wiring for you, so any plucked/strummed string instrument (1–6 strings) can
 be set up quickly:
 
@@ -117,16 +142,17 @@ be set up quickly:
 The mechanical choice is **not stored** in the profile (the firmware derives frets
 from the servo list); the Builder re-derives it from the current servos on entry.
 
-## Frets and Plucking — calibrated separately (wizard steps 2–3)
+## Frets and Plucking — calibrated separately (Calibration page)
 
-After the Builder, the two physical halves of each string are calibrated and tested
-on their **own steps**, so the frets (frettes) and the plucking (grattage) can each
+On the **Calibration** page, the two physical halves of each string are calibrated
+and tested on their **own steps** (Frettes → Grattage → Test), so the frets
+(frettes) and the plucking (grattage) can each
 be tuned independently. Each fret position has its own finger servo plus a
 pluck/strum servo per string, **with or without a PCA9685**. Both steps adapt to the
 Builder's choices (open-only → a banner; strum → its stroke controls) and carry an
 **Arm** control and a **test bench** (below).
 
-- **Frets (step 2) — the finger servos only.** Per string (string-tab strip), add
+- **Frets (Frettes step) — the finger servos only.** Per string (string-tab strip), add
   **one finger servo per fret** (1..`maxFret`; frets need not be contiguous — gaps
   are allowed); a finger can be **geared** (one servo drives two frets: side A =
   `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted). A clickable
@@ -137,7 +163,7 @@ Builder's choices (open-only → a banner; strum → its stroke controls) and ca
   calibrates three positions — **neutral / press A / press B** — each driven to its
   exact `us` pulse and held (`POST /api/test/servo` with `us`).
 
-- **Plucking (step 3) — the plectrum and its helpers only.** Per string, calibrate
+- **Plucking (Grattage step) — the plectrum and its helpers only.** Per string, calibrate
   the **pluck/strum** servo (rest + strike angle); a **strum** striker also exposes
   its **stroke shaping** (alternate up/down, up-stroke angle, stroke time, min strike
   depth). Optionally add a **strum lift** (lowers the plucker onto the string for a
@@ -159,7 +185,7 @@ boards can be split across a second bus (`Wire1`, pins **SDA2/SCL2**) to halve t
 bus traffic and refresh the servos faster on large instruments (many strings / many
 boards). The Builder's **Wiring & capacity** step has a *Use a second I²C bus*
 toggle with a **per-board Bus 0 / Bus 1** picker and an **Auto-split evenly** button;
-the second bus's SDA2/SCL2 GPIOs are assigned on the **GPIO Pins** tab (default
+the second bus's SDA2/SCL2 GPIOs are assigned in the **GPIO** sub-tab (default
 GPIO38/39). You can also **separate the `/OE` safety line per bus** (a *Separate the
 /OE per bus* toggle adds `SERVO_OE2`, default GPIO21) or keep a single shared `/OE`.
 Each I²C bus addresses **up to 8 boards** (0x40–0x47), so two buses reach **16 boards
@@ -173,9 +199,9 @@ Per-string servos get their `stringIndex` set automatically. Each servo carries 
 calibration (rest/active µs, pulse min/max, inverted, travelMs, settleMs,
 disableAtRest).
 
-## Playable fretboard (Fretboard tab)
+## Playable fretboard (Instrument page)
 
-Once the instrument is defined and calibrated, the **Fretboard** tab turns it into a
+Once the instrument is defined and calibrated, the **Instrument** page turns it into a
 clickable **keyboard**. It draws the neck as a stylised instrument (headstock with
 tuning pegs, wood fretboard, body with a soundhole) and lays out the strings and
 fret wires **to scale**: the spacing between frets follows equal temperament (the
@@ -205,9 +231,9 @@ tried immediately. Leaving the tab (or a re-render) always lifts any held finger
 cancels pending strokes. An **All fingers up** button and the **STOP (panic)** button
 provide a manual safety net.
 
-## Wiring map (Wiring tab)
+## Wiring map (Câblage & GPIO page → Schéma de câblage)
 
-The **Wiring** tab draws the current instrument's electrical harness as a
+The **Câblage & GPIO** page draws the current instrument's electrical harness as a
 schematic, **as close to the real build as the profile allows** and fully
 **adaptive** — every element is derived from the working `profile` (the same
 draft the wizard edits), so the picture updates with each mechanical / pin /

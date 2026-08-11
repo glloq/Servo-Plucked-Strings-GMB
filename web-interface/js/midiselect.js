@@ -15,8 +15,9 @@
 
   var monitor = null;
 
-  function render(host) {
-    if (monitor) { monitor.close(); monitor = null; }
+  // MIDI settings only (params + timing + string/fret selection + advanced). Used
+  // as the MIDI step of the config wizard (Settings modal). No live socket here.
+  function renderSettings(host) {
     var p = GMB.state.profile;
     var sfs = p.stringFretSelection;
 
@@ -87,8 +88,7 @@
             { value: 'reject', label: 'Reject' }] }))
       ]),
       h('div.toolbar', [
-        GMB.button('Apply General-Midi-Boop preset', applyGmbPreset, 'primary'),
-        GMB.button('Send a test', function () { GMB.navigate('midi'); scrollToTest(); }, 'ghost')
+        GMB.button('Apply General-Midi-Boop preset', applyGmbPreset, 'primary')
       ]),
       h('p.muted', mode_desc(sfs.mode))
     ]);
@@ -98,16 +98,22 @@
     if (GMB.isAdvanced()) {
       host.appendChild(advancedPanel(sfs, p));
     }
+  }
 
-    // ---- MIDI monitor (section 15) ------------------------------------------
+  // Live MIDI monitor + integrated tester. Hosted in Settings > Advanced; owns the
+  // /ws/midi socket, so it must be torn down when its host is removed.
+  function renderTools(host) {
+    if (monitor) { monitor.close(); monitor = null; }
+    var p = GMB.state.profile;
     var monHost = h('div.card', [h('div.card-head', [h('h2', 'MIDI monitor'),
       h('span.muted', 'live received events')]), h('div#monitor-host')]);
     host.appendChild(monHost);
     monitor = GMB.midiMonitor.mount(monHost.querySelector('#monitor-host'));
-
-    // ---- Integrated test tool (section 16) ----------------------------------
     host.appendChild(testTool(p));
   }
+
+  // Legacy combined page (settings + tools).
+  function render(host) { renderSettings(host); renderTools(host); }
 
   function mode_desc(mode) {
     return {
@@ -296,5 +302,15 @@
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   }
 
-  GMB.views.midi = { render: render };
+  GMB.views.midi = {
+    render: render,
+    teardown: function () { if (monitor) { monitor.close(); monitor = null; } }
+  };
+  // Split entry points for the Settings modal: settings-only (the config wizard's
+  // MIDI step) and the live tools (the Advanced tab).
+  GMB.midiSettings = {
+    settings: renderSettings,
+    tools: renderTools,
+    teardown: function () { if (monitor) { monitor.close(); monitor = null; } }
+  };
 })(window);
