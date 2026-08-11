@@ -1,27 +1,17 @@
 /*
- * fretboard.js — playable fretboard visualization ("Fretboard" tab).
+ * fretboard.js — playable instrument ("Instrument" main page).
  *
- * Once an instrument is defined and calibrated (strings + finger servos +
- * plucker/strum servos), this page draws its neck as a stylised instrument and
- * turns it into a clickable "keyboard":
+ * Redesigned to echo the General-Midi-Boop virtual keyboard: a clean wooden neck
+ * with a note-name circle on every EQUIPPED fret (the frets that carry a servo),
+ * an open-string circle on the headstock side, and nothing else on the board — no
+ * colour coding, no legend. Press-and-hold a note to play it; a chord bar below
+ * plays common chords across several strings at once. The top bar keeps only the
+ * controls a player needs: a big emergency STOP, a Re-arm button, the armed badge
+ * and the play-mode selector (above the frets).
  *
- *   • The strings and fret wires are drawn to scale — the spacing between frets
- *     follows equal temperament (the luthier's "rule of 18"), so the neck
- *     compresses toward the body exactly like a real fretboard.
- *   • Every equipped fret shows the finger servo as a small rectangle on the
- *     string, just on the nut side of its fret wire (where a finger presses).
- *   • Press-and-hold a fret with a servo → the finger servo presses that fret
- *     and the string is sounded; the played string lights up. Release → the
- *     finger lifts off the string. The open-string zone (left of the nut) plays
- *     the open note (fret 0, no finger).
- *   • A play-mode selector exposes the sounding options the wiring actually
- *     supports — Pluck, Up-stroke and Alternate for a strum servo, Muted when a
- *     damper is present — so only mechanically-feasible modes are offered.
- *
- * It drives the hardware through the same one-servo-at-a-time test endpoints the
- * wizard uses (POST /api/test/servo), so it works on the real device (once armed)
- * and stand-alone against the mock backend. Reads the working draft profile
- * (GMB.state.profile), so an in-progress calibration can be tried immediately.
+ * It drives the hardware through the one-servo-at-a-time test endpoints
+ * (POST /api/test/servo), so it works on the real device (once armed) and
+ * stand-alone against the mock backend, reading the working draft profile.
  */
 (function (global) {
   'use strict';
@@ -37,7 +27,7 @@
   var BODY_RIGHT = 972;
   var TOP = 54;          // headroom for the fret numbers
   var ROW = 58;          // vertical pitch between strings
-  var BOT = 34;
+  var BOT = 40;          // room for the fret-number row at the bottom
   var STD_INLAYS = [3, 5, 7, 9, 15, 17, 19, 21];  // single dots
   var DBL_INLAYS = [12, 24];                       // double dots (octave)
 
@@ -49,11 +39,10 @@
   var timers = [];           // pending strike/return setTimeouts, cleared on teardown
   var armedHint = false;     // show the "arm the instrument" hint at most once
   var els = null;            // element references for live highlight updates
-  var readout = null;        // "now playing" line
+  var chordRoot = 0;         // selected chord root (0 = C … 11 = B), persists
 
   // ---- small helpers --------------------------------------------------------
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-  function noop() {}
   function svg(tag, attrs, kids) {
     var el = document.createElementNS(SVGNS, tag);
     if (attrs) Object.keys(attrs).forEach(function (k) {
@@ -100,9 +89,7 @@
   function servoIndexOf(sv) { return GMB.state.profile.servos.indexOf(sv); }
   function clampPulse(sv, us) { return clamp(us, sv.pulseMinUs || 500, sv.pulseMaxUs || 2500); }
 
-  // Equal-temperament fret position: distance from the nut as a fraction of the
-  // scale length is 1 - 2^(-n/12). Normalising by the highest fret keeps the real
-  // relative spacing while fitting the drawn board to the available width.
+  // Equal-temperament fret position (luthier's rule of 18), normalised to fit.
   function fretFraction(n) { return 1 - Math.pow(2, -n / 12); }
   function fretX(n, boardMax) {
     var denom = fretFraction(boardMax) || 1;
@@ -122,62 +109,61 @@
       modes.push({ id: 'mute', label: 'Muted' });
     return modes;
   }
+  function modeHint(id) {
+    return {
+      pluck: 'Single strike (down-stroke).',
+      up: 'Strike with the up-stroke pulse.',
+      alternate: 'Alternate down / up strokes on each note.',
+      mute: 'Strike, then damp for a short, muted note.'
+    }[id] || '';
+  }
 
   // ---- driving the mechanics ------------------------------------------------
-
-  // One servo command. A rejection (e.g. not armed / mock offline) is swallowed,
-  // but the first one nudges the user to arm the instrument.
   function drive(payload) {
     return GMB.api.testServo(payload).catch(function () {
       if (!armedHint) {
         armedHint = true;
-        GMB.toast('Arm the instrument (top of the page) to move the servos.', 'warn');
+        GMB.toast('Re-arm the instrument (top of the page) to move the servos.', 'warn');
       }
     });
   }
   function later(fn, ms) { var t = setTimeout(fn, ms); timers.push(t); return t; }
 
   // Press a fret (or open string) on a string: lift any finger already down on
-  // that string, press the target finger, light the string, then sound it.
+  // that string, press the target finger, then sound it.
   function press(strIdx, fret) {
-    var p = GMB.state.profile;
     releaseFinger(strIdx);
     var lead = 0;
     if (fret > 0) {
       var fsv = fingerFor(strIdx, fret);
-      if (!fsv) return;                       // guarded: empty cells carry no handler
+      if (!fsv) return;
       var idx = servoIndexOf(fsv);
-      // A geared finger presses its side-B fret with a different pulse.
       var pulse = (isGeared(fsv) && fsv.fretB === fret) ? (fsv.activeBUs || fsv.activeUs) : fsv.activeUs;
       if (idx >= 0) drive({ index: idx, active: true, us: pulse | 0 });
       held[strIdx] = { idx: idx, fret: fret };
-      lead = clamp(fsv.travelMs || 120, 60, 200);  // give the finger time to seat
+      lead = clamp(fsv.travelMs || 120, 60, 200);
     }
     active[strIdx] = fret;
     paintActive(strIdx, fret, true);
     strike(strIdx, lead);
   }
 
-  // Release a string: lift its finger and drop the highlight.
   function release(strIdx) {
     releaseFinger(strIdx);
     if (active[strIdx] !== undefined) {
       paintActive(strIdx, active[strIdx], false);
       delete active[strIdx];
     }
-    updateReadout();
   }
   function releaseFinger(strIdx) {
     var hv = held[strIdx];
     if (!hv) return;
     delete held[strIdx];
-    // active:false with no us → normal rest semantics (honours disableAtRest).
     if (hv.idx >= 0) drive({ index: hv.idx, active: false });
   }
+  function releaseAllActive() { Object.keys(active).slice().forEach(function (k) { release(+k); }); }
 
-  // Sound the string after `lead` ms (once the finger has begun to seat), using
-  // the striker servo and the current play mode. A strum lift, when present, is
-  // lowered for the stroke and raised again; 'mute' taps the damper right after.
+  // Sound the string after `lead` ms using the striker and the current play mode.
   function strike(strIdx, lead) {
     var sk = strikerFor(strIdx);
     if (!sk) { GMB.toast('String ' + (strIdx + 1) + ' has no plucker to sound it.', 'warn'); return; }
@@ -196,10 +182,9 @@
     var strokeMs = Math.max(80, sk.strokeMs || 120);
 
     later(function () {
-      if (liftIdx >= 0) drive({ index: liftIdx, active: true, us: lift.activeUs | 0 });  // lower onto string
+      if (liftIdx >= 0) drive({ index: liftIdx, active: true, us: lift.activeUs | 0 });
       drive({ index: idx, active: true, us: strikeUs });
       flashString(strIdx);
-      // Muted: let it ring for a moment, then damp for a short, staccato note.
       if (mode === 'mute') {
         var dmp = perStringServo(strIdx, 'damper');
         if (dmp) {
@@ -211,52 +196,56 @@
         }
       }
       later(function () {
-        drive({ index: idx, active: false });                      // return stroke
-        if (liftIdx >= 0) drive({ index: liftIdx, active: false }); // raise the lift
+        drive({ index: idx, active: false });
+        if (liftIdx >= 0) drive({ index: liftIdx, active: false });
       }, strokeMs);
     }, lead || 0);
   }
 
-  // Lift every finger this page is holding (safety net; STOP/panic fully
-  // neutralises the hardware). Scoped to tracked fingers so it never floods the
-  // command queue with a rest command for every servo on the instrument.
-  function allFingersUp() {
-    var keys = Object.keys(active);
-    keys.slice().forEach(function (k) { release(+k); });
-    GMB.toast(keys.length ? 'Lifted ' + keys.length + ' finger(s).' : 'No fingers are pressed.',
-      keys.length ? 'ok' : 'warn');
+  // ---- chords ---------------------------------------------------------------
+  var ROOTS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  var CHORD_TYPES = [
+    { id: 'maj',  label: 'Maj',  iv: [0, 4, 7] },
+    { id: 'min',  label: 'Min',  iv: [0, 3, 7] },
+    { id: '5',    label: '5',    iv: [0, 7] },
+    { id: '7',    label: '7',    iv: [0, 4, 7, 10] },
+    { id: 'maj7', label: 'Maj7', iv: [0, 4, 7, 11] },
+    { id: 'm7',   label: 'm7',   iv: [0, 3, 7, 10] }
+  ];
+
+  // Play a chord: pick, on each string, the lowest playable fret (open or equipped)
+  // whose pitch class is in the chord, then strike them together (a strummed chord).
+  function playChord(intervals) {
+    var p = GMB.state.profile;
+    releaseAllActive();
+    var pcs = intervals.map(function (iv) { return (chordRoot + iv) % 12; });
+    var picks = [];
+    p.strings.forEach(function (s, i) {
+      if (!s.enabled) return;
+      for (var f = 0; f <= (s.maxFret || 0); f++) {
+        if (f === 0) { if (!strikerFor(i)) continue; }
+        else if (!fingerFor(i, f)) continue;
+        if (pcs.indexOf((s.openNote + f) % 12) >= 0) { picks.push({ str: i, fret: f }); break; }
+      }
+    });
+    if (!picks.length) { GMB.toast('No chord notes reachable on this instrument.', 'warn'); return; }
+    picks.forEach(function (pk) { press(pk.str, pk.fret); });
+    later(function () { picks.forEach(function (pk) { release(pk.str); }); }, 650);
   }
 
   // ---- live highlight -------------------------------------------------------
   function paintActive(strIdx, fret, on) {
     if (!els) return;
-    if (els.string[strIdx]) els.string[strIdx].classList.toggle('active', on);
-    if (els.rowHi[strIdx]) els.rowHi[strIdx].classList.toggle('active', on);
-    var mark = fret > 0 ? els.pad[strIdx + ':' + fret] : els.open[strIdx];
+    var mark = fret > 0 ? els.note[strIdx + ':' + fret] : els.open[strIdx];
     if (mark) mark.classList.toggle('pressed', on);
-    if (on) updateReadout(strIdx, fret); else updateReadout();
   }
-  // A brief "pluck" wobble on the string, cleared shortly after.
   function flashString(strIdx) {
     if (!els || !els.string[strIdx]) return;
     var line = els.string[strIdx];
     line.classList.remove('vibrate');
-    try { line.getBBox(); } catch (_) {}  // force reflow so re-adding restarts the animation
+    try { line.getBBox(); } catch (_) {}
     line.classList.add('vibrate');
     later(function () { line.classList.remove('vibrate'); }, 420);
-  }
-  function updateReadout(strIdx, fret) {
-    if (!readout) return;
-    var keys = Object.keys(active);
-    if (strIdx === undefined) {
-      if (!keys.length) { readout.textContent = '—'; return; }
-      strIdx = +keys[keys.length - 1];
-      fret = active[strIdx];
-    }
-    var s = GMB.state.profile.strings[strIdx];
-    var note = GMB.noteName(s.openNote + fret);
-    readout.textContent = 'String ' + (strIdx + 1) + ' · ' +
-      (fret === 0 ? 'open' : 'fret ' + fret) + ' · ' + note;
   }
 
   // ---- board construction ---------------------------------------------------
@@ -265,14 +254,13 @@
     var n = strings.length;
     var boardMax = Math.max.apply(null, strings.map(function (s) { return s.maxFret || 0; }).concat([0]));
     var H = TOP + n * ROW + BOT;
-    els = { string: [], rowHi: [], pad: {}, open: [] };
+    els = { string: [], note: {}, open: [] };
 
     var root = svg('svg', {
       class: 'fb-svg', viewBox: '0 0 ' + VB_W + ' ' + H,
       preserveAspectRatio: 'xMidYMid meet', role: 'group', 'aria-label': 'Instrument fretboard'
     });
 
-    // Wood gradients (themed via CSS classes on the stops).
     var defs = svg('defs', null, [
       svg('linearGradient', { id: 'fbNeck', x1: '0', y1: '0', x2: '0', y2: '1' }, [
         svg('stop', { offset: '0%', class: 'fb-neck-a' }),
@@ -286,8 +274,7 @@
     ]);
     root.appendChild(defs);
 
-    // Instrument silhouette in the background: body (right) + soundhole, neck,
-    // headstock (left) with tuning pegs.
+    // Instrument silhouette: body (right) + soundhole, neck, headstock (left).
     var bodyTop = TOP - 22, bodyBot = H - BOT + 22;
     root.appendChild(svg('path', {
       class: 'fb-body',
@@ -305,7 +292,6 @@
     root.appendChild(svg('ellipse', { class: 'fb-hole-ring', cx: holeCx, cy: holeCy,
       rx: 40, ry: clamp(n * ROW * 0.32 + 6, 30, 130) }));
 
-    // Headstock.
     root.appendChild(svg('path', {
       class: 'fb-headstock',
       d: 'M ' + (NUT_X + 2) + ' ' + (TOP - 14) +
@@ -316,106 +302,84 @@
          ' H ' + (NUT_X + 2) + ' Z'
     }));
 
-    // Neck / fretboard.
     root.appendChild(svg('rect', { class: 'fb-neck', x: NUT_X, y: TOP - 14,
       width: (FRET_RIGHT + 24) - NUT_X, height: (H - BOT + 14) - (TOP - 14),
       rx: 6, fill: 'url(#fbNeck)' }));
-
-    // Nut.
     root.appendChild(svg('rect', { class: 'fb-nut', x: NUT_X - 6, y: TOP - 14,
       width: 6, height: (H - BOT + 14) - (TOP - 14), rx: 2 }));
 
-    // Fret wires + numbers.
+    // Fret wires + numbers (top and bottom, GMB-style).
     for (var f = 1; f <= boardMax; f++) {
       var x = fretX(f, boardMax);
       root.appendChild(svg('line', { class: 'fb-fret', x1: x, y1: TOP - 14, x2: x, y2: H - BOT + 14 }));
-      root.appendChild(svg('text', { class: 'fb-fretnum', x: x, y: TOP - 24,
+      root.appendChild(svg('text', { class: 'fb-fretnum', x: (fretX(f - 1, boardMax) + x) / 2, y: H - BOT + 30,
         'text-anchor': 'middle', text: String(f) }));
     }
+    root.appendChild(svg('text', { class: 'fb-fretnum', x: (NUT_X + fretX(1, boardMax)) / 2 - 30, y: H - BOT + 30,
+      'text-anchor': 'middle', text: '0' }));
 
-    // Inlay dots (centre of the cell, on the neck centre line).
+    // Inlay dots.
     var midY = TOP + (n * ROW) / 2;
     function inlayX(fret) { return (fretX(fret - 1, boardMax) + fretX(fret, boardMax)) / 2; }
     STD_INLAYS.forEach(function (fr) {
-      if (fr <= boardMax) root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY, r: 6 }));
+      if (fr <= boardMax) root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY, r: 5 }));
     });
     DBL_INLAYS.forEach(function (fr) {
       if (fr <= boardMax) {
-        root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY - ROW * 0.55, r: 6 }));
-        root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY + ROW * 0.55, r: 6 }));
+        root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY - ROW * 0.55, r: 5 }));
+        root.appendChild(svg('circle', { class: 'fb-inlay', cx: inlayX(fr), cy: midY + ROW * 0.55, r: 5 }));
       }
     });
-
-    // Per-string row highlight (behind the strings).
-    for (var i = 0; i < n; i++) {
-      var rh = svg('rect', { class: 'fb-rowhi', x: NUT_X, y: stringY(i) - ROW * 0.42,
-        width: FRET_RIGHT + 24 - NUT_X, height: ROW * 0.84, rx: 5 });
-      els.rowHi[i] = rh;
-      root.appendChild(rh);
-    }
 
     // Strings — thicker for the lower-pitched ones (mirrors real gauges).
     var notes = strings.map(function (s) { return s.openNote; });
     var loN = Math.min.apply(null, notes), hiN = Math.max.apply(null, notes);
-    for (i = 0; i < n; i++) {
+    for (var i = 0; i < n; i++) {
       var t = hiN > loN ? (strings[i].openNote - loN) / (hiN - loN) : 0.5;
-      var w = 3.4 - 1.7 * t;   // low note (t≈0) → thick, high note (t≈1) → thin
+      var w = 3.4 - 1.7 * t;
       var y = stringY(i);
+      // Dim the out-of-range region beyond this string's last fret.
+      if (strings[i].maxFret < boardMax) {
+        var xoor = fretX(strings[i].maxFret, boardMax);
+        root.appendChild(svg('rect', { class: 'fb-oor', x: xoor, y: y - ROW * 0.42,
+          width: (FRET_RIGHT + 24) - xoor, height: ROW * 0.84 }));
+      }
       var ln = svg('line', { class: 'fb-string', x1: PEG_X, y1: y, x2: BRIDGE_X, y2: y,
         'stroke-width': w.toFixed(2) });
       els.string[i] = ln;
       root.appendChild(ln);
     }
 
-    // Servo pads: a small rectangle on the string, just on the nut side of the
-    // fret wire — one per equipped fret (a geared servo shows a pad on both frets).
-    for (i = 0; i < n; i++) {
-      GMB.availableFrets(p, i).forEach(function (fret) {
-        if (fret > boardMax) return;
-        var self = i;
-        var xr = fretX(fret, boardMax);
-        var cellW = fretX(fret, boardMax) - fretX(fret - 1, boardMax);
-        var padW = clamp(cellW * 0.5, 7, 16);
-        var padH = clamp(ROW * 0.36, 12, 20);
-        var sv = fingerFor(self, fret);
-        var pad = svg('rect', {
-          class: 'fb-pad' + (isGeared(sv) ? ' geared' : ''),
-          x: xr - 3 - padW, y: stringY(self) - padH / 2, width: padW, height: padH, rx: 3
-        });
-        els.pad[self + ':' + fret] = pad;
-        root.appendChild(pad);
-      });
+    // Note circles: an open-string circle on the headstock side, and one per
+    // EQUIPPED fret (the frets that actually carry a servo). That is all — no
+    // colour coding, no pads.
+    function noteCircle(cx, cy, label, strIdx, fret, playable) {
+      var r = fret > 0 ? clamp((fretX(fret, boardMax) - fretX(fret - 1, boardMax)) * 0.34, 8, 13) : 12;
+      var g = svg('g', { class: 'fb-notewrap' + (playable ? '' : ' disabled') });
+      var circle = svg('circle', { class: 'fb-note', cx: cx, cy: cy, r: r });
+      g.appendChild(circle);
+      g.appendChild(svg('text', { class: 'fb-notetext', x: cx, y: cy + 3.6, 'text-anchor': 'middle', text: label }));
+      if (playable) attachCell(g, strIdx, fret);
+      return { g: g, circle: circle };
     }
 
-    // Tuning pegs + open-note labels + open-string trigger (headstock region).
     for (i = 0; i < n; i++) {
       (function (idx) {
-        var y = stringY(idx);
         var s = strings[idx];
-        root.appendChild(svg('circle', { class: 'fb-peg', cx: PEG_X, cy: y, r: 7 }));
-        var openMark = svg('circle', { class: 'fb-open', cx: NUT_X - 20, cy: y, r: 9 });
-        els.open[idx] = openMark;
-        root.appendChild(openMark);
-        root.appendChild(svg('text', { class: 'fb-opennote', x: NUT_X - 20, y: y - 15,
-          'text-anchor': 'middle', text: GMB.noteName(s.openNote) }));
-        root.appendChild(svg('text', { class: 'fb-strnum', x: NUT_X - 20, y: y + 4,
-          'text-anchor': 'middle', text: String(idx + 1) }));
-
-        // Open-string hit zone (headstock → nut). Playable only if a striker exists.
-        var openCell = svg('rect', { x: 2, y: y - ROW * 0.42, width: NUT_X - 8, height: ROW * 0.84,
-          class: 'fb-cell' + (strikerFor(idx) ? '' : ' empty'), rx: 5 });
-        if (strikerFor(idx)) attachCell(openCell, idx, 0);
-        root.appendChild(openCell);
-
-        // Fret cells 1..boardMax. Playable when the fret carries a finger and is
-        // within this string's range.
-        for (var fr = 1; fr <= boardMax; fr++) {
-          var x0 = fretX(fr - 1, boardMax), x1 = fretX(fr, boardMax);
-          var playable = fr <= (s.maxFret || 0) && !!fingerFor(idx, fr);
-          var cell = svg('rect', { x: x0, y: y - ROW * 0.42, width: x1 - x0, height: ROW * 0.84,
-            class: 'fb-cell' + (playable ? '' : ' empty') });
-          if (playable) attachCell(cell, idx, fr);
-          root.appendChild(cell);
+        var yy = stringY(idx);
+        root.appendChild(svg('circle', { class: 'fb-peg', cx: PEG_X, cy: yy, r: 7 }));
+        root.appendChild(svg('text', { class: 'fb-strnum', x: PEG_X, y: yy - 12, 'text-anchor': 'middle', text: String(idx + 1) }));
+        // Open string (playable when a plucker exists).
+        var open = noteCircle(NUT_X - 22, yy, GMB.noteName(s.openNote), idx, 0, !!strikerFor(idx));
+        els.open[idx] = open.circle;
+        root.appendChild(open.g);
+        // Equipped frets.
+        for (var fr = 1; fr <= s.maxFret; fr++) {
+          if (!fingerFor(idx, fr)) continue;
+          var cx = (fretX(fr - 1, boardMax) + fretX(fr, boardMax)) / 2;
+          var node = noteCircle(cx, yy, GMB.noteName(s.openNote + fr), idx, fr, true);
+          els.note[idx + ':' + fr] = node.circle;
+          root.appendChild(node.g);
         }
       })(i);
     }
@@ -423,33 +387,32 @@
     return root;
   }
 
-  // Wire one interactive cell: press-and-hold semantics via pointer capture, plus
-  // keyboard (Enter / Space) for accessibility.
-  function attachCell(rect, strIdx, fret) {
-    rect.setAttribute('tabindex', '0');
-    rect.setAttribute('role', 'button');
+  // Press-and-hold semantics via pointer capture, plus keyboard for accessibility.
+  function attachCell(g, strIdx, fret) {
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('role', 'button');
     var s = GMB.state.profile.strings[strIdx];
-    rect.setAttribute('aria-label', 'String ' + (strIdx + 1) + ' ' +
+    g.setAttribute('aria-label', 'String ' + (strIdx + 1) + ' ' +
       (fret === 0 ? 'open' : 'fret ' + fret) + ' — ' + GMB.noteName(s.openNote + fret));
-    rect.addEventListener('pointerdown', function (e) {
+    g.addEventListener('pointerdown', function (e) {
       e.preventDefault();
-      try { rect.setPointerCapture(e.pointerId); } catch (_) {}
+      try { g.setPointerCapture(e.pointerId); } catch (_) {}
       press(strIdx, fret);
     });
     var up = function () { release(strIdx); };
-    rect.addEventListener('pointerup', up);
-    rect.addEventListener('pointercancel', up);
-    rect.addEventListener('keydown', function (e) {
+    g.addEventListener('pointerup', up);
+    g.addEventListener('pointercancel', up);
+    g.addEventListener('keydown', function (e) {
       if ((e.key === 'Enter' || e.key === ' ') && active[strIdx] === undefined) { e.preventDefault(); press(strIdx, fret); }
     });
-    rect.addEventListener('keyup', function (e) {
+    g.addEventListener('keyup', function (e) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); release(strIdx); }
     });
-    rect.addEventListener('blur', up);
+    g.addEventListener('blur', up);
   }
 
-  // ---- controls (arm, mode, actions) ----------------------------------------
-  function armBar() {
+  // ---- top control bar (emergency stop + re-arm + armed badge + play mode) ---
+  function topBar(p) {
     var badge = h('span.badge', 'checking…');
     function refresh() {
       GMB.api.getStatus().then(function (st) {
@@ -460,95 +423,68 @@
       }).catch(function () { badge.textContent = 'unknown'; badge.className = 'badge'; });
     }
     refresh();
-    return h('div.fb-arm', [
-      GMB.button('Arm for playing', function () {
-        GMB.api.resetSystem().then(function (res) {
-          if (res && res.ok === false) GMB.toast('Arm refused: ' + (res.error || 'E-stop/invalid config') + '.', 'warn');
-          else { armedHint = false; GMB.toast('Armed — the fretboard can drive the servos.', 'ok'); }
-          refresh();
-        }).catch(function (e) { GMB.toast('Arm failed: ' + (e && e.message || e), 'error'); });
-      }, 'ghost'),
-      badge,
-      h('span.muted', 'Servos move only while armed. Stand-alone, the motion is simulated.')
+
+    var modes = availableModes(p);
+    if (!modes.some(function (m) { return m.id === mode; })) mode = 'pluck';
+    var modeWrap = h('div.fb-modes');
+    modes.forEach(function (m) {
+      var btn = h('button.fb-mode' + (m.id === mode ? '.active' : ''),
+        { type: 'button', title: modeHint(m.id), onclick: function () {
+          mode = m.id;
+          modeWrap.querySelectorAll('.fb-mode').forEach(function (x) { x.classList.remove('active'); });
+          btn.classList.add('active');
+        } }, m.label);
+      modeWrap.appendChild(btn);
+    });
+
+    return h('div.card.fb-topbar', [
+      h('div.fb-estop', [
+        h('button.btn.danger.fb-stop', { type: 'button', title: 'Emergency stop', onclick: GMB.doPanic }, 'STOP'),
+        GMB.button('Re-arm servos', function () {
+          GMB.api.resetSystem().then(function (res) {
+            if (res && res.ok === false) GMB.toast('Re-arm refused: ' + (res.error || 'E-stop / invalid config') + '.', 'warn');
+            else { armedHint = false; GMB.toast('Re-armed.', 'ok'); }
+            refresh();
+          }).catch(function (e) { GMB.toast('Re-arm failed: ' + (e && e.message || e), 'error'); });
+        }, 'ghost'),
+        badge
+      ]),
+      h('div.fb-play', [h('span.fb-lbl', 'Play'), modeWrap])
     ]);
   }
 
-  function modeBar(p) {
-    var modes = availableModes(p);
-    if (!modes.some(function (m) { return m.id === mode; })) mode = 'pluck';
-    var wrap = h('div.fb-modes');
-    modes.forEach(function (m) {
-      var b = h('button.fb-mode' + (m.id === mode ? '.active' : ''), {
-        type: 'button', title: modeHint(m.id),
-        onclick: function () {
-          mode = m.id;
-          wrap.querySelectorAll('.fb-mode').forEach(function (x) { x.classList.remove('active'); });
+  // ---- chord bar (root + common chord types, played across the strings) ------
+  function chordBar() {
+    var rootWrap = h('div.fb-roots');
+    ROOTS.forEach(function (name, i) {
+      var b = h('button.fb-root' + (i === chordRoot ? '.active' : ''),
+        { type: 'button', onclick: function () {
+          chordRoot = i;
+          rootWrap.querySelectorAll('.fb-root').forEach(function (x) { x.classList.remove('active'); });
           b.classList.add('active');
-        }
-      }, m.label);
-      wrap.appendChild(b);
+        } }, name);
+      rootWrap.appendChild(b);
     });
-    return h('div.fb-modewrap', [h('span.fb-lbl', 'Play mode'), wrap,
-      h('span.muted.fb-modehint', modes.length > 1 ? '' : 'Add a strum servo or damper for more modes.')]);
-  }
-  function modeHint(id) {
-    return {
-      pluck: 'Single strike (down-stroke).',
-      up: 'Strike with the up-stroke pulse.',
-      alternate: 'Alternate down / up strokes on each note.',
-      mute: 'Strike, then damp for a short, muted note.'
-    }[id] || '';
-  }
-
-  // Prominent emergency stop at the top of the main page (kept from the old
-  // dashboard): a big STOP that neutralises the servos + flushes the MIDI queue,
-  // and a Reset that recovers from an E-stop and re-arms.
-  function emergencyStopCard() {
-    return h('div.card.panic-card', [
-      h('div', [h('h2', 'Emergency stop'),
-        h('p.muted', 'Neutralises the servos (PCA9685 /OE) and flushes the MIDI queue.')]),
-      h('div.panic-actions', [
-        h('button.btn.danger.panic-big', { onclick: GMB.doPanic }, 'STOP'),
-        GMB.button('Reset & re-arm', function () {
-          GMB.api.resetSystem().then(function (res) {
-            if (res && res.ok === false) {
-              GMB.toast('Reset refused: ' + (res.error || 'E-stop active or invalid config') + '.', 'warn');
-            } else {
-              GMB.toast('Reset accepted — re-arming.', 'ok');
-            }
-          }).catch(function (e) { GMB.toast('Reset failed: ' + (e && e.message || e), 'error'); });
-        })
-      ])
+    var typeWrap = h('div.fb-chords');
+    CHORD_TYPES.forEach(function (c) {
+      typeWrap.appendChild(h('button.fb-chord', { type: 'button',
+        onclick: function () { playChord(c.iv); } }, c.label));
+    });
+    return h('div.card.fb-chordbar', [
+      h('div.fb-chordhead', [h('span.fb-lbl', 'Chords'), h('span.muted', 'play across the strings')]),
+      h('div.fb-rootrow', [h('span.fb-rootlbl', 'Root'), rootWrap]),
+      typeWrap
     ]);
   }
 
   // ---- render / teardown ----------------------------------------------------
   function render(host) {
-    // Fresh state for this mount (mode is intentionally preserved).
     held = {}; active = {}; timers = []; armedHint = false; els = null;
-
     var p = GMB.state.profile;
     var strings = p.strings || [];
-    var anyFinger = p.servos.some(function (s) { return s.enabled && s.function === 'finger'; });
     var anyStriker = strings.some(function (_, i) { return !!strikerFor(i); });
 
-    readout = h('span.fb-readout', '—');
-
-    host.appendChild(emergencyStopCard());
-    host.appendChild(h('div.card', [
-      h('div.card-head', [h('h2', 'Fretboard'),
-        h('span.muted', 'play the calibrated instrument — press and hold a fret')]),
-      h('p.muted', 'Fret spacing follows equal temperament (the neck compresses toward the body like a real ' +
-        'fretboard). Each equipped fret shows its finger servo as a pad on the string, just before the fret ' +
-        'wire. Press and hold a fret with a servo to press the finger and sound the string; release to lift it. ' +
-        'The zone left of the nut plays the open string.'),
-      armBar(),
-      h('div.fb-controls', [
-        modeBar(p),
-        h('span.spacer'),
-        h('span.fb-nowlabel', 'Now playing'), readout
-      ])
-    ]));
+    host.appendChild(topBar(p));
 
     if (!strings.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No strings configured yet.'),
@@ -556,34 +492,16 @@
         h('div.row', [GMB.button('Open configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
       return;
     }
-    if (!anyStriker)
-      host.appendChild(h('div.note-box', [
-        'None of the strings has a plucker / strum servo yet, so notes cannot sound. ',
-        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
-    else if (!anyFinger)
-      host.appendChild(h('div.note-box', [
-        'No finger servos are equipped — only the open strings can be played. ',
-        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
 
-    // The board itself (scrolls horizontally on narrow screens so tap targets
-    // stay usable rather than shrinking to nothing).
+    // The board itself (scrolls horizontally on narrow screens).
     host.appendChild(h('div.card.fb-card', [h('div.fb-scroll', buildBoard(p))]));
 
-    // Legend + safety actions.
-    host.appendChild(h('div.card', [
-      h('div.fb-legend', [
-        legendItem('fb-lg-pad', 'finger servo (equipped fret)'),
-        legendItem('fb-lg-geared', 'geared servo (two frets)'),
-        legendItem('fb-lg-empty', 'no servo on this fret'),
-        legendItem('fb-lg-active', 'active string')
-      ]),
-      h('div.row', [
-        GMB.button('All fingers up', function () { allFingersUp(); }, 'ghost')
-      ])
-    ]));
-  }
-  function legendItem(cls, label) {
-    return h('span.fb-lg', [h('span.fb-swatch.' + cls), h('span', label)]);
+    if (!anyStriker)
+      host.appendChild(h('div.note-box', [
+        'No plucker on any string yet, so notes cannot sound. ',
+        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
+    else
+      host.appendChild(chordBar());
   }
 
   // Leaving the page (or re-rendering) must never leave a finger pressed or a
@@ -592,7 +510,7 @@
     timers.forEach(clearTimeout);
     timers = [];
     Object.keys(held).slice().forEach(function (k) { releaseFinger(+k); });
-    held = {}; active = {}; els = null; readout = null;
+    held = {}; active = {}; els = null;
   }
 
   GMB.views.fretboard = { render: render, teardown: teardown };

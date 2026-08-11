@@ -802,3 +802,41 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .esp-nub.power { fill: var(--used); }
 .esp-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
 .swatch.esp-sw-power { background: var(--used); }
+
+/* ---- Instrument page redesign (GMB-style playable board) ---------------- */
+.fb-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.fb-estop { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fb-stop { font-size: 20px; font-weight: 800; letter-spacing: 1px; padding: 14px 32px; border-radius: 12px; }
+.fb-play { display: flex; align-items: center; gap: 10px; }
+
+/* Note circles on the neck (open string + equipped frets) — no colour coding. */
+.fb-notewrap { cursor: pointer; outline: none; }
+.fb-notewrap.disabled { pointer-events: none; opacity: .45; }
+.fb-note { fill: #f3ede0; stroke: #3b2c1c; stroke-width: 1.2; transition: fill .06s; }
+.fb-notewrap:hover .fb-note { fill: #fff6e2; }
+.fb-notewrap:focus-visible .fb-note { stroke: var(--accent); stroke-width: 2.4; }
+.fb-note.pressed { fill: var(--fb-pad-press); stroke: var(--fb-pad-press); }
+.fb-notetext { fill: #2a2016; font-size: 12px; font-weight: 700; font-family: var(--mono); pointer-events: none; }
+.fb-oor { fill: rgba(0, 0, 0, .28); }
+
+/* Chord bar below the board. */
+.fb-chordbar { display: flex; flex-direction: column; gap: 10px; }
+.fb-chordhead { display: flex; align-items: baseline; gap: 10px; }
+.fb-rootrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fb-rootlbl { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.fb-roots { display: flex; flex-wrap: wrap; gap: 4px; }
+.fb-root {
+  min-width: 34px; padding: 6px 8px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.fb-root:hover { border-color: var(--accent); }
+.fb-root.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.fb-chords { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.fb-chord {
+  padding: 12px 10px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 15px; font-weight: 700;
+}
+.fb-chord:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.fb-chord:active { transform: translateY(1px); }
