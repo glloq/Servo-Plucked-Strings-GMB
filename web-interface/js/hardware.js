@@ -1,10 +1,10 @@
 /*
- * hardware.js — combined "Câblage & GPIO" page (UI redesign).
+ * hardware.js — combined "Wiring & GPIO" page (UI redesign).
  *
  * One of the three main pages a builder needs. It hosts, behind two sub-tabs, the
  * two hardware views that used to be separate nav entries:
- *   • Schéma de câblage — the adaptive ESP32-S3 + PCA9685 harness diagram (wiring.js)
- *   • Broches GPIO       — the GPIO pin-assignment grid + validation (pins.js)
+ *   • Wiring diagram — the adaptive ESP32 + PCA9685 harness diagram (wiring.js)
+ *   • GPIO pins      — the GPIO pin-assignment grid + validation (pins.js)
  * It simply delegates to GMB.views.wiring / GMB.views.pins, so all the wiring and
  * pin logic stays in those modules; this file only owns the sub-tab switch.
  */
@@ -21,11 +21,11 @@
 
   function render(host) {
     host.appendChild(h('div.card.hw-head', [
-      h('div.card-head', [h('h2', 'Câblage & GPIO'),
-        h('span.muted', 'schéma du harnais et affectation des broches')]),
+      h('div.card-head', [h('h2', 'Wiring & GPIO'),
+        h('span.muted', 'harness diagram and pin assignment')]),
       h('div.subtabs', [
-        subBtn('wiring', 'Schéma de câblage'),
-        subBtn('gpio', 'Broches GPIO')
+        subBtn('wiring', 'Wiring diagram'),
+        subBtn('gpio', 'GPIO pins')
       ])
     ]));
 

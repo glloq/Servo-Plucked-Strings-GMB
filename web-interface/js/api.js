@@ -119,9 +119,135 @@
     return {
       identifier: 'esp32-s3-devkitc-1',
       displayName: 'ESP32-S3-DevKitC-1',
-      pins: pins
+      pins: pins,
+      recommended: { SDA: 40, SCL: 41, SERVO_OE: 47, SDA2: 38, SCL2: 39, SERVO_OE2: 21,
+        SERVO: [4, 5, 6, 7, 15, 16, 17, 18] }
+      // No `layout`: the board diagram falls back to a schematic two-column view
+      // (the 44-pin S3 header order is drawn by GPIO number, marked "schematic").
     };
   }
+
+  // ---------------------------------------------------------------------------
+  // Classic ESP32 (ESP32-WROOM-32 / ESP32-D0WD). Shared GPIO capability model for
+  // the 38-pin DevKitC and the 30-pin DevKit v1 boards below; they differ only in
+  // which pins are broken out (the 30-pin omits the SPI-flash pads) and the
+  // physical header order used to draw the board diagram.
+  //   • Input-only: 34, 35, 36 (VP), 39 (VN) — no output, can't drive I2C/servo/OE.
+  //   • Strapping: 0, 2, 5, 12, 15 — usable but risky (advanced / caution).
+  //   • Reserved: 1/3 (UART0), 6..11 (SPI flash).
+  // ---------------------------------------------------------------------------
+  function wroom32Pins(includeFlash) {
+    var pins = [];
+    pins.push(pin(0, { strapping: true, output: true, preference: 'caution',
+      note: 'BOOT strapping pin — must be released at boot; advanced use only.' }));
+    pins.push(pin(1, { onboardPeripheral: true, preference: 'reserved',
+      note: 'U0TXD — programming & diagnostic UART. Reserved.' }));
+    pins.push(pin(2, { adc: true, strapping: true, output: true, preference: 'caution',
+      note: 'Strapping / on-board LED on many boards — advanced use only.' }));
+    pins.push(pin(3, { onboardPeripheral: true, preference: 'reserved',
+      note: 'U0RXD — programming & diagnostic UART. Reserved.' }));
+    pins.push(pin(4, { adc: true, output: true, preference: 'recommended', note: 'General purpose (ADC2).' }));
+    pins.push(pin(5, { strapping: true, output: true, preference: 'caution',
+      note: 'Strapping pin (must be HIGH at boot) — advanced use only.' }));
+    if (includeFlash) [6, 7, 8, 9, 10, 11].forEach(function (g) {
+      pins.push(pin(g, { preference: 'reserved', reserved: true,
+        note: 'Connected to the SPI flash — not available.' }));
+    });
+    pins.push(pin(12, { adc: true, strapping: true, output: true, preference: 'caution',
+      note: 'MTDI strapping pin (flash voltage) — advanced use only.' }));
+    pins.push(pin(13, { adc: true, output: true, preference: 'recommended', note: 'General purpose (ADC2).' }));
+    pins.push(pin(14, { adc: true, output: true, preference: 'recommended', note: 'General purpose (ADC2).' }));
+    pins.push(pin(15, { adc: true, strapping: true, output: true, preference: 'caution',
+      note: 'MTDO strapping pin — advanced use only.' }));
+    [16, 17].forEach(function (g) {
+      pins.push(pin(g, { output: true, preference: 'recommended',
+        note: 'General purpose — used by PSRAM on WROVER modules; verify yours.' }));
+    });
+    [18, 19].forEach(function (g) {
+      pins.push(pin(g, { output: true, preference: 'recommended', note: 'General purpose (VSPI).' }));
+    });
+    pins.push(pin(21, { output: true, preference: 'recommended', note: 'Recommended I2C SDA (PCA9685).' }));
+    pins.push(pin(22, { output: true, preference: 'recommended', note: 'Recommended I2C SCL (PCA9685).' }));
+    pins.push(pin(23, { output: true, preference: 'recommended', note: 'Recommended PCA9685 /OE safety line.' }));
+    [25, 26].forEach(function (g) {
+      pins.push(pin(g, { adc: true, output: true, preference: 'recommended', note: 'General purpose (DAC / ADC2).' }));
+    });
+    pins.push(pin(27, { adc: true, output: true, preference: 'recommended', note: 'General purpose (ADC2).' }));
+    [32, 33].forEach(function (g) {
+      pins.push(pin(g, { adc: true, output: true, preference: 'recommended', note: 'General purpose (ADC1).' }));
+    });
+    // Input-only pins: usable as sensor inputs but never as outputs (no I2C/servo/OE).
+    [34, 35].forEach(function (g) {
+      pins.push(pin(g, { adc: true, input: true, output: false, internalPullUp: false, internalPullDown: false,
+        preference: 'reserved', note: 'Input-only (ADC1) — cannot drive I2C / servo / /OE.' }));
+    });
+    pins.push(pin(36, { adc: true, input: true, output: false, internalPullUp: false, internalPullDown: false,
+      preference: 'reserved', note: 'Input-only sensor VP (ADC1) — cannot output.' }));
+    pins.push(pin(39, { adc: true, input: true, output: false, internalPullUp: false, internalPullDown: false,
+      preference: 'reserved', note: 'Input-only sensor VN (ADC1) — cannot output.' }));
+    return pins;
+  }
+
+  // Physical header order for the board diagram: one entry per header pin,
+  // top→bottom, per side. { side, label, gpio (null for power/GND), power }.
+  function P(side, label, gpio, power) { return { side: side, label: label, gpio: gpio == null ? null : gpio, power: !!power }; }
+
+  function buildWroom32DevKitC() {
+    // ESP32-WROOM-32 DevKitC — 38-pin header (USB at the bottom).
+    var layout = [
+      P('L', '3V3', null, true), P('L', 'EN', null, true), P('L', 'VP', 36), P('L', 'VN', 39),
+      P('L', 'IO34', 34), P('L', 'IO35', 35), P('L', 'IO32', 32), P('L', 'IO33', 33),
+      P('L', 'IO25', 25), P('L', 'IO26', 26), P('L', 'IO27', 27), P('L', 'IO14', 14),
+      P('L', 'IO12', 12), P('L', 'GND', null, true), P('L', 'IO13', 13), P('L', 'D2', 9),
+      P('L', 'D3', 10), P('L', 'CMD', 11),
+      P('R', 'GND', null, true), P('R', 'IO23', 23), P('R', 'IO22', 22), P('R', 'TX0', 1),
+      P('R', 'RX0', 3), P('R', 'IO21', 21), P('R', 'GND', null, true), P('R', 'IO19', 19),
+      P('R', 'IO18', 18), P('R', 'IO5', 5), P('R', 'IO17', 17), P('R', 'IO16', 16),
+      P('R', 'IO4', 4), P('R', 'IO0', 0), P('R', 'IO2', 2), P('R', 'IO15', 15),
+      P('R', 'D1', 8), P('R', 'D0', 7), P('R', 'CLK', 6), P('R', '5V', null, true)
+    ];
+    return {
+      identifier: 'esp32-wroom-32',
+      displayName: 'ESP32-WROOM-32 (DevKitC, 38-pin)',
+      pins: wroom32Pins(true),
+      recommended: { SDA: 21, SCL: 22, SERVO_OE: 23, SDA2: 32, SCL2: 33, SERVO_OE2: 25,
+        SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
+      layout: layout
+    };
+  }
+
+  function buildEsp32DevKitV1() {
+    // ESP32 DevKit v1 / NodeMCU-32S — 30-pin header (flash pads not broken out).
+    var layout = [
+      P('L', 'EN', null, true), P('L', 'VP', 36), P('L', 'VN', 39), P('L', 'IO34', 34),
+      P('L', 'IO35', 35), P('L', 'IO32', 32), P('L', 'IO33', 33), P('L', 'IO25', 25),
+      P('L', 'IO26', 26), P('L', 'IO27', 27), P('L', 'IO14', 14), P('L', 'IO12', 12),
+      P('L', 'IO13', 13), P('L', 'GND', null, true), P('L', 'VIN', null, true),
+      P('R', 'IO23', 23), P('R', 'IO22', 22), P('R', 'TX0', 1), P('R', 'RX0', 3),
+      P('R', 'IO21', 21), P('R', 'GND', null, true), P('R', 'IO19', 19), P('R', 'IO18', 18),
+      P('R', 'IO5', 5), P('R', 'IO17', 17), P('R', 'IO16', 16), P('R', 'IO4', 4),
+      P('R', 'IO0', 0), P('R', 'IO2', 2), P('R', 'IO15', 15)
+    ];
+    return {
+      identifier: 'esp32-devkit-v1',
+      displayName: 'ESP32 DevKit v1 (30-pin)',
+      pins: wroom32Pins(false),
+      recommended: { SDA: 21, SCL: 22, SERVO_OE: 23, SDA2: 32, SCL2: 33, SERVO_OE2: 25,
+        SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
+      layout: layout
+    };
+  }
+
+  // Board registry — the boards the UI offers for the pin representation.
+  var BOARDS = {};
+  [buildDevKitC1(), buildWroom32DevKitC(), buildEsp32DevKitV1()].forEach(function (b) { BOARDS[b.identifier] = b; });
+  function boardFor(id) { return BOARDS[id] || BOARDS['esp32-s3-devkitc-1']; }
+  GMB.boardList = function () {
+    return Object.keys(BOARDS).map(function (id) { return { id: id, name: BOARDS[id].displayName }; });
+  };
+  // Recommended pin map for a board id (SDA/SCL/OE… ), used by auto-assign and the
+  // second-bus pin defaults. Falls back to the S3 map.
+  GMB.recommendedFor = function (id) { return boardFor(id).recommended || RECOMMENDED; };
 
   // ---------------------------------------------------------------------------
   // Default recommended pin assignment (spec 11.5). Signal names
@@ -492,7 +618,12 @@
     ],
     startupSlot: 0
   };
-  GMB.mockBoard = function () { return MOCK.board; };
+  // The board the current working profile targets (falls back to the S3 DevKitC-1).
+  function currentBoardId() {
+    return (GMB.state && GMB.state.profile && GMB.state.profile.board &&
+      GMB.state.profile.board.profile) || 'esp32-s3-devkitc-1';
+  }
+  GMB.mockBoard = function () { return boardFor(currentBoardId()); };
 
   // Build the { profiles:[...], startupSlot } list from the slot array.
   function mockProfilesList() {
@@ -507,12 +638,13 @@
   // requested string count and reserved USB pins (mirrors PinManager::autoAssign).
   // ---------------------------------------------------------------------------
   function mockAutoAssign(req) {
+    var rec = GMB.recommendedFor(currentBoardId());
     var pins = [];
     if (req.useI2cServos !== false) {
-      pins.push({ signal: 'SDA', kind: 'sda', gpio: RECOMMENDED.SDA });
-      pins.push({ signal: 'SCL', kind: 'scl', gpio: RECOMMENDED.SCL });
+      pins.push({ signal: 'SDA', kind: 'sda', gpio: rec.SDA });
+      pins.push({ signal: 'SCL', kind: 'scl', gpio: rec.SCL });
     }
-    if (req.servoSafetyOe !== false) pins.push({ signal: 'SERVO_OE', kind: 'servoOe', gpio: RECOMMENDED.SERVO_OE });
+    if (req.servoSafetyOe !== false) pins.push({ signal: 'SERVO_OE', kind: 'servoOe', gpio: rec.SERVO_OE });
     return { pins: pins, errors: [] };
   }
 
@@ -521,16 +653,17 @@
   function mockValidatePins(profile) {
     var pins = (profile && profile.pins) || [];
     var reserveUsb = !!(profile && profile.board && profile.board.reserveUsb);
+    var brd = boardFor(profile && profile.board && profile.board.profile);
     var errors = [];
     var byGpio = {};
     pins.forEach(function (a) {
       if (a.gpio < 0) return;
-      var cap = MOCK.board.pins.filter(function (p) { return p.gpio === a.gpio; })[0];
+      var cap = brd.pins.filter(function (p) { return p.gpio === a.gpio; })[0];
       // Duplicate use.
       if (byGpio[a.gpio]) {
         errors.push({ signal: a.signal, gpio: a.gpio,
           reason: 'GPIO ' + a.gpio + ' is already used by ' + byGpio[a.gpio] + '.',
-          suggestion: suggest(a.kind, pins), conflictWith: byGpio[a.gpio] });
+          suggestion: suggest(a.kind, pins, brd), conflictWith: byGpio[a.gpio] });
       } else {
         byGpio[a.gpio] = a.signal;
       }
@@ -538,19 +671,19 @@
       if (!cap) {
         errors.push({ signal: a.signal, gpio: a.gpio,
           reason: 'GPIO ' + a.gpio + ' does not exist on this board.',
-          suggestion: suggest(a.kind, pins), conflictWith: '' });
+          suggestion: suggest(a.kind, pins, brd), conflictWith: '' });
       } else if (reserveUsb && cap.usb) {
         errors.push({ signal: a.signal, gpio: a.gpio,
           reason: 'GPIO ' + a.gpio + ' is reserved for future native USB.',
-          suggestion: suggest(a.kind, pins), conflictWith: 'USB (reserved)' });
+          suggestion: suggest(a.kind, pins, brd), conflictWith: 'USB (reserved)' });
       } else if (cap.preference === 'reserved') {
         errors.push({ signal: a.signal, gpio: a.gpio,
           reason: cap.note || ('GPIO ' + a.gpio + ' is reserved.'),
-          suggestion: suggest(a.kind, pins), conflictWith: '' });
+          suggestion: suggest(a.kind, pins, brd), conflictWith: '' });
       } else if (!GMB.pinSupports(cap, SIGNAL_KIND[a.kind] || 'generic')) {
         errors.push({ signal: a.signal, gpio: a.gpio,
           reason: 'GPIO ' + a.gpio + ' is not compatible with a ' + a.kind.toUpperCase() + ' signal.',
-          suggestion: suggest(a.kind, pins), conflictWith: '' });
+          suggestion: suggest(a.kind, pins, brd), conflictWith: '' });
       }
     });
     // Map the rich mock errors onto the firmware's { field, message, severity }
@@ -562,11 +695,11 @@
     return { ok: issues.length === 0, issues: issues };
   }
 
-  function suggest(kind, pins) {
+  function suggest(kind, pins, brd) {
     var used = {};
     pins.forEach(function (a) { used[a.gpio] = true; });
     var wantKind = SIGNAL_KIND[kind] || 'generic';
-    var free = MOCK.board.pins.filter(function (p) {
+    var free = (brd || boardFor(currentBoardId())).pins.filter(function (p) {
       return !used[p.gpio] && p.preference === 'recommended' && GMB.pinSupports(p, wantKind);
     });
     return free.length ? ('Try GPIO ' + free[0].gpio + '.') : 'No free recommended pin — free one up first.';
@@ -924,7 +1057,7 @@
       });
     },
     getBoard: function (id) {
-      return this._call('/api/board/' + id, null, function () { return deepCopy(MOCK.board); });
+      return this._call('/api/board/' + id, null, function () { return deepCopy(boardFor(id)); });
     },
     // GET /gmb/descriptor.json -> the GMB v2 descriptor the firmware serves (the
     // authoritative view of what a General-Midi-Boop controller receives).
@@ -934,8 +1067,10 @@
       });
     },
     autoPins: function (req) {
+      // Tell the firmware which board the draft targets (board-aware auto-assign).
+      var body = Object.assign({ board: currentBoardId() }, req);
       return this._call('/api/pins/auto', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       }, function () { return mockAutoAssign(req); });
     },
     // POST /api/pins/validate -> { ok, issues:[{field,message,severity}] }.

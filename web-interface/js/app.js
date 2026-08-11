@@ -126,7 +126,7 @@
   var TABS = [
     { id: 'fretboard', label: 'Instrument', icon: '♪' },
     { id: 'calibration', label: 'Calibration', icon: '⛭' },
-    { id: 'hardware', label: 'Câblage & GPIO', icon: '⚡' }
+    { id: 'hardware', label: 'Wiring & GPIO', icon: '⚡' }
   ];
 
   var state = {
@@ -256,7 +256,7 @@
           h('span#mock-badge.badge.mock', { style: 'display:none' }, 'DEMO / MOCK DATA'),
           h('span#conn-badge.badge.ok', 'Local'),
           h('button.icon-btn#settings-btn', {
-            title: 'Réglages — configuration instrument, MIDI, réseau, profils, avancé',
+            title: 'Settings — instrument configuration, MIDI, network, advanced',
             onclick: function () { if (GMB.openSettings) GMB.openSettings(); }
           }, '⚙')
         ])

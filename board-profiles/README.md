@@ -14,6 +14,8 @@ sync means the browser UI and the on-device validator agree about every pin.
 | File | Board | Source of truth |
 | ---- | ----- | --------------- |
 | `esp32-s3-devkitc-1.json` | Espressif ESP32-S3-DevKitC-1 | `makeEsp32S3DevKitC1()` |
+| `esp32-wroom-32.json` | ESP32-WROOM-32 (DevKitC, 38-pin) | `makeEsp32Wroom32()` |
+| `esp32-devkit-v1.json` | ESP32 DevKit v1 (30-pin) | `makeEsp32DevKitV1()` |
 
 ## Top-level format
 

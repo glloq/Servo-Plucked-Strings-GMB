@@ -272,10 +272,12 @@ void WebApi::registerRoutes() {
         sendJson(req, doc, queued ? 202 : 503);
     });
 
-    // ---- GET /api/board/{id} ----
-    server_->on("/api/board/esp32-s3-devkitc-1", HTTP_GET,
-               [](AsyncWebServerRequest* req) {
-        const BoardProfile* b = builtinBoardProfile("esp32-s3-devkitc-1");
+    // ---- GET /api/board/{id} ---- one route per built-in board profile. The
+    // JSON carries exposed / input / output so the web can filter candidates
+    // correctly (classic-ESP32 input-only pins 34/35/36/39 have output=false).
+    auto emitBoard = [](AsyncWebServerRequest* req, const char* id) {
+        const BoardProfile* b = builtinBoardProfile(id);
+        if (!b) b = builtinBoardProfile("esp32-s3-devkitc-1");
         JsonDocument doc;
         doc["identifier"] = b->identifier;
         doc["displayName"] = b->displayName;
@@ -283,6 +285,9 @@ void WebApi::registerRoutes() {
         for (const auto& p : b->pins) {
             JsonObject o = pins.add<JsonObject>();
             o["gpio"] = p.gpio;
+            o["exposed"] = p.exposed;
+            o["input"] = p.input;
+            o["output"] = p.output;
             o["preference"] = prefName(p.preference);
             o["reserved"] = p.reserved;
             o["usb"] = p.usb;
@@ -292,7 +297,13 @@ void WebApi::registerRoutes() {
             o["note"] = p.note;
         }
         sendJson(req, doc);
-    });
+    };
+    static const char* const kBoardIds[] = {
+        "esp32-s3-devkitc-1", "esp32-wroom-32", "esp32-devkit-v1"};
+    for (const char* id : kBoardIds) {
+        server_->on((std::string("/api/board/") + id).c_str(), HTTP_GET,
+                   [emitBoard, id](AsyncWebServerRequest* req) { emitBoard(req, id); });
+    }
 
     // ---- POST /api/pins/auto (auto-assign GPIO for the wizard's draft) ----
     // Reads the wizard's request body so the assignment matches the DRAFT being
@@ -300,7 +311,14 @@ void WebApi::registerRoutes() {
     // currently-active profile.
     auto* pinsAuto = new AsyncCallbackJsonWebHandler(
         "/api/pins/auto", [this](AsyncWebServerRequest* req, JsonVariant& body) {
-            const BoardProfile* b = builtinBoardProfile("esp32-s3-devkitc-1");
+            // Assign against the board the DRAFT targets (body), else the active
+            // profile's board, else the reference S3.
+            std::string boardId = body["board"] | "";
+            if (boardId.empty())
+                boardId = ctx_.profile ? ctx_.profile->boardIdentifier
+                                       : std::string("esp32-s3-devkitc-1");
+            const BoardProfile* b = builtinBoardProfile(boardId);
+            if (!b) b = builtinBoardProfile("esp32-s3-devkitc-1");
             PinManager pm(*b);
             PinRequest r;
             int fallback = ctx_.profile ? ctx_.profile->instrument.stringCount : 4;

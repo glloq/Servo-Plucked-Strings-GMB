@@ -112,21 +112,39 @@ mapping reste néanmoins libre par servo.
 ## 🖥️ Interface web
 
 Toute la configuration se fait dans le navigateur (servie par l'ESP32, ou en
-ouvrant `web-interface/index.html` en **mode démo**). Huit pages **adaptatives** —
-tableau de bord, manche jouable, assistant de création, broches GPIO, **câblage**,
-MIDI, GMB/SysEx et profils. Aperçu de chacune :
-[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-eight-pages-at-a-glance).
+ouvrant `web-interface/index.html` en **mode démo**). L'interface se réduit à
+**trois pages principales** — Instrument, Calibration, Câblage & GPIO — et tout
+le reste (configuration de l'instrument, MIDI, réseau, avancé) est regroupé dans
+le **modal Réglages** (bouton engrenage). Aperçu détaillé de chaque partie :
+[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
 
-La carte de **câblage** dessine le faisceau ESP32 + PCA9685 de l'instrument courant
-(un ou deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit) :
+**Instrument** — manche jouable façon GMB : un cercle de note par frette utilisée
+et par corde à vide, gros arrêt d'urgence + ré-armement, sélecteur de mode de jeu,
+et une barre d'accords qui gratte l'accord sur plusieurs cordes.
+<p align="center"><img src="img/screenshots/fretboard.png" alt="Page Instrument" width="90%"/></p>
 
-<img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/>
+**Calibration** — réglage **manuel** des servos (angle de contact + sens de
+rotation) et banc de test, en trois étapes : Frettes → Grattage → Test.
+<p align="center"><img src="img/screenshots/calibration.png" alt="Page Calibration" width="90%"/></p>
+
+**Câblage & GPIO** — le faisceau ESP32 + PCA9685 de l'instrument courant (un ou
+deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit), et le
+**brochage graphique** de la carte ESP32 choisie (S3 / WROOM-32 / DevKit v1) avec
+les broches utilisées surlignées.
+<p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
+<p align="center"><img src="img/screenshots/pins.png" alt="Broches GPIO + brochage de la carte" width="90%"/></p>
+
+**Réglages** — l'assistant de configuration de l'instrument (toutes ses pages :
+Instrument → MIDI → Alimentation → Validation), plus réseau et outils avancés.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Modal Réglages — Configuration" width="90%"/></p>
 
 ## 🔌 Matériel
 
 <img src="img/Schemas.png" alt="Architecture PCA9685" width="80%"/>
 
-- **Carte** : ESP32-S3-DevKitC-1 (le profil de carte filtre les GPIO utilisables).
+- **Carte** : ESP32-S3-DevKitC-1, ESP32-WROOM-32 (DevKitC 38 broches) ou ESP32
+  DevKit v1 (30 broches), sélectionnable — le profil de carte filtre les GPIO
+  utilisables et le brochage est affiché graphiquement.
 - **Servos** : PWM issu d'un **canal PCA9685** (I²C, jusqu'à 8 cartes 0x40–0x47,
   16 canaux chacune) **ou** d'un **GPIO direct** (LEDC, jusqu'à 8 servos),
   mixables par servo.
@@ -192,11 +210,11 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ Adaptateurs ESP32 (Wi-Fi, serveur web, ServoBank, stockage)
 │   ├── src/main.cpp        Intégration matérielle + scheduler servo-par-frette
 │   └── test/               Tests natifs (g++) + hostcheck + profilecheck
-├── web-interface/          Interface web (wizard, calibration, dashboard,
-│                           moniteur MIDI, sélection CC, SysEx)
+├── web-interface/          Interface web (3 pages : Instrument, Calibration,
+│                           Câblage & GPIO + modal Réglages)
 ├── instrument-profiles/    Profils prêts (ukulélé + variante à engrenage, guitare,
 │                           basse, mandoline, banjo)
-├── board-profiles/         Carte ESP32-S3-DevKitC-1
+├── board-profiles/         Profils de carte ESP32 (S3, WROOM-32, DevKit v1)
 ├── hardware/               BOM, schémas, câblage
 ├── mechanics/              Notes mécaniques (doigts, grattage)
 ├── docs/                   Guides détaillés

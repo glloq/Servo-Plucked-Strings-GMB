@@ -28,7 +28,7 @@
 
     host.appendChild(h('div.card', [
       h('h2', 'Current working profile'),
-      h('p.muted', 'Edited across Configuration, Calibration and the hardware page; saved atomically. (Wi-Fi credentials live in the Réseau tab.)'),
+      h('p.muted', 'Edited across Configuration, Calibration and the hardware page; saved atomically. (Wi-Fi credentials live in the Network tab.)'),
       h('div.form-grid', [
         GMB.field('Name', GMB.input(GMB.state.profile.instrument, 'name')),
         GMB.field('Startup profile', h('span.muted', 'set from the list above'))
@@ -163,7 +163,7 @@
     GMB.api.loadProfileSlot(pr.slot).then(function (res) {
       if (res && res.ok === false) { GMB.toast('Slot ' + pr.slot + ' is empty.', 'warn'); return; }
       GMB.reloadProfile().then(function () {
-        GMB.toast('Profil « ' + pr.name + ' » chargé.', 'ok');
+        GMB.toast('Loaded “' + pr.name + '”.', 'ok');
         if (GMB.closeSettings) GMB.closeSettings();
         GMB.navigate('fretboard');
       });
