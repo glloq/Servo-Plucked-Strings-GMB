@@ -548,6 +548,55 @@
     return h('div.card', kids);
   }
 
+  // Power-distribution advice + a per-board bulk-capacitor recommendation, sized to
+  // how many micro-servos can start at once on each board (fewer starts -> a smaller
+  // cap is enough). The worst case follows the governor caps set on the Timing step:
+  // a per-board start cap directly bounds it.
+  function powerAdviceCard(p, m) {
+    var pw = p.power || {};
+    var globalCap = pw.maxConcurrentMoves | 0;    // 0 = no global limit
+    var boardCap = pw.maxConcurrentPerBoard | 0;  // 0 = no per-board limit
+    var needsBig = false;
+    var rows = m.boards.map(function (b) {
+      var chans = m.byBoard[b.key] || [];
+      var count = 0;
+      for (var c = 0; c < 16; c++) count += (chans[c] ? chans[c].length : 0);
+      var eff = boardCap > 0 ? boardCap : (globalCap > 0 ? globalCap : count);
+      var worst = Math.min(count, eff);
+      var uF = worst > 8 ? 2200 : 1000;
+      if (uF === 2200) needsBig = true;
+      return h('tr', [
+        h('td', 'PCA ' + b.board + ' · ' + hex2(0x40 + b.board) + (m.useBus1 ? ' · bus ' + b.bus : '')),
+        h('td', String(count)),
+        h('td', '≤ ' + worst),
+        h('td.cap-uf', uF + ' µF')
+      ]);
+    });
+    var kids = [
+      h('div.card-head', [h('h2', 'Power wiring'), h('span.muted', 'protect the 5–6 V servo rail')]),
+      h('ul.advice-list', [
+        h('li', ['Run a ', h('strong', 'direct line from the power supply to each PCA9685'),
+          '’s V+/GND input (star wiring) — don’t daisy-chain the power from one board to the ' +
+          'next, so one board’s in-rush can’t sag its neighbours.']),
+        h('li', ['Add a ', h('strong', 'bulk capacitor across each PCA9685’s V+/GND'),
+          ': 1000 µF per board, stepping up to 2200 µF once more than 6–8 micro-servos can ' +
+          'start at the same time on that board.']),
+        h('li', 'Keep the servo supply separate from the ESP32 3.3 V logic — share only GND.')
+      ])
+    ];
+    if (m.boards.length) {
+      kids.push(h('table.cap-table', [
+        h('thead', h('tr', [h('th', 'Board'), h('th', 'Servos'),
+          h('th', 'Can start at once'), h('th', 'Bulk cap')])),
+        h('tbody', rows)
+      ]));
+      if (needsBig && boardCap === 0)
+        kids.push(h('p.muted', 'Tip: a per-board start cap on the Timing step lowers the ' +
+          '“can start at once” count — set it to 6–8 and 1000 µF per board is enough.'));
+    }
+    return h('div.card', kids);
+  }
+
   // Serialize the live SVG and offer it as a download (a portable bench reference).
   function downloadSvg(host) {
     var node = host.querySelector('.wire-svg');
@@ -620,6 +669,7 @@
     ]));
 
     host.appendChild(summaryCard(p, m, issues));
+    host.appendChild(powerAdviceCard(p, m));
     host.appendChild(legendCard());
   }
 

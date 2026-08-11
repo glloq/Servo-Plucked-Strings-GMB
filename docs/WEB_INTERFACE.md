@@ -128,7 +128,12 @@ angle (always alternating), and an optional descent servo (the second way to str
 #### Main page 3 — Wiring & GPIO
 
 Two sub-tabs. The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards
-at their address, per-pin string·role, live conflict checks, SVG export…
+at their address, per-pin string·role, live conflict checks, SVG export — plus a
+**Power wiring** card: run a **direct line from the supply to each PCA9685** (star
+wiring, no daisy-chaining) and add a **bulk capacitor** at each board's V+/GND
+(**1000 µF per board**, **2200 µF** once more than 6–8 micro-servos can start at once
+on it). A per-board table sizes the capacitor from each board's worst-case
+simultaneous starts (which the Timing step's per-board cap bounds).
 <p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map (Wiring diagram sub-tab)" width="100%"/></p>
 
 …and the board GPIO map + per-signal assignment with a **graphical board pinout** that
