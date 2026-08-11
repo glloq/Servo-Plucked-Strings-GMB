@@ -549,26 +549,25 @@
   }
 
   // Power-distribution advice + a per-board bulk-capacitor recommendation, sized to
-  // how many micro-servos can start at once on each board (fewer starts -> a smaller
-  // cap is enough). The worst case follows the governor caps set on the Timing step:
-  // a per-board start cap directly bounds it.
+  // how many micro-servos sit on each board — its own worst-case simultaneous start.
+  // A per-board start cap (Timing step) hard-limits that and can lower the cap; the
+  // whole-instrument global cap is NOT used, since the capacitor must handle the
+  // board's own load whatever the software throttle does.
   function powerAdviceCard(p, m) {
     var pw = p.power || {};
-    var globalCap = pw.maxConcurrentMoves | 0;    // 0 = no global limit
     var boardCap = pw.maxConcurrentPerBoard | 0;  // 0 = no per-board limit
     var needsBig = false;
     var rows = m.boards.map(function (b) {
       var chans = m.byBoard[b.key] || [];
       var count = 0;
       for (var c = 0; c < 16; c++) count += (chans[c] ? chans[c].length : 0);
-      var eff = boardCap > 0 ? boardCap : (globalCap > 0 ? globalCap : count);
-      var worst = Math.min(count, eff);
+      var worst = boardCap > 0 ? Math.min(count, boardCap) : count;
       var uF = worst > 8 ? 2200 : 1000;
       if (uF === 2200) needsBig = true;
       return h('tr', [
         h('td', 'PCA ' + b.board + ' · ' + hex2(0x40 + b.board) + (m.useBus1 ? ' · bus ' + b.bus : '')),
         h('td', String(count)),
-        h('td', '≤ ' + worst),
+        h('td', boardCap > 0 ? ('≤ ' + worst) : String(worst)),
         h('td.cap-uf', uF + ' µF')
       ]);
     });
