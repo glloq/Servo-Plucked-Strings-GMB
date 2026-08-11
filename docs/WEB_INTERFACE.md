@@ -89,29 +89,54 @@ Simplified mode). All views are **adaptive**: they redraw from the active profil
 The interface keeps only **three main pages** in the sidebar; every other setting
 lives in the **Settings** modal (the gear button, top-right).
 
-#### Main pages
+#### Main page 1 — Instrument
 
-**Instrument** — a clean playable neck (GMB-style): a note-name circle on each equipped fret and the open string, press-and-hold to play. A big emergency **STOP** + Re-arm and the play-mode selector sit on top; a chord bar below strums common chords across the strings.
+A clean playable neck (GMB-style): a note-name circle on each equipped fret and the
+open string, press-and-hold to play. A big emergency **STOP** + Re-arm and the
+play-mode selector sit on top; a chord bar below strums common chords across the strings.
 <p align="center"><img src="../img/screenshots/fretboard.png" alt="Instrument page" width="100%"/></p>
 
-**Calibration** — hand tuning of the servos + test bench (Frets → Plucking → Test). Each equipped finger gets its contact angle, a Reverse rotation direction control and a live test.
-<p align="center"><img src="../img/screenshots/calibration.png" alt="Calibration page" width="100%"/></p>
+#### Main page 2 — Calibration
 
-**Wiring & GPIO** — the hardware page (two sub-tabs). The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards at their address, per-pin string·role, live conflict checks, SVG export…
+Hand tuning of the servos + a test bench, over three steps. Which frets carry a servo
+(and their gearing / wiring) is defined in Settings; here you only set angles and test.
+
+**Frets** — per equipped fret: contact angle, Reverse rotation direction, live test.
+<p align="center"><img src="../img/screenshots/calibration.png" alt="Calibration — Frets" width="100%"/></p>
+
+**Plucking** — the plectrum / strum servo per string (rest / strike angle, direction) plus the instrument-wide gesture & muting.
+<p align="center"><img src="../img/screenshots/calibration-plucking.png" alt="Calibration — Plucking" width="100%"/></p>
+
+**Test** — full-instrument group tests: play every open string, sweep every finger / plucker, run a scale, test everything.
+<p align="center"><img src="../img/screenshots/calibration-test.png" alt="Calibration — Test" width="100%"/></p>
+
+#### Main page 3 — Wiring & GPIO
+
+Two sub-tabs. The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards
+at their address, per-pin string·role, live conflict checks, SVG export…
 <p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map (Wiring diagram sub-tab)" width="100%"/></p>
 
-…and the board GPIO map + per-signal assignment with an **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) and a **graphical board pinout** that highlights the used pins.
+…and the board GPIO map + per-signal assignment with an **ESP32 board selector**
+(S3 / WROOM-32 / DevKit v1) and a **graphical board pinout** that highlights the used pins.
 <p align="center"><img src="../img/screenshots/pins.png" alt="GPIO grid + board pinout (GPIO pins sub-tab)" width="100%"/></p>
 
 #### Settings modal (gear button)
 
-**Configuration** — the instrument-configuration wizard with **every page** reachable: Instrument → MIDI → Power → Validation.
-<p align="center"><img src="../img/screenshots/wizard.png" alt="Settings — Configuration wizard" width="100%"/></p>
+**Configuration** — the instrument-configuration wizard, every page reachable:
 
-**MIDI** — string/fret CC selection and playback parameters (a page of the config wizard).
-<p align="center"><img src="../img/screenshots/midi.png" alt="Settings — MIDI page" width="100%"/></p>
+Instrument (type, strings, tuning, fretting / sounding mechanism, I²C-bus split, generate wiring):
+<p align="center"><img src="../img/screenshots/wizard.png" alt="Settings — Configuration: Instrument" width="100%"/></p>
 
-**Advanced** — GMB identity & computed capabilities + the SysEx tester, and the live MIDI monitor.
+MIDI (string/fret CC selection + playback parameters):
+<p align="center"><img src="../img/screenshots/midi.png" alt="Settings — Configuration: MIDI" width="100%"/></p>
+
+Power (PCA9685 in-rush current limits + latency):
+<p align="center"><img src="../img/screenshots/power.png" alt="Settings — Configuration: Power" width="100%"/></p>
+
+**Network** — network mode, SSIDs, hostname, write-only Wi-Fi credentials and the hotspot switch:
+<p align="center"><img src="../img/screenshots/network.png" alt="Settings — Network" width="100%"/></p>
+
+**Advanced** — GMB identity & computed capabilities + the SysEx tester, and the live MIDI monitor:
 <p align="center"><img src="../img/screenshots/sysex.png" alt="Settings — Advanced (GMB / SysEx)" width="100%"/></p>
 
 Profiles are intentionally not exposed (a hidden, non-user setting).

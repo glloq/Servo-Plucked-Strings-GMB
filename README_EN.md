@@ -111,21 +111,39 @@ mapping still stays free per servo.
 ## 🖥️ Web interface
 
 All configuration happens in the browser (served by the ESP32, or by opening
-`web-interface/index.html` in **demo mode**). Eight **adaptive** pages — dashboard,
-playable fretboard, setup wizard, GPIO pins, **wiring**, MIDI, GMB/SysEx and
-profiles. Overview of each:
-[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-eight-pages-at-a-glance).
+`web-interface/index.html` in **demo mode**). The interface is just **three main
+pages** — Instrument, Calibration, Wiring & GPIO — and everything else (instrument
+configuration, MIDI, network, advanced) lives in the **Settings** modal (gear
+button). Detailed overview of every part:
+[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
 
-The **wiring** map draws the current instrument's ESP32 + PCA9685 harness (one or
-two I²C buses, addresses, per-pin string·role, live conflict checks):
+**Instrument** — a GMB-style playable neck: a note-name circle on each equipped
+fret and open string, a big emergency STOP + Re-arm, a play-mode selector, and a
+chord bar that strums a chord across several strings.
+<p align="center"><img src="img/screenshots/fretboard.png" alt="Instrument page" width="90%"/></p>
 
-<img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/>
+**Calibration** — **hand** tuning of the servos (contact angle + rotation
+direction) and a test bench, in three steps: Frets → Plucking → Test.
+<p align="center"><img src="img/screenshots/calibration.png" alt="Calibration page" width="90%"/></p>
+
+**Wiring & GPIO** — the current instrument's ESP32 + PCA9685 harness (one or two
+I²C buses, addresses, per-pin string·role, live conflict checks), and the
+**graphical pinout** of the chosen ESP32 board (S3 / WROOM-32 / DevKit v1) with the
+used pins highlighted.
+<p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
+<p align="center"><img src="img/screenshots/pins.png" alt="GPIO pins + board pinout" width="90%"/></p>
+
+**Settings** — the instrument-configuration wizard (all its pages: Instrument →
+MIDI → Power → Validation), plus network and advanced tools.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Settings modal — Configuration" width="90%"/></p>
 
 ## 🔌 Hardware
 
 <img src="img/Schemas.png" alt="PCA9685 architecture" width="80%"/>
 
-- **Board**: ESP32-S3-DevKitC-1 (the board profile filters usable GPIOs).
+- **Board**: ESP32-S3-DevKitC-1, ESP32-WROOM-32 (DevKitC 38-pin) or ESP32
+  DevKit v1 (30-pin), selectable — the board profile filters usable GPIOs and
+  the pinout is shown graphically.
 - **Servos**: PWM from a **PCA9685 channel** (I²C, up to 8 boards 0x40–0x47,
   16 channels each) **or** a **direct GPIO** (LEDC, up to 8 servos), mixable per
   servo.
@@ -191,11 +209,11 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ ESP32 adapters (Wi-Fi, web server, ServoBank, storage)
 │   ├── src/main.cpp        Hardware integration + servo-per-fret scheduler
 │   └── test/               Native tests (g++) + hostcheck + profilecheck
-├── web-interface/          Web interface (wizard, calibration, dashboard,
-│                           MIDI monitor, CC selection, SysEx)
+├── web-interface/          Web interface (3 pages: Instrument, Calibration,
+│                           Wiring & GPIO + Settings modal)
 ├── instrument-profiles/    Ready-made profiles (ukulele + geared variant, guitar,
 │                           bass, mandolin, banjo)
-├── board-profiles/         ESP32-S3-DevKitC-1 board
+├── board-profiles/         ESP32 board profiles (S3, WROOM-32, DevKit v1)
 ├── hardware/               BOM, schematics, wiring
 ├── mechanics/              Mechanical notes (fingers, plucking)
 ├── docs/                   Detailed guides
