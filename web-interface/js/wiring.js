@@ -548,6 +548,66 @@
     return h('div.card', kids);
   }
 
+  // Bulk-capacitor range for a board, sized to how many micro-servos can start at
+  // once on it (each servo's in-rush hits this board's own capacitor):
+  //   ~4 → 1000–2200 µF · ~8 → 2200–4700 µF · ~16 → 4700–10000 µF.
+  function capRange(n) {
+    if (n <= 4) return '1000–2200 µF';
+    if (n <= 8) return '2200–4700 µF';
+    return '4700–10000 µF';  // up to a PCA9685's 16 channels
+  }
+
+  // Power-distribution advice + a per-board bulk-capacitor recommendation, sized to
+  // how many micro-servos sit on each board — its own worst-case simultaneous start.
+  // A per-board start cap (Timing step) hard-limits that and can lower the cap; the
+  // whole-instrument global cap is NOT used, since the capacitor must handle the
+  // board's own load whatever the software throttle does.
+  function powerAdviceCard(p, m) {
+    var pw = p.power || {};
+    var boardCap = pw.maxConcurrentPerBoard | 0;  // 0 = no per-board limit
+    var anyAboveMin = false;
+    var rows = m.boards.map(function (b) {
+      var chans = m.byBoard[b.key] || [];
+      var count = 0;
+      for (var c = 0; c < 16; c++) count += (chans[c] ? chans[c].length : 0);
+      var worst = boardCap > 0 ? Math.min(count, boardCap) : count;
+      if (worst > 4) anyAboveMin = true;
+      return h('tr', [
+        h('td', 'PCA ' + b.board + ' · ' + hex2(0x40 + b.board) + (m.useBus1 ? ' · bus ' + b.bus : '')),
+        h('td', String(count)),
+        h('td', boardCap > 0 ? ('≤ ' + worst) : String(worst)),
+        h('td.cap-uf', capRange(worst))
+      ]);
+    });
+    var kids = [
+      h('div.card-head', [h('h2', 'Power wiring'), h('span.muted', 'protect the 5–6 V servo rail')]),
+      h('ul.advice-list', [
+        h('li', ['Run a ', h('strong', 'direct line from the power supply to each PCA9685'),
+          '’s V+/GND input (star wiring) — don’t daisy-chain the power from one board to the ' +
+          'next, so one board’s in-rush can’t sag its neighbours.']),
+        h('li', ['Add a ', h('strong', 'bulk capacitor across each PCA9685’s V+/GND'),
+          ', sized to how many micro-servos can start at once on that board: ',
+          h('strong', '~4 → 1000–2200 µF'), ', ', h('strong', '~8 → 2200–4700 µF'), ', ',
+          h('strong', '~16 → 4700–10000 µF'), '.']),
+        h('li', ['Pair it with a ', h('strong', '100 nF ceramic'),
+          ' across the same V+/GND to filter high-frequency noise — this limits ESP32 ' +
+          'resets/crashes, especially when the logic shares the servo supply.']),
+        h('li', 'Keep the servo supply separate from the ESP32 3.3 V logic — share only GND.')
+      ])
+    ];
+    if (m.boards.length) {
+      kids.push(h('table.cap-table', [
+        h('thead', h('tr', [h('th', 'Board'), h('th', 'Servos'),
+          h('th', 'Can start at once'), h('th', 'Bulk cap')])),
+        h('tbody', rows)
+      ]));
+      if (anyAboveMin && boardCap === 0)
+        kids.push(h('p.muted', 'Tip: a per-board start cap on the Timing step limits how many ' +
+          'servos start at once, so a smaller capacitor per board is enough.'));
+    }
+    return h('div.card', kids);
+  }
+
   // Serialize the live SVG and offer it as a download (a portable bench reference).
   function downloadSvg(host) {
     var node = host.querySelector('.wire-svg');
@@ -620,6 +680,7 @@
     ]));
 
     host.appendChild(summaryCard(p, m, issues));
+    host.appendChild(powerAdviceCard(p, m));
     host.appendChild(legendCard());
   }
 

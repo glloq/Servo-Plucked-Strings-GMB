@@ -705,6 +705,15 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .wire-svg { display: block; width: 100%; height: auto; min-width: 360px; }
 .wire-svg text { font-family: var(--sans); }
 
+/* Power-wiring advice + per-board capacitor table (Wiring diagram tab). */
+.advice-list { margin: 4px 0 14px; padding-left: 20px; display: flex; flex-direction: column; gap: 7px; }
+.advice-list li { line-height: 1.45; }
+.cap-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cap-table th, .cap-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.cap-table th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.cap-table td { font-variant-numeric: tabular-nums; }
+.cap-table .cap-uf { font-weight: 700; white-space: nowrap; }
+
 /* Modules. */
 .wire-esp { fill: var(--wire-esp); stroke: rgba(0, 0, 0, .35); stroke-width: 1.4; }
 .wire-psu { fill: var(--wire-psu); stroke: rgba(0, 0, 0, .35); stroke-width: 1.4; }
