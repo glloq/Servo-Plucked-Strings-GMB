@@ -57,10 +57,20 @@ The IDE opens the sketch and shows `firmware.ino` as well as the `src/` tree.
 | Option | Recommended value |
 | ------ | ----------------- |
 | USB CDC On Boot | **Enabled** (serial console on the native USB) |
-| Flash Size | **8MB** (or according to your module) |
-| Partition Scheme | a scheme **with a filesystem**, e.g. *"8M with spiffs (3MB APP/1.5MB SPIFFS)"* |
+| Flash Size | **8MB** for the ESP32-S3-DevKitC-1 (or according to your module — 4MB on many classic boards) |
+| Partition Scheme | a **No-OTA "Huge APP"** scheme that still keeps a filesystem — see below |
 | PSRAM | according to the module variant (OPI PSRAM if present) |
 | Upload Mode | UART0 / Hardware CDC |
+
+> **Partition Scheme — use a No-OTA "Huge APP".** This firmware (async web server +
+> JSON + servo control) is large and does **not** use OTA, so pick a **No-OTA**
+> scheme (both app slots merged into one) that still reserves a **filesystem**
+> partition for the web UI. On a **4 MB** flash board (e.g. an ESP32-WROOM-32 or a
+> DevKit v1) an OTA scheme leaves too little app space and the sketch won't fit —
+> choose **"Huge APP (3MB No OTA/1MB SPIFFS)"**. On the **8 MB** ESP32-S3-DevKitC-1,
+> use *"8M with spiffs (3MB APP/1.5MB SPIFFS)"*. The "spiffs" data partition holds
+> the LittleFS `/www` uploaded in §7 (its label says SPIFFS but it is formatted as
+> LittleFS).
 
 > **Reserved pins**: GPIO19/20 (native USB), 43/44 (UART0), 0/3/45/46
 > (strapping), 48 (LED), 26–32 & 35–37 (Flash/PSRAM). The firmware and the Web
@@ -103,7 +113,7 @@ At power-on, the ESP32 creates the Wi-Fi access point
 | `fatal error: ArduinoJson.h: No such file or directory` | Library not installed — see §3. |
 | `ledcAttach was not declared` | ESP32 core is version 2.x — update to 3.x (§2). |
 | Empty Web interface / 404 | LittleFS image not uploaded — redo §7 after `sync_web_data.sh`. |
-| `Sketch too big` / no FS | Choose a *Partition Scheme* with a filesystem (§5). |
+| `Sketch too big` / no FS | Choose a **No-OTA "Huge APP"** partition scheme with a filesystem — on 4 MB flash, *"Huge APP (3MB No OTA/1MB SPIFFS)"* (§5). An OTA scheme's ~1.3 MB app slot is too small for this firmware. |
 | The sketch does not compile the files in `src/` | Make sure you open `firmware/firmware.ino` (the `src/` must be **next to** the `.ino`). |
 | Unit tests | They do **not** compile in the Arduino IDE; use `cd firmware/test && make` (see [`ARCHITECTURE.md`](ARCHITECTURE.md)). |
 

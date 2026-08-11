@@ -177,7 +177,9 @@ pio run -t upload           # flash the firmware
 ```
 
 (Arduino IDE: open `firmware/firmware.ino`; the `src/` folder is compiled
-recursively. See [`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)
+recursively. Pick a **No-OTA "Huge APP"** partition scheme so the large firmware
+fits — on 4 MB boards *"Huge APP (3MB No OTA/1MB SPIFFS)"*. See
+[`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)
 
 ### 3. First configuration
 

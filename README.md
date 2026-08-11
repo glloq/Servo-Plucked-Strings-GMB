@@ -180,7 +180,9 @@ pio run -t upload           # flashe le firmware
 ```
 
 (Arduino IDE : ouvrir `firmware/firmware.ino`, le dossier `src/` est compilé
-récursivement. Voir [`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)
+récursivement. Choisir un schéma de partition **« Huge APP » sans OTA** pour que le
+firmware (volumineux) tienne — sur les cartes 4 Mo : *« Huge APP (3MB No OTA/1MB
+SPIFFS) »*. Voir [`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)
 
 ### 3. Première configuration
 
