@@ -119,13 +119,14 @@
   };
 
   // ---- routing --------------------------------------------------------------
-  // Only three main pages a player needs (UI redesign): the playable instrument,
-  // the servo calibration, and the hardware (wiring + GPIO). Everything else —
-  // the instrument-configuration wizard, MIDI, network, profiles and the SysEx
-  // tooling — lives in the Settings modal (gear button, top-right).
+  // Three main pages (UI redesign): the playable Instrument, the complete Setup
+  // flow (the whole instrument creation in order — identity, mechanics, board,
+  // wiring, frets, plucking, MIDI, timing, test, validation), and the Wiring &
+  // GPIO reference. Only device Wi-Fi and the diagnostic tools (SysEx / MIDI
+  // monitor) live in the Settings modal (gear button, top-right).
   var TABS = [
     { id: 'fretboard', label: 'Instrument', icon: '♪' },
-    { id: 'calibration', label: 'Calibration', icon: '⛭' },
+    { id: 'setup', label: 'Setup', icon: '⛭' },
     { id: 'hardware', label: 'Wiring & GPIO', icon: '⚡' }
   ];
 
@@ -256,7 +257,7 @@
           h('span#mock-badge.badge.mock', { style: 'display:none' }, 'DEMO / MOCK DATA'),
           h('span#conn-badge.badge.ok', 'Local'),
           h('button.icon-btn#settings-btn', {
-            title: 'Settings — instrument configuration, MIDI, network, advanced',
+            title: 'Device settings — Wi-Fi network and advanced diagnostic tools',
             onclick: function () { if (GMB.openSettings) GMB.openSettings(); }
           }, '⚙')
         ])

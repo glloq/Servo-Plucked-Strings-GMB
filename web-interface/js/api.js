@@ -400,8 +400,13 @@
     // 'open' / 'custom' add no finger servos.
 
     if (spec.fretting !== 'custom') {                  // every sounding string needs a striker
+      // Unified plucking model: the plectrum RESTS against the string (contact,
+      // ~90°) and sweeps ± an angle for alternating strokes — down-stroke to
+      // activeUs (~110°), up-stroke to activeAltUs (~70°). Same config for every
+      // striker; only the angles change with the mechanical mounting.
       push(spec.sounding === 'strum' ? 'strum' : 'pluck',
-        { activeUs: 1700, travelMs: 90, settleMs: 20 });
+        { restUs: 1500, activeUs: 1720, activeAltUs: 1280, alternateDirection: true,
+          travelMs: 90, settleMs: 20 });
       if (spec.lift)   push('strumLift', { restUs: 1000, activeUs: 1600, engageDelayMs: 20 });
       if (spec.damper) push('damper',    { restUs: 1000, activeUs: 1600 });
     }
@@ -473,14 +478,16 @@
           expiredSelectionPolicy: 'automaticAllocation'
         }
       },
-      // Ukulele GCEA: physical order low->high used by GMB = G4(67) C4(60) E4(64) A4(69)
-      strings: [makeString(67, 12), makeString(60, 12), makeString(64, 12), makeString(69, 12)],
-      // Servo-per-fret: one finger servo per fret + one plucker per string, wired
-      // one PCA9685 per string (board = string index).
-      servos: GMB.defaultStringServos(0, 12)
-        .concat(GMB.defaultStringServos(1, 12))
-        .concat(GMB.defaultStringServos(2, 12))
-        .concat(GMB.defaultStringServos(3, 12))
+      // Ukulele GCEA: physical order low->high used by GMB = G4(67) C4(60) E4(64) A4(69).
+      // Fret reach shortens across the neck: 12 / 10 / 8 / 7 frets per string.
+      strings: [makeString(67, 12), makeString(60, 10), makeString(64, 8), makeString(69, 7)],
+      // Each string: a geared servo covering the first two frets (tight low frets
+      // need the extra torque of a reduction gear), plain fingers on the rest, and
+      // one plucker. One PCA9685 per string (board = string index).
+      servos: GMB.buildStringServos(0, { maxFret: 12, fretting: 'geared', gearThreshold: 2, sounding: 'pluck', board: 0 })
+        .concat(GMB.buildStringServos(1, { maxFret: 10, fretting: 'geared', gearThreshold: 2, sounding: 'pluck', board: 1 }))
+        .concat(GMB.buildStringServos(2, { maxFret: 8, fretting: 'geared', gearThreshold: 2, sounding: 'pluck', board: 2 }))
+        .concat(GMB.buildStringServos(3, { maxFret: 7, fretting: 'geared', gearThreshold: 2, sounding: 'pluck', board: 3 }))
     };
   }
   GMB.sampleProfile = sampleProfile;
@@ -861,11 +868,13 @@
             CC: cc.join(', ') };
         }
         case 'stringConfig': {
-          var strings = resp[7], frets = resp[8], capo = resp[10],
+          // resp[10] is the protocol's transpose/offset byte (kept on the wire, not
+          // surfaced in the interface).
+          var strings = resp[7], frets = resp[8],
             ccString = resp[12], ccFret = resp[13];
           var tuning = resp.slice(14, 14 + strings);
           return { Channel: resp[6] + 1, Strings: strings, Frets: frets, Fretless: 'no',
-            Capo: capo, 'CC string': ccString, 'CC fret': ccFret,
+            'CC string': ccString, 'CC fret': ccFret,
             Tuning: tuning.map(GMB.noteName).join(' ') };
         }
         case 'notify':

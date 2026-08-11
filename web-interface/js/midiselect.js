@@ -16,7 +16,7 @@
   var monitor = null;
 
   // MIDI settings only (params + timing + string/fret selection + advanced). Used
-  // as the MIDI step of the config wizard (Settings modal). No live socket here.
+  // as the MIDI step of the Setup page flow. No live socket here.
   function renderSettings(host) {
     var p = GMB.state.profile;
     var sfs = p.stringFretSelection;
@@ -54,17 +54,8 @@
     );
     host.appendChild(h('div.card', [h('h2', 'MIDI parameters'), h('div.form-grid', midiFields)]));
 
-    // ---- Playback timing / latency (Advanced) ------------------------------
-    if (adv) host.appendChild(h('div.card', [
-      h('h2', 'Playback timing'),
-      h('p.muted', 'Manage the delay between receiving a note and hearing it, and how early the mechanics anticipate.'),
-      h('div.form-grid', [
-        GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 2000 }),
-          'Fixed delay from Note On to the note actually sounding, giving the finger a constant window to reach the fret.'),
-        GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs', { type: 'number', min: 0, max: 2000 }),
-          'Start lowering the strum lift this long before the string is ready, so it is engaged when the strike time comes.')
-      ])
-    ]));
+    // Playback timing (action delay / strum lead) is set once on the Timing step, so
+    // it is not repeated here.
 
     // ---- String/fret selection — Enable + preset (essentials); CC details Advanced.
     var selKids = [

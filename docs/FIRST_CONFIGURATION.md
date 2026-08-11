@@ -38,10 +38,11 @@ obtained by DHCP — a fixed static IP is not currently configurable. If the
 connection fails several times, the system automatically reverts to access-point
 mode. A long press on the **BOOT** button forces the hotspot back on at any time.
 
-The wizard has **7 steps**: **Builder** → **Frets** → **Plucking** → MIDI →
-Power → Test → Validation. Step 1 (the Builder) makes the *mechanical* choices
-and generates the wiring; the frets (frettes) and the plucking (grattage) of each
-string are then calibrated and tested on their **own steps**.
+The whole setup is **one ordered flow on the Setup page** — **7 steps**:
+**Instrument** → **Frets** → **Plucking** → MIDI → Timing → Test → Validation. Step 1
+(the Instrument builder) makes the *mechanical* choices and generates the wiring; the
+frets (frettes) and the plucking (grattage) of each string are then calibrated and
+tested on their **own steps**, all without leaving the page.
 
 ---
 
@@ -55,10 +56,9 @@ The instrument **type is cosmetic** — an instrument is defined by its
   to load a tuning + GM tags, or **Custom** for your own. The type only tags the
   name / GM program.
 * **Strings & tuning** — **number of strings** (1–6), each string's
-  **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`),
-  plus a **tuning helper** (named tunings for the string count, or shift every
-  string ±1 semitone). A string is just an open pitch plus its top fret — no
-  vibrating length, transmission or steps/mm.
+  **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`).
+  A string is just an open pitch plus its top fret — no vibrating length,
+  transmission or steps/mm.
 * **Fretting mechanism** — **one servo per fret** (full chromatic) ·
   **geared low neck** (pair the wide low frets on one antagonistic servo each,
   narrow high frets stay single — halves the low-neck servo count) ·
@@ -72,11 +72,13 @@ The instrument **type is cosmetic** — an instrument is defined by its
   appears when the committed wiring no longer matches. Auxiliary servos and any
   string still classified *custom* are preserved.
 
-Advanced mode adds capo / transpose / GM tags and a **Board & network** card
-(board is fixed to **ESP32-S3-DevKitC-1**; network mode access point / Wi-Fi
-client). The tuning sets the note range announced to General-Midi-Boop (see
+Advanced mode adds transpose / GM tags and a **Board** card — the **ESP32 board
+selector** (ESP32-S3-DevKitC-1 · ESP32-WROOM-32 · ESP32 DevKit v1) plus the
+native-USB reserve. Wi-Fi / hostname are **not** here — they live in the gear modal
+(⚙ Network), because they belong to the device, not the instrument. The tuning sets
+the note range announced to General-Midi-Boop (see
 [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3). The mechanical choice is **not stored**
-in the profile — the Builder re-derives it from the servo list on entry.
+in the profile — the builder re-derives it from the servo list on entry.
 
 ---
 
@@ -111,20 +113,26 @@ string**: that string's fret fingers on channels `0 … maxFret−1`.
 ## 4. Step 3 — Plucking (grattage)
 
 This step configures the **plucking mechanism only** — the part that sounds the
-string. For every string you can:
+string. Every striker uses the **same model**, only the angles change with the
+mounting: the plectrum **rests against the string** (contact angle, e.g. 90°)
+ready to strum, then sweeps to the **down-stroke** and **up-stroke** angles on
+either side (e.g. ±20°) for alternating strokes. For every string you can:
 
-* **add a plucker** (pluck/strum servo) and set its **rest ↔ strike angle** and
-  rotation direction;
+* **add a plucker** (pluck/strum servo) and set its **contact / down-stroke /
+  up-stroke angles** and rotation direction (the up-stroke angle may be left at 0
+  to mirror the down-stroke about contact);
 * add an optional **strum lift** — it lowers the plucker onto the string for a
   stroke, then raises it (with an engage delay);
 * add an optional **damper** — it presses the string to mute it;
 * add global **auxiliary** actuators (not tied to a string).
 
 By default the plucker sits on its string's PCA9685 board (channel `maxFret`).
-Each actuator has **Test rest / strike** buttons and a **▶ Pluck open** button,
-and a **test bench** plucks every open string, sweeps every plucker, and tests
-the strum lifts / dampers. Every string needs a plucker to sound (the validation
-step flags a string that has none).
+Each actuator has **Contact / Down-stroke / Up-stroke** test buttons and a
+**▶ Pluck open** button, and a **test bench** plucks every open string, sweeps
+every plucker, and tests the strum lifts / dampers. Every string needs a plucker
+to sound (the validation step flags a string that has none). The two global
+delays — the **action delay** (a fixed-time FIFO buffer) and the **fret → strum
+delay** — are set once on the **Timing** step, not here.
 
 ---
 
@@ -132,19 +140,23 @@ step flags a string that has none).
 
 Global MIDI channel, Omni, sustain pedal, velocity curve, and **string/fret
 selection**: `CC20` selects the string and `CC21` the fret before a `Note On`
-(General-Midi-Boop tablature). The full CC/selection editor and the GMB
-identity/capabilities live on the **MIDI tab** (see
-[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3).
+(General-Midi-Boop tablature). The full CC/selection editor is on this step in
+**Advanced** mode; the GMB identity/capabilities and the live MIDI monitor are in
+the gear modal (Advanced) — see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3.
 
 ---
 
-## 6. Step 5 — Power
+## 6. Step 5 — Timing
 
-The **current governor** limits PCA9685 in-rush current. Three combined
-mechanisms: idle fingers cut their PWM (`disableAtRest`), only **one finger
-presses per string at a time**, and the governor **staggers** how many servos
-start moving together (`maxConcurrentMoves`, `staggerMs`) — important when a
-chord re-frets several strings at once.
+Two cards. **Timing** sets the two global delays: the **action delay** — a
+fixed-time FIFO buffer (`noteExecutionDelayMs`) that holds every incoming note by
+the same amount so chords land together and the feel stays even — and the
+**fret → strum delay** (`fretToPluckMs`) that waits after a finger has seated a
+fret before the plectrum strikes (plus the strum **lead**). **Current management**
+limits PCA9685 in-rush current: idle fingers cut their PWM (`disableAtRest`), only
+**one finger presses per string at a time**, and the governor **staggers** how
+many servos start moving together (`maxConcurrentMoves`, `staggerMs`) — important
+when a chord re-frets several strings at once.
 
 ---
 

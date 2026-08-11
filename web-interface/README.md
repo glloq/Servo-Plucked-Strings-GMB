@@ -61,27 +61,25 @@ python3 -m http.server -d web-interface 8080
 # then browse http://localhost:8080/
 ```
 
-## Navigation (three pages + a Settings modal)
+## Navigation (three pages; device settings in a gear modal)
 
-The UI is deliberately minimal: a player only needs **three main pages** in the
-sidebar, and every other setting is grouped in the **Settings modal** (the gear
-button, top-right).
+The UI is deliberately minimal: **three main pages** in the sidebar, and the whole
+instrument creation grouped into ONE ordered flow on the Setup page. Only device
+Wi-Fi and the diagnostic tools live in the gear modal (top-right).
 
 - **Instrument** (`fretboard.js`) — the default landing page: a prominent
   **emergency stop** (STOP + reset/re-arm) and the **playable fretboard**.
-- **Calibration** (`wizard.js`, calibration flow) — hand tuning of the servos and
-  a test bench: **Frets → Plucking → Test**. Each equipped finger gets its
-  contact angle, a Reverse rotation direction control and a test; the servos
-  themselves (which frets, gearing, wiring) are defined in Settings.
-- **Wiring & GPIO** (`hardware.js`) — the hardware page, with two sub-tabs: the
+- **Setup** (`wizard.js`, the single setup flow) — the complete creation of an
+  instrument, in order: **Instrument → Frets → Plucking → MIDI → Timing → Test →
+  Validation**. Define it (identity, mechanics, ESP32 board, wiring), calibrate what
+  you defined by hand (contact / stroke angles + rotation direction), set its MIDI
+  behaviour and timing, then test and save — nothing split across a page and a modal.
+- **Wiring & GPIO** (`hardware.js`) — the hardware reference, with two sub-tabs: the
   **wiring diagram** (`wiring.js`) and the **GPIO pin grid + board pinout**
-  (`pins.js`, with an ESP32 board selector).
+  (`pins.js`). The board is chosen on the Setup page; this page assigns pins on it.
 
-The **Settings modal** (`settings.js`) has three tabs:
+The **gear modal** (`settings.js`) holds only what belongs to the device, in two tabs:
 
-- **Configuration** — the instrument-configuration wizard with **every page**
-  reachable: **Instrument → MIDI → Power → Validation** (`wizard.js` config flow;
-  the MIDI page is the full string/fret selection + params).
 - **Network** — network mode, SSIDs, hostname, Wi-Fi credentials, hotspot switch.
 - **Advanced** — GMB identity & capabilities + SysEx tester (`sysex.js`) and the
   live MIDI monitor + integrated tester (`midiselect.js` tools).
@@ -101,12 +99,12 @@ web-interface/
 │   ├── hardware.js       Wiring & GPIO page — sub-tab switch over wiring.js / pins.js
 │   ├── pins.js           GPIO grid + ESP32 board selector + graphical board pinout (§11)
 │   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram)
-│   ├── wizard.js         shared step engine: config flow (Settings modal) + calibration flow (page) (§10)
+│   ├── wizard.js         single setup-flow step engine: Instrument → Frets → Plucking → MIDI → Timing → Test → Validation (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
-│   ├── midiselect.js     MIDI settings (§14/§18) + live monitor/test tools (§16), split for the modal
+│   ├── midiselect.js     MIDI settings (§14/§18, the Setup MIDI step) + live monitor/test tools (§16, Advanced tab)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
 │   ├── profiles.js       profile slots (§20) — loaded but not exposed in the UI (hidden setting)
-│   └── settings.js       Settings modal — Configuration / Network / Advanced tabs
+│   └── settings.js       gear modal — Network / Advanced (device + diagnostics) tabs
 └── README.md
 ```
 
@@ -119,18 +117,17 @@ and **Advanced** (manual GPIO assignment including caution pins, per-servo wirin
 / damper / auxiliary actuators, SysEx block toggles, raw byte views), per
 SPECIFICATION.md §9.2.
 
-## Instrument Builder — mechanical-choice-driven creation (Settings → Configuration → Instrument)
+## Instrument Builder — mechanical-choice-driven creation (Setup → Instrument step)
 
 The **type is cosmetic**; an instrument is defined by its **mechanics**. The
-**Instrument** page of the config wizard is one adaptive **Builder** screen that
+**Instrument** step of the Setup flow is one adaptive **Builder** screen that
 makes those choices explicit and generates the
 servo wiring for you, so any plucked/strummed string instrument (1–6 strings) can
 be set up quickly:
 
 - **Starting point** — a preset (ukulele/guitar/bass/mandolin/banjo) loads a tuning
   + GM tags, or **Custom** for your own. Type only tags the name / GM program.
-- **Strings & tuning** — string count, per-string open note + max fret, and a
-  **tuning helper** (named tunings for the count, ± a semitone on all).
+- **Strings & tuning** — string count, per-string open note + max fret.
 - **Fretting mechanism** — *one servo per fret* (full chromatic) · **geared low
   neck** (pair the wide low frets on one antagonistic servo each, plain high frets;
   halves the low-neck servo count) · **open-string-only** (no frets) · **custom**
@@ -139,6 +136,8 @@ be set up quickly:
   **strum**, plus optional **strum-lift** and **damper**.
 - **Wiring & capacity** — one PCA9685 per string by default, with a **capacity
   meter** (channels per board vs 16, boards vs 8, direct-GPIO vs 8).
+- **Board** — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB
+  reserve. Wi-Fi / hostname are in the gear modal (device, not instrument).
 - **Generate wiring** — builds the servo list from the choices (a *pending* pill
   tells you when the committed wiring no longer matches). Auxiliary servos and any
   string still marked *custom* are preserved.
@@ -146,11 +145,11 @@ be set up quickly:
 The mechanical choice is **not stored** in the profile (the firmware derives frets
 from the servo list); the Builder re-derives it from the current servos on entry.
 
-## Frets and Plucking — calibrated separately (Calibration page)
+## Frets and Plucking — calibrated in the same flow (Setup page)
 
-On the **Calibration** page, the two physical halves of each string are calibrated
-and tested on their **own steps** (Frettes → Grattage → Test), so the frets
-(frettes) and the plucking (grattage) can each
+On the **Setup** page, the two physical halves of each string are calibrated
+and tested on their **own steps** (Frets → Plucking → Test), right after the
+Instrument step, so the frets (frettes) and the plucking (grattage) can each
 be tuned independently. Each fret position has its own finger servo plus a
 pluck/strum servo per string, **with or without a PCA9685**. Both steps adapt to the
 Builder's choices (open-only → a banner; strum → its stroke controls) and carry an

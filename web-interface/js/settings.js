@@ -1,34 +1,29 @@
 /*
- * settings.js — the consolidated Settings modal (gear button, top-right).
+ * settings.js — the device Settings modal (gear button, top-right).
  *
- * UI redesign: the three main pages a player needs (Instrument, Calibration,
- * Wiring & GPIO) stay in the nav; EVERYTHING else a user configures lives here,
- * behind three tabs:
+ * UI redesign: the WHOLE instrument creation now lives on the Setup main page
+ * (one ordered flow), so this modal holds only what belongs to the device rather
+ * than the instrument, behind two tabs:
  *
- *   • Configuration — the instrument-configuration wizard (all its pages:
- *                     Instrument -> MIDI -> Power -> Validation), hosted via
- *                     GMB.renderConfigWizard. This is the config-instrument wizard
- *                     with every page reachable, not just the first.
- *   • Network       — network mode, SSIDs, hostname, Wi-Fi credentials (write-only)
- *                     and the on-demand hotspot switch.
- *   • Advanced      — GMB identity & capabilities (SysEx) + the live MIDI monitor
- *                     and integrated tester.
+ *   • Network  — network mode, SSIDs, hostname, Wi-Fi credentials (write-only)
+ *                and the on-demand hotspot switch.
+ *   • Advanced — GMB identity & capabilities (SysEx) + the live MIDI monitor
+ *                and integrated tester (diagnostics).
  *
  * Profiles are intentionally not exposed here (a hidden, non-user setting). The
  * Simplified / Advanced toggle is mirrored in the footer because the overlay
- * covers the sidebar. Tabs that own a live socket (Advanced, and the config
- * wizard's MIDI step) are torn down on every tab switch and on close.
+ * covers the sidebar. The Advanced tab owns a live MIDI socket, torn down on
+ * every tab switch and on close.
  */
 (function (global) {
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
   var overlay = null;
-  var activeTab = 'config';
+  var activeTab = 'network';
   var wifi = { stationPassword: '', apPassword: '' };
 
   var TABS = [
-    { id: 'config',   label: 'Configuration' },
     { id: 'network',  label: 'Network' },
     { id: 'advanced', label: 'Advanced' }
   ];
@@ -88,9 +83,8 @@
     if (!body) return;
     teardownTab();
     body.innerHTML = '';
-    if (activeTab === 'config') GMB.renderConfigWizard(body);
-    else if (activeTab === 'network') networkTab(body);
-    else if (activeTab === 'advanced') advancedTab(body);
+    if (activeTab === 'advanced') advancedTab(body);
+    else networkTab(body);
   }
 
   function switchTab(id) {
@@ -116,7 +110,6 @@
   function teardownTab() {
     if (GMB.midiSettings && GMB.midiSettings.teardown) GMB.midiSettings.teardown();
     if (GMB.views.midi && GMB.views.midi.teardown) GMB.views.midi.teardown();
-    if (GMB.configWizard && GMB.configWizard.teardown) GMB.configWizard.teardown();
     if (GMB.testRunner && GMB.testRunner.stop) GMB.testRunner.stop();
   }
 
@@ -160,7 +153,7 @@
   // ---- open / close ---------------------------------------------------------
   function open(tab) {
     if (!GMB.state.profile) { GMB.toast('Configuration still loading…', 'warn'); return; }
-    activeTab = (tab && TABS.some(function (t) { return t.id === tab; })) ? tab : 'config';
+    activeTab = (tab && TABS.some(function (t) { return t.id === tab; })) ? tab : 'network';
     if (overlay) overlay.remove();
     build();
     // rAF so the .open transition runs from the hidden state.
