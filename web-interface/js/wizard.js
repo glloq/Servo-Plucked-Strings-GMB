@@ -579,6 +579,7 @@
       if (builder.perString[i].fretting !== undefined) delete builder.perString[i].fretting;
       if (!Object.keys(builder.perString[i]).length) delete builder.perString[i];
     });
+    autoGenerate();
     drawStep();
   }
   // The effective spec for string i (global merged with its overrides).
@@ -614,12 +615,12 @@
   }
   // Commit the chosen mechanics to p.servos. Preserves aux actuators and any string
   // still classified 'custom' (unless the user explicitly picked a variant for it).
-  function applyBuilder() {
+  function applyBuilder(force) {
     var p = GMB.state.profile;
     var overwrite = p.strings.some(function (_, i) {
       return deriveStringSpec(i).fretting === 'custom' && effectiveSpec(i).fretting !== 'custom';
     });
-    if (overwrite && !confirm('Some strings have hand-edited wiring. Replace it with the chosen mechanics?'))
+    if (overwrite && !force && !confirm('Some strings have hand-edited wiring. Replace it with the chosen mechanics?'))
       return false;
     var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
     // Preserve each PCA board's I²C-bus assignment across regeneration (bus is a
@@ -632,6 +633,18 @@
     syncSelection();
     GMB.markDirty();
     return true;
+  }
+
+  // Keep the servo wiring in sync with the mechanics automatically (the Simplified
+  // creation path has no explicit "Generate" button). Skipped when a string uses
+  // hand-edited 'custom' wiring — that is only regenerated from the Advanced
+  // "Generate wiring" button, so a manual layout is never silently overwritten.
+  function autoGenerate() {
+    var custom = GMB.state.profile.strings.some(function (_, i) {
+      return effectiveSpec(i).fretting === 'custom';
+    });
+    if (custom) return;
+    applyBuilder(true);
   }
 
   // Load a type preset: tuning + GM tags + a fresh chromatic+pluck wiring.
@@ -689,7 +702,8 @@
         GMB.input(s, 'openNote', { type: 'number', min: 0, max: 127, onChange: drawStep })]),
       h('span.sr-note', GMB.noteName(s.openNote)),
       h('label.sr-cell', [h('span.muted', 'max fret'),
-        GMB.input(s, 'maxFret', { type: 'number', min: 0, max: 24, onChange: drawStep })]),
+        GMB.input(s, 'maxFret', { type: 'number', min: 0, max: 24,
+          onChange: function () { autoGenerate(); drawStep(); } })]),
       h('span.muted', '→ ' + GMB.noteName(s.openNote + s.maxFret))
     ]);
   }
@@ -838,13 +852,11 @@
     var p = GMB.state.profile;
     if (builder === null || builderRef !== p) { builder = deriveSpec(); builderRef = p; }
     var g = builder.global, strings = p.strings;
+    var adv = GMB.isAdvanced();
 
-    body.appendChild(h('div.note-box',
-      'Build the instrument from its mechanics. Pick a starting point, set the tuning, ' +
-      'then choose how the strings are fretted and sounded — the servo wiring is generated ' +
-      'for you. The type is only cosmetic; the real choices are the mechanisms below.'));
-
-    // 1 · Instrument identity + presets.
+    // Instrument identity + presets. Simplified keeps only the essentials (preset +
+    // name); the mechanics, wiring and GM tags are Advanced — a preset already
+    // produces a working instrument and the wiring is (re)generated automatically.
     var TYPES = ['ukulele', 'guitar', 'bass', 'mandolin', 'banjo'];
     var presets = TYPES.map(function (t) {
       return h('button.preset-card' + (p.instrument.type === t ? '.selected' : ''),
@@ -854,13 +866,13 @@
     presets.push(h('button.preset-card' + (TYPES.indexOf(p.instrument.type) < 0 ? '.selected' : ''),
       { type: 'button', onclick: function () { p.instrument.type = 'custom'; GMB.markDirty(); drawStep(); } },
       [h('strong', 'Custom'), h('span.muted', 'your own')]));
-    body.appendChild(builderSection('1 · Instrument', [
+    var idFields = [GMB.field('Instrument name', GMB.input(p.instrument, 'name'))];
+    if (adv) idFields.push(GMB.field('Description', GMB.input(p.instrument, 'description')));
+    body.appendChild(builderSection('Instrument', [
+      h('p.muted', 'Pick a starting point and name your instrument — the type just tags the name / GM program.'),
       h('div.preset-row', presets),
-      h('div.grid2', [
-        GMB.field('Instrument name', GMB.input(p.instrument, 'name')),
-        GMB.field('Description', GMB.input(p.instrument, 'description'))
-      ]),
-      GMB.isAdvanced() ? h('div.grid3', [
+      h('div.grid2', idFields),
+      adv ? h('div.grid3', [
         GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 }),
           'virtual offset (acts like transpose) — leave at 0: no physical capo'),
         GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 }),
@@ -868,98 +880,107 @@
         GMB.field('GM program', GMB.input(p.instrument, 'gmProgram', { type: 'number', min: 0, max: 127 })),
         GMB.field('GMB type id', GMB.input(p.instrument, 'typeId', { type: 'number', min: 0, max: 127 }))
       ]) : null
-    ], 'type is cosmetic (tags name / GM only)'));
+    ]));
 
-    // 2 · Strings & tuning.
-    body.appendChild(builderSection('2 · Strings & tuning', [
+    // Strings & tuning. Changing the string count or a max fret re-generates the
+    // wiring automatically, so the Simplified path needs no "Generate" button.
+    body.appendChild(builderSection('Strings & tuning', [
       h('div.row', [
         GMB.field('Number of strings', GMB.input(p.instrument, 'stringCount',
-          { type: 'number', min: 1, max: 6, onChange: function (v) { setStringCount(v); drawStep(); } }))
+          { type: 'number', min: 1, max: 6,
+            onChange: function (v) { setStringCount(v); autoGenerate(); drawStep(); } }))
       ]),
       h('div.string-rows', strings.map(function (s, i) { return stringRow(s, i); }))
     ]));
 
-    // 3 · Fretting mechanism.
-    var fretExtra = [];
-    if (g.fretting === 'geared')
-      fretExtra.push(GMB.field('Gear frets up to', GMB.input(g, 'gearThreshold',
-        { type: 'number', min: 2, max: 24, onChange: drawStep }),
-        'frets 1..N are paired two-per-servo; higher frets stay single'));
-    body.appendChild(builderSection('3 · Fretting mechanism', [
-      h('div.radio-row', [
-        radioCard(g.fretting === 'chromatic', 'One servo per fret',
-          'A dedicated finger on every fret — maximum range, most servos.',
-          fingerCountForFretting('chromatic', g.gearThreshold, strings) + ' fingers',
-          function () { setGlobalFretting('chromatic'); }),
-        radioCard(g.fretting === 'geared', 'Geared low neck',
-          'Pair the wide low frets on one antagonistic servo each; narrow high frets stay single. Halves the low-neck servo count.',
-          fingerCountForFretting('geared', g.gearThreshold, strings) + ' fingers',
-          function () { setGlobalFretting('geared'); }),
-        radioCard(g.fretting === 'open', 'Open string only',
-          'No frets — each string plays its open note only (slide / open tunings).',
-          '0 fingers', function () { setGlobalFretting('open'); }),
-        radioCard(g.fretting === 'custom', 'Custom',
-          'Keep the current per-fret wiring; equip frets yourself on the Frets step.',
-          null, function () { setGlobalFretting('custom'); })
-      ])
-    ].concat(fretExtra.length ? [h('div.row', fretExtra)] : [])));
+    // Advanced: the mechanical choices + wiring topology. A preset defaults these to
+    // "one servo per fret + a pick per string", which is what most builds want.
+    if (adv) {
+      var fretExtra = [];
+      if (g.fretting === 'geared')
+        fretExtra.push(GMB.field('Gear frets up to', GMB.input(g, 'gearThreshold',
+          { type: 'number', min: 2, max: 24, onChange: function () { autoGenerate(); drawStep(); } }),
+          'frets 1..N are paired two-per-servo; higher frets stay single'));
+      body.appendChild(builderSection('Fretting mechanism', [
+        h('div.radio-row', [
+          radioCard(g.fretting === 'chromatic', 'One servo per fret',
+            'A dedicated finger on every fret — maximum range, most servos.',
+            fingerCountForFretting('chromatic', g.gearThreshold, strings) + ' fingers',
+            function () { setGlobalFretting('chromatic'); }),
+          radioCard(g.fretting === 'geared', 'Geared low neck',
+            'Pair the wide low frets on one antagonistic servo each; narrow high frets stay single. Halves the low-neck servo count.',
+            fingerCountForFretting('geared', g.gearThreshold, strings) + ' fingers',
+            function () { setGlobalFretting('geared'); }),
+          radioCard(g.fretting === 'open', 'Open string only',
+            'No frets — each string plays its open note only (slide / open tunings).',
+            '0 fingers', function () { setGlobalFretting('open'); }),
+          radioCard(g.fretting === 'custom', 'Custom',
+            'Keep the current per-fret wiring; equip frets yourself on the Frets step.',
+            null, function () { setGlobalFretting('custom'); })
+        ])
+      ].concat(fretExtra.length ? [h('div.row', fretExtra)] : [])));
 
-    // 4 · Sounding mechanism.
-    body.appendChild(builderSection('4 · Sounding mechanism', [
-      h('div.radio-row', [
-        radioCard(g.sounding === 'pluck', 'Individual pick',
-          'One plectrum per string — best for chords, repeated notes, tremolo and per-string velocity.',
-          null, function () { g.sounding = 'pluck'; drawStep(); }),
-        radioCard(g.sounding === 'strum', 'Per-string strum',
-          'A strum servo per string with up/down strokes. (Actuated only when the string has no pick.)',
-          null, function () { g.sounding = 'strum'; drawStep(); })
-      ]),
-      h('label.inline.builder-opt', [GMB.input(g, 'lift', { type: 'checkbox', onChange: drawStep }),
-        h('span', 'Add strum lift — raises the striker off the string between strokes')]),
-      h('label.inline.builder-opt', [GMB.input(g, 'damper', { type: 'checkbox', onChange: drawStep }),
-        h('span', 'Add a per-string damper — presses the string to mute it')])
-    ], 'sound each string with a pick or a strum'));
+      body.appendChild(builderSection('Sounding mechanism', [
+        h('div.radio-row', [
+          radioCard(g.sounding === 'pluck', 'Individual pick',
+            'One plectrum per string — best for chords, repeated notes, tremolo and per-string velocity.',
+            null, function () { g.sounding = 'pluck'; autoGenerate(); drawStep(); }),
+          radioCard(g.sounding === 'strum', 'Per-string strum',
+            'A strum servo per string with up/down strokes. (Actuated only when the string has no pick.)',
+            null, function () { g.sounding = 'strum'; autoGenerate(); drawStep(); })
+        ]),
+        h('label.inline.builder-opt', [GMB.input(g, 'lift', { type: 'checkbox', onChange: function () { autoGenerate(); drawStep(); } }),
+          h('span', 'Add strum lift — raises the striker off the string between strokes')]),
+        h('label.inline.builder-opt', [GMB.input(g, 'damper', { type: 'checkbox', onChange: function () { autoGenerate(); drawStep(); } }),
+          h('span', 'Add a per-string damper — presses the string to mute it')])
+      ], 'sound each string with a pick or a strum'));
 
-    // 5 · Wiring & capacity.
-    body.appendChild(builderSection('5 · Wiring & capacity', [
-      h('p.muted', 'Default: one PCA9685 board per string (its fingers + striker share the 16 channels), all on ' +
-        'a single I²C bus. Switch individual servos to a direct GPIO on the Frets / Plucking steps.'),
-      busTopology(),
-      capacityReport()
-    ]));
+      body.appendChild(builderSection('Wiring & capacity', [
+        h('p.muted', 'Default: one PCA9685 board per string (its fingers + striker share the 16 channels), all on ' +
+          'a single I²C bus. Switch individual servos to a direct GPIO on the Frets / Plucking steps.'),
+        busTopology(),
+        capacityReport()
+      ]));
 
-    if (GMB.isAdvanced()) body.appendChild(builderSection('Board & network', [
-      h('div.grid2', [
-        GMB.field('Reserve native USB (GPIO19/20)', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' })),
-        GMB.field('Network mode', GMB.input(p.network, 'mode',
-          { type: 'select', options: [{ value: 'accessPoint', label: 'Access point' }, { value: 'station', label: 'Wi-Fi client' }] })),
-        GMB.field('AP SSID', GMB.input(p.network, 'apSsid')),
-        GMB.field('Station SSID', GMB.input(p.network, 'ssid')),
-        GMB.field('Hostname', GMB.input(p.network, 'hostname'))
-      ])
-    ]));
+      body.appendChild(builderSection('Board & network', [
+        h('div.grid2', [
+          GMB.field('Reserve native USB (GPIO19/20)', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' })),
+          GMB.field('Network mode', GMB.input(p.network, 'mode',
+            { type: 'select', options: [{ value: 'accessPoint', label: 'Access point' }, { value: 'station', label: 'Wi-Fi client' }] })),
+          GMB.field('AP SSID', GMB.input(p.network, 'apSsid')),
+          GMB.field('Station SSID', GMB.input(p.network, 'ssid')),
+          GMB.field('Hostname', GMB.input(p.network, 'hostname'))
+        ])
+      ]));
+    }
 
-    // 6 · Generate.
+    // Summary + CTA. Advanced keeps an explicit Generate button (for hand-edited
+    // wiring); Simplified auto-generates, so it only offers "Go to calibration".
     var preview = previewServos(), auxN = auxServos().length;
-    var pending = wiringSignature(p.servos) !== wiringSignature(preview);
     var boards = {}; preview.forEach(function (s) { if (s.source === 'pca') boards[s.pcaBoard] = 1; });
-    body.appendChild(builderSection('6 · Generate wiring', [
+    var summaryKids = [
       h('div.summary', [
         h('div', [h('strong', strings.length + ' strings'),
-          ' · fretting ' + g.fretting + ' · sounding ' + g.sounding +
-          (g.lift ? ' + lift' : '') + (g.damper ? ' + damper' : '')]),
-        h('div.muted', (preview.length + auxN) + ' servos total across ' +
-          Object.keys(boards).length + ' PCA board(s)')
-      ]),
-      pending ? h('div.pill.warn', 'Pending — click Generate to apply your mechanical choices.')
-              : h('div.pill.ok', 'Wiring matches your choices.'),
-      h('div.row', [
+          ' · ' + g.fretting + ' · ' + g.sounding + (g.lift ? ' + lift' : '') + (g.damper ? ' + damper' : '')]),
+        h('div.muted', (preview.length + auxN) + ' servos across ' + Object.keys(boards).length + ' PCA board(s)')
+      ])
+    ];
+    if (adv) {
+      var pending = wiringSignature(p.servos) !== wiringSignature(preview);
+      summaryKids.push(pending ? h('div.pill.warn', 'Pending — click Generate to apply your changes.')
+                               : h('div.pill.ok', 'Wiring matches your choices.'));
+      summaryKids.push(h('div.row', [
         GMB.button('Generate wiring', function () {
           if (applyBuilder()) { GMB.toast('Wiring generated.', 'ok'); drawStep(); }
         }, 'primary'),
         GMB.button('Go to calibration →', function () { if (GMB.openCalibration) GMB.openCalibration(); }, 'ghost')
-      ])
-    ]));
+      ]));
+    } else {
+      summaryKids.push(h('div.row', [
+        GMB.button('Go to calibration →', function () { if (GMB.openCalibration) GMB.openCalibration(); }, 'primary')
+      ]));
+    }
+    body.appendChild(builderSection(adv ? 'Generate wiring' : 'Ready', summaryKids));
   }
 
   // ---- direct-GPIO pin picker (same rules as the GPIO sub-tab) --------------

@@ -20,42 +20,42 @@
   function renderSettings(host) {
     var p = GMB.state.profile;
     var sfs = p.stringFretSelection;
+    var adv = GMB.isAdvanced();
+    // Re-render the settings in place (toggles that show/hide dependent fields).
+    // Works whether hosted as the config-wizard MIDI step or standalone.
+    function redraw() { host.innerHTML = ''; renderSettings(host); }
 
-    // ---- General MIDI parameters (spec 18) --------------------
-    host.appendChild(h('div.card', [
-      h('h2', 'MIDI parameters'),
-      h('div.form-grid', [
-        GMB.field('Global channel (1–16)', GMB.input(p.midi, 'globalChannel', {
-          type: 'number', min: 0, max: 15,
-          onChange: function () {}, // stored zero-based
-        }), 'stored zero-based (0 = channel 1)'),
-        GMB.field('Omni mode', GMB.input(p.midi, 'omni', { type: 'checkbox' })),
-        GMB.field('Transpose (semitones)', GMB.input(p.midi, 'transpose', { type: 'number', min: -48, max: 48 }),
-          'adds to the instrument transpose (Builder → Advanced); both are summed'),
-        GMB.field('Chord window (ms)', GMB.input(p.midi, 'chordWindowMs', { type: 'number', min: 0, max: 50 })),
-        GMB.field('Velocity curve', GMB.input(p.midi, 'velocityCurve', {
-          // 'custom' is intentionally omitted: no custom curve table exists yet,
-          // so offering it would silently behave like 'linear' (audit P1-12).
-          type: 'select', options: ['linear', 'soft', 'hard', 'exponential']
-        })),
-        GMB.field('Sustain pedal', GMB.input(p.midi, 'sustainPedal', { type: 'checkbox', onChange: function () { GMB.render(); } })),
-        p.midi.sustainPedal
-          ? GMB.field('Sustain CC number', GMB.input(p.midi, 'sustainCc', { type: 'number', min: 0, max: 119 }), 'Default 64 (sustain pedal).')
-          : null,
-        GMB.field('Chord saturation strategy', GMB.input(p.midi, 'saturationStrategy', {
-          type: 'select', options: [
-            { value: 'priorityLow', label: 'Keep lowest notes' },
-            { value: 'priorityHigh', label: 'Keep highest notes' },
-            { value: 'priorityFirst', label: 'Keep first-arriving' },
-            { value: 'replaceOldest', label: 'Replace oldest' },
-            { value: 'ignoreExtra', label: 'Ignore extra notes' },
-            { value: 'monophonic', label: 'Monophonic (one note)' }]
-        }), 'What happens when more notes arrive than there are strings.')
-      ])
-    ]));
+    // ---- General MIDI parameters (spec 18) — essentials, rest is Advanced ----
+    var midiFields = [
+      GMB.field('Global channel (1–16)', GMB.input(p.midi, 'globalChannel', { type: 'number', min: 0, max: 15 }),
+        'stored zero-based (0 = channel 1)'),
+      GMB.field('Omni mode', GMB.input(p.midi, 'omni', { type: 'checkbox' })),
+      GMB.field('Velocity curve', GMB.input(p.midi, 'velocityCurve', {
+        // 'custom' is intentionally omitted: no custom curve table exists yet.
+        type: 'select', options: ['linear', 'soft', 'hard', 'exponential'] }))
+    ];
+    if (adv) midiFields.push(
+      GMB.field('Transpose (semitones)', GMB.input(p.midi, 'transpose', { type: 'number', min: -48, max: 48 }),
+        'adds to the instrument transpose (Instrument → Advanced); both are summed'),
+      GMB.field('Chord window (ms)', GMB.input(p.midi, 'chordWindowMs', { type: 'number', min: 0, max: 50 })),
+      GMB.field('Sustain pedal', GMB.input(p.midi, 'sustainPedal', { type: 'checkbox', onChange: redraw })),
+      p.midi.sustainPedal
+        ? GMB.field('Sustain CC number', GMB.input(p.midi, 'sustainCc', { type: 'number', min: 0, max: 119 }), 'Default 64 (sustain pedal).')
+        : null,
+      GMB.field('Chord saturation strategy', GMB.input(p.midi, 'saturationStrategy', {
+        type: 'select', options: [
+          { value: 'priorityLow', label: 'Keep lowest notes' },
+          { value: 'priorityHigh', label: 'Keep highest notes' },
+          { value: 'priorityFirst', label: 'Keep first-arriving' },
+          { value: 'replaceOldest', label: 'Replace oldest' },
+          { value: 'ignoreExtra', label: 'Ignore extra notes' },
+          { value: 'monophonic', label: 'Monophonic (one note)' }]
+      }), 'What happens when more notes arrive than there are strings.')
+    );
+    host.appendChild(h('div.card', [h('h2', 'MIDI parameters'), h('div.form-grid', midiFields)]));
 
-    // ---- Playback timing / latency -----------------------------------------
-    host.appendChild(h('div.card', [
+    // ---- Playback timing / latency (Advanced) ------------------------------
+    if (adv) host.appendChild(h('div.card', [
       h('h2', 'Playback timing'),
       h('p.muted', 'Manage the delay between receiving a note and hearing it, and how early the mechanics anticipate.'),
       h('div.form-grid', [
@@ -66,38 +66,34 @@
       ])
     ]));
 
-    // ---- Simplified string/fret selection panel (section 14) ----------------
-    var simplified = h('div.card', [
+    // ---- String/fret selection — Enable + preset (essentials); CC details Advanced.
+    var selKids = [
       h('div.card-head', [h('h2', 'String / fret selection'),
         h('span.muted', 'General-Midi-Boop tablature over MIDI CC')]),
-      h('label.inline.big', [GMB.input(sfs, 'enabled', { type: 'checkbox', onChange: function () { GMB.render(); } }),
-        h('span', 'Enable string/fret selection')]),
-      h('div.form-grid', [
-        GMB.field('System', GMB.input(sfs, 'preset', { type: 'select', options: [
-          { value: 'general-midi-boop', label: 'General-Midi-Boop' }, { value: 'custom', label: 'Custom' }] })),
-        GMB.field('String CC', GMB.input(sfs.string, 'ccNumber', { type: 'number', min: 0, max: 119 })),
-        GMB.field('Fret CC', GMB.input(sfs.fret, 'ccNumber', { type: 'number', min: 0, max: 119 })),
-        GMB.field('String numbering', GMB.input(sfs.string, 'numbering', {
-          type: 'select', options: [{ value: 'oneBased', label: '1 to N' }, { value: 'zeroBased', label: '0 to N-1' }] })),
-        GMB.field('String order', GMB.input(sfs.string, 'reverseOrder', {
-          type: 'select', options: [{ value: false, label: 'Normal' }, { value: true, label: 'Reversed' }],
-          coerce: function (v) { return v === 'true' || v === true; }, onChange: function () { GMB.render(); } })),
-        GMB.field('When CC missing', GMB.input(sfs.validation, 'missingSelectionPolicy', {
-          type: 'select', options: [
-            { value: 'automaticAllocation', label: 'Choose automatically' },
-            { value: 'reject', label: 'Reject' }] }))
-      ]),
-      h('div.toolbar', [
-        GMB.button('Apply General-Midi-Boop preset', applyGmbPreset, 'primary')
-      ]),
-      h('p.muted', mode_desc(sfs.mode))
-    ]);
-    host.appendChild(simplified);
+      h('label.inline.big', [GMB.input(sfs, 'enabled', { type: 'checkbox', onChange: redraw }),
+        h('span', 'Enable string/fret selection')])
+    ];
+    if (adv) selKids.push(h('div.form-grid', [
+      GMB.field('System', GMB.input(sfs, 'preset', { type: 'select', options: [
+        { value: 'general-midi-boop', label: 'General-Midi-Boop' }, { value: 'custom', label: 'Custom' }] })),
+      GMB.field('String CC', GMB.input(sfs.string, 'ccNumber', { type: 'number', min: 0, max: 119 })),
+      GMB.field('Fret CC', GMB.input(sfs.fret, 'ccNumber', { type: 'number', min: 0, max: 119 })),
+      GMB.field('String numbering', GMB.input(sfs.string, 'numbering', {
+        type: 'select', options: [{ value: 'oneBased', label: '1 to N' }, { value: 'zeroBased', label: '0 to N-1' }] })),
+      GMB.field('String order', GMB.input(sfs.string, 'reverseOrder', {
+        type: 'select', options: [{ value: false, label: 'Normal' }, { value: true, label: 'Reversed' }],
+        coerce: function (v) { return v === 'true' || v === true; }, onChange: redraw })),
+      GMB.field('When CC missing', GMB.input(sfs.validation, 'missingSelectionPolicy', {
+        type: 'select', options: [
+          { value: 'automaticAllocation', label: 'Choose automatically' },
+          { value: 'reject', label: 'Reject' }] }))
+    ]));
+    selKids.push(h('div.toolbar', [GMB.button('Apply General-Midi-Boop preset', function () { applyGmbPreset(); redraw(); }, 'primary')]));
+    selKids.push(h('p.muted', mode_desc(sfs.mode)));
+    host.appendChild(h('div.card', selKids));
 
-    // ---- Advanced settings --------------------------------------------------
-    if (GMB.isAdvanced()) {
-      host.appendChild(advancedPanel(sfs, p));
-    }
+    // ---- Advanced selection settings ---------------------------------------
+    if (adv) host.appendChild(advancedPanel(sfs, p));
   }
 
   // Live MIDI monitor + integrated tester. Hosted in Settings > Advanced; owns the
