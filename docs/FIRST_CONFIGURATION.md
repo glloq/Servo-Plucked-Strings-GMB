@@ -72,7 +72,7 @@ The instrument **type is cosmetic** — an instrument is defined by its
   appears when the committed wiring no longer matches. Auxiliary servos and any
   string still classified *custom* are preserved.
 
-Advanced mode adds capo / transpose / GM tags and a **Board & network** card
+Advanced mode adds transpose / GM tags and a **Board & network** card
 (board is fixed to **ESP32-S3-DevKitC-1**; network mode access point / Wi-Fi
 client). The tuning sets the note range announced to General-Midi-Boop (see
 [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3). The mechanical choice is **not stored**
@@ -111,20 +111,26 @@ string**: that string's fret fingers on channels `0 … maxFret−1`.
 ## 4. Step 3 — Plucking (grattage)
 
 This step configures the **plucking mechanism only** — the part that sounds the
-string. For every string you can:
+string. Every striker uses the **same model**, only the angles change with the
+mounting: the plectrum **rests against the string** (contact angle, e.g. 90°)
+ready to strum, then sweeps to the **down-stroke** and **up-stroke** angles on
+either side (e.g. ±20°) for alternating strokes. For every string you can:
 
-* **add a plucker** (pluck/strum servo) and set its **rest ↔ strike angle** and
-  rotation direction;
+* **add a plucker** (pluck/strum servo) and set its **contact / down-stroke /
+  up-stroke angles** and rotation direction (the up-stroke angle may be left at 0
+  to mirror the down-stroke about contact);
 * add an optional **strum lift** — it lowers the plucker onto the string for a
   stroke, then raises it (with an engage delay);
 * add an optional **damper** — it presses the string to mute it;
 * add global **auxiliary** actuators (not tied to a string).
 
 By default the plucker sits on its string's PCA9685 board (channel `maxFret`).
-Each actuator has **Test rest / strike** buttons and a **▶ Pluck open** button,
-and a **test bench** plucks every open string, sweeps every plucker, and tests
-the strum lifts / dampers. Every string needs a plucker to sound (the validation
-step flags a string that has none).
+Each actuator has **Contact / Down-stroke / Up-stroke** test buttons and a
+**▶ Pluck open** button, and a **test bench** plucks every open string, sweeps
+every plucker, and tests the strum lifts / dampers. Every string needs a plucker
+to sound (the validation step flags a string that has none). The two global
+delays — the **action delay** (a fixed-time FIFO buffer) and the **fret → strum
+delay** — are set once on the **Power** step, not here.
 
 ---
 
@@ -140,11 +146,15 @@ identity/capabilities live on the **MIDI tab** (see
 
 ## 6. Step 5 — Power
 
-The **current governor** limits PCA9685 in-rush current. Three combined
-mechanisms: idle fingers cut their PWM (`disableAtRest`), only **one finger
-presses per string at a time**, and the governor **staggers** how many servos
-start moving together (`maxConcurrentMoves`, `staggerMs`) — important when a
-chord re-frets several strings at once.
+Two cards. **Timing** sets the two global delays: the **action delay** — a
+fixed-time FIFO buffer (`noteExecutionDelayMs`) that holds every incoming note by
+the same amount so chords land together and the feel stays even — and the
+**fret → strum delay** (`fretToPluckMs`) that waits after a finger has seated a
+fret before the plectrum strikes (plus the strum **lead**). **Current management**
+limits PCA9685 in-rush current: idle fingers cut their PWM (`disableAtRest`), only
+**one finger presses per string at a time**, and the governor **staggers** how
+many servos start moving together (`maxConcurrentMoves`, `staggerMs`) — important
+when a chord re-frets several strings at once.
 
 ---
 

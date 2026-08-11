@@ -54,7 +54,6 @@
         capItem('CC string', caps.ccString),
         capItem('CC fret', caps.ccFret),
         capItem('Tuning', caps.tuningNames.join(' ')),
-        capItem('Capo', caps.capo),
         capItem('Revision', caps.revision)
       ])
     ]));

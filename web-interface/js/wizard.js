@@ -551,9 +551,15 @@
   // Build the whole-instrument spec (global + per-string overrides) from the servos.
   function deriveSpec() {
     var specs = GMB.state.profile.strings.map(function (_, i) { return deriveStringSpec(i); });
+    // Global gear threshold = the widest threshold among the strings that are
+    // actually geared (default 6 when none are geared). Deriving only from geared
+    // strings keeps the committed threshold intact — a chromatic string's nominal 6
+    // must not inflate a "frets 1-2 geared" instrument to 6.
+    var gearedGts = specs.filter(function (s) { return s.fretting === 'geared' && s.gearThreshold > 0; })
+      .map(function (s) { return s.gearThreshold; });
     var global = {
       fretting: modeOf(specs.map(function (s) { return s.fretting; }), 'chromatic'),
-      gearThreshold: Math.max.apply(null, specs.map(function (s) { return s.gearThreshold || 6; }).concat([6])),
+      gearThreshold: gearedGts.length ? Math.max.apply(null, gearedGts) : 6,
       sounding: modeOf(specs.map(function (s) { return s.sounding; }), 'pluck'),
       lift: specs.filter(function (s) { return s.lift; }).length * 2 >= specs.length && specs.some(function (s) { return s.lift; }),
       damper: specs.filter(function (s) { return s.damper; }).length * 2 >= specs.length && specs.some(function (s) { return s.damper; }),
@@ -873,10 +879,8 @@
       h('div.preset-row', presets),
       h('div.grid2', idFields),
       adv ? h('div.grid3', [
-        GMB.field('Capo', GMB.input(p.instrument, 'capo', { type: 'number', min: 0, max: 24 }),
-          'virtual offset (acts like transpose) — leave at 0: no physical capo'),
         GMB.field('Transpose', GMB.input(p.instrument, 'transpose', { type: 'number', min: -48, max: 48 }),
-          'global offset in semitones (preferred over the capo)'),
+          'global offset in semitones'),
         GMB.field('GM program', GMB.input(p.instrument, 'gmProgram', { type: 'number', min: 0, max: 127 })),
         GMB.field('GMB type id', GMB.input(p.instrument, 'typeId', { type: 'number', min: 0, max: 127 }))
       ]) : null
@@ -1260,37 +1264,6 @@
     return h('div.fret-line-wrap', [line, h('div.fret-detail', detail)]);
   }
 
-  // Guard-rail helper: copy one plain finger's contact + rest angle to every other
-  // PLAIN finger on the same string (geared fingers keep their own three positions).
-  function applyContactToAll(strIdx, sv) {
-    var n = 0;
-    GMB.state.profile.servos.forEach(function (s) {
-      if (s.function === 'finger' && s.stringIndex === strIdx && s.fretB < 1 && s !== sv) {
-        s.activeUs = sv.activeUs; s.restUs = sv.restUs; n++;
-      }
-    });
-    GMB.markDirty();
-    GMB.toast('Applied the contact / rest angle to ' + n + ' other fret(s).', 'ok');
-  }
-
-  // Copy the active string's finger + gearing + calibration to every other string
-  // (one PCA board per string) as a starting point to fine-tune per string.
-  function copyStringFingers(fromIdx) {
-    var p = GMB.state.profile;
-    var src = p.servos.filter(function (s) { return s.stringIndex === fromIdx && s.function === 'finger'; });
-    for (var j = 0; j < p.strings.length; j++) {
-      if (j === fromIdx) continue;
-      p.servos = p.servos.filter(function (s) { return !(s.stringIndex === j && s.function === 'finger'); });
-      src.forEach(function (s) {
-        var c = GMB.deepCopy(s);
-        c.stringIndex = j;
-        c.pcaBoard = j;  // one-PCA-per-string convention
-        p.servos.push(c);
-      });
-    }
-    GMB.markDirty();
-  }
-
   function pcaMap(strIdx) {
     var used = {};
     GMB.state.profile.servos.forEach(function (s) {
@@ -1423,6 +1396,12 @@
     if (!p.midi) p.midi = {};
     if (p.midi.noteExecutionDelayMs === undefined) p.midi.noteExecutionDelayMs = 0;
     if (p.midi.strumLeadMs === undefined) p.midi.strumLeadMs = 0;
+    // Unified plucking model: every striker rests against the string and sweeps ±
+    // an angle for alternating down/up strokes. Enforce the alternating invariant so
+    // older profiles pick up the model (only the angles differ per mounting).
+    (p.servos || []).forEach(function (sv) {
+      if (sv.function === 'pluck' || sv.function === 'strum') sv.alternateDirection = true;
+    });
   }
 
   // The plucking gesture + delays + mute behaviour, configured ONCE for the whole
@@ -1432,18 +1411,16 @@
     var p = GMB.state.profile, pk = p.pluck, midi = p.midi;
     var hasLift = anyRole('strumLift');
 
-    // Gesture & delays — common to every string.
+    // Gesture — stroke shaping common to every string. The two global delays
+    // (action delay / FIFO buffer and fret → strum delay) live in
+    // Settings › Configuration, not here.
     var gesture = h('div.card.inset', [
-      h('h3', 'Gesture & delays'),
+      h('h3', 'Gesture'),
       h('div.grid2', [
         GMB.field('Stroke duration (ms)', GMB.input(pk, 'strokeMs', { type: 'number', min: 0, max: 2000 }),
           '0 = each servo keeps its own timing'),
         GMB.field('Minimum depth (%)', GMB.input(pk, 'minStrikePct', { type: 'number', min: 0, max: 100 }),
-          'attack floor for soft notes (0 = per servo)'),
-        GMB.field('Fret → pluck delay (ms)', GMB.input(pk, 'fretToPluckMs', { type: 'number', min: 0, max: 1000 }),
-          'wait after the finger is seated before plucking'),
-        GMB.field('Note On → sound latency (ms)', GMB.input(midi, 'noteExecutionDelayMs', { type: 'number', min: 0, max: 2000 }),
-          'fixed latency for an even feel')
+          'attack floor for soft notes (0 = per servo)')
       ])
     ]);
 
@@ -1500,11 +1477,12 @@
     var p = GMB.state.profile;
     ensurePluckConfig(p);
     body.appendChild(h('div.note-box',
-      'Plucking — calibrate the plectrum / strum servo that sounds each string (and its ' +
-      'optional strum lift and damper) by hand: set the rest / strike angles and rotation ' +
-      'direction, then test. The gesture and delays below are set once for the whole ' +
-      'instrument. Which strings have a plucker / lift / damper is defined in ' +
-      'Settings › Configuration.'));
+      'Plucking — every striker uses the same model, only the angles change with the ' +
+      'mounting: the plectrum rests against the string (contact angle) ready to strum, ' +
+      'then sweeps to the down-stroke and up-stroke angles on either side for alternating ' +
+      'strokes. Set the contact / down / up angles and the rotation direction by hand, ' +
+      'then test. Which strings have a plucker / lift / damper is defined in ' +
+      'Settings › Configuration; the global delays live there too.'));
 
     body.appendChild(pluckGlobalCard());
     body.appendChild(armToolbar());
@@ -1521,31 +1499,17 @@
 
     // Plucker / striker for this string (wiring shown in Advanced only).
     if (striker) {
+      // Unified strum model — same for every striker, only the angles change with the
+      // mechanical mounting: the plectrum RESTS against the string (contact, e.g. 90°)
+      // ready to strum, then sweeps to the down-stroke and up-stroke angles on either
+      // side (e.g. ±20°) for alternating strokes.
       var sk = [
-        angleSlider(striker, 'restUs', 'Rest angle', 'plectrum off the string'),
-        angleSlider(striker, 'activeUs', 'Strike angle', 'how deep the plectrum rakes the string'),
-        GMB.field('Reverse direction', GMB.input(striker, 'inverted', { type: 'checkbox' }))
+        angleSlider(striker, 'restUs', 'Contact angle', 'plectrum resting against the string, ready to strum (e.g. 90°)'),
+        angleSlider(striker, 'activeUs', 'Down-stroke angle', 'the down sweep off contact (e.g. +20°)'),
+        angleSlider(striker, 'activeAltUs', 'Up-stroke angle', 'the up sweep off contact (0 = mirror the down-stroke)'),
+        GMB.field('Reverse rotation direction', GMB.input(striker, 'inverted', { type: 'checkbox' }),
+          'flip which way the servo turns for the mounting')
       ];
-      // Per-string strum: the stroke shaping (alternate up/down, up-stroke angle,
-      // stroke time, minimum strike depth) is the mechanical difference between a
-      // strum servo and an individual pick, so surface it as first-class controls.
-      var strumBlock = null;
-      if (striker.function === 'strum') {
-        strumBlock = h('div.card.inset', [
-          h('h3', 'Strum stroke'),
-          h('div.grid2', [
-            GMB.field('Alternate up/down strokes', GMB.input(striker, 'alternateDirection',
-              { type: 'checkbox' }), 'each strike alternates direction'),
-            angleSlider(striker, 'activeAltUs', 'Up-stroke angle', '0 = mirror the down-stroke about rest'),
-            GMB.field('Stroke time (ms)', GMB.input(striker, 'strokeMs',
-              { type: 'number', min: 0, max: 2000 }), '0 = use travel time'),
-            GMB.field('Min strike depth (µs)', GMB.input(striker, 'minStrikeUs',
-              { type: 'number', min: 0, max: 3000 }), 'so soft notes still catch (0 = velocity only)')
-          ]),
-          h('div.row', [testServoBtn('Down-stroke', striker, true),
-            testPulseBtn('Up-stroke', striker, 'activeAltUs', 'Servo → up-stroke')])
-        ]);
-      }
       // Plectrum-as-mute: the plectrum rests AGAINST the string at Note Off to damp
       // it with no dedicated damper servo. Surfaced when the global mute source uses
       // the plectrum, or in Advanced mode. The toggle parks muteUs between rest and
@@ -1570,8 +1534,12 @@
       }
       var advRows = [];
       if (GMB.isAdvanced()) {
-        // Fine timing only; wiring / add / remove live in Settings.
+        // Stroke shaping + fine timing; wiring / add / remove live in Settings.
         advRows = [
+          GMB.field('Stroke time (ms)', GMB.input(striker, 'strokeMs', { type: 'number', min: 0, max: 2000 }),
+            '0 = use travel time'),
+          GMB.field('Min strike depth (µs)', GMB.input(striker, 'minStrikeUs', { type: 'number', min: 0, max: 3000 }),
+            'so soft notes still catch (0 = velocity only)'),
           GMB.field('Pulse min (µs)', GMB.input(striker, 'pulseMinUs', { type: 'number', min: 200, max: 3000 })),
           GMB.field('Pulse max (µs)', GMB.input(striker, 'pulseMaxUs', { type: 'number', min: 200, max: 3000 })),
           GMB.field('Travel (ms)', GMB.input(striker, 'travelMs', { type: 'number', min: 0, max: 2000 })),
@@ -1580,12 +1548,25 @@
         ];
       }
       body.appendChild(h('div.card', [
-        h('div.card-head', [h('h3', 'Plucker · string ' + (activeStr + 1) + ' (' + striker.function + ')')]),
+        h('div.card-head', [h('h3', 'Plucker · string ' + (activeStr + 1) + ' (' + striker.function + ')'),
+          h('span.muted', 'rests at the string, sweeps ± for alternating strokes')]),
         h('div.grid2', sk),
-        strumBlock,
         muteBlock,
         advRows.length ? h('div.grid3', advRows) : null,
-        h('div.row', [testServoBtn('Test rest', striker, false), testServoBtn('Test strike', striker, true),
+        h('div.row', [testServoBtn('Contact', striker, false),
+          testPulseBtn('Down-stroke', striker, 'activeUs', 'Servo → down-stroke'),
+          GMB.button('Up-stroke', function () {
+            var idx = servoIndexOf(striker);
+            if (idx < 0) return;
+            // 0 = mirror the down-stroke about the contact angle.
+            var us = (striker.activeAltUs | 0) > 0
+              ? (striker.activeAltUs | 0)
+              : (2 * striker.restUs - striker.activeUs);
+            us = Math.max(striker.pulseMinUs || 500, Math.min(striker.pulseMaxUs || 2500, us));
+            GMB.api.testServo({ index: idx, active: true, us: us | 0 })
+              .then(function () { GMB.toast('Servo → up-stroke', 'ok'); })
+              .catch(function () { GMB.toast('Servo test refused (arm the instrument first).', 'warn'); });
+          }, 'ghost'),
           playNoteBtn(activeStr, 0, '▶ Pluck open')])
       ]));
     } else {
@@ -1622,19 +1603,39 @@
   function stepPower(body) {
     var p = GMB.state.profile;
     if (!p.power) p.power = { maxConcurrentMoves: 3, staggerMs: 8 };
-    body.appendChild(h('p.muted',
-      'Limit PCA9685 in-rush current. Idle fingers cut their PWM (per servo), only one ' +
-      'finger presses per string at a time, and the governor staggers how many servos start ' +
-      'moving together — important when a chord re-frets several strings at once.'));
-    body.appendChild(h('div.grid2', [
-      GMB.field('Max servos moving at once', GMB.input(p.power, 'maxConcurrentMoves',
-        { type: 'number', min: 1, max: 32 }), 'lower = gentler on the power supply'),
-      GMB.field('Stagger between starts (ms)', GMB.input(p.power, 'staggerMs',
-        { type: 'number', min: 0, max: 200 }), '0 disables staggering'),
-      GMB.field('Note execution delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
-        { type: 'number', min: 0, max: 2000 }), 'fixed reception → sound latency'),
-      GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs',
-        { type: 'number', min: 0, max: 2000 }), 'lower the strum lift early (0 = off)')
+    ensurePluckConfig(p);
+
+    // Timing — the two global delays that shape when every note fires.
+    body.appendChild(h('div.card.inset', [
+      h('h3', 'Timing'),
+      h('p.muted',
+        'A fixed action delay (a fixed-time FIFO buffer) holds every incoming note by ' +
+        'the same amount so chords land together and the feel stays even. The fret → ' +
+        'strum delay then waits after the finger has seated a fret before the plectrum ' +
+        'strikes.'),
+      h('div.grid2', [
+        GMB.field('Global action delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
+          { type: 'number', min: 0, max: 2000 }), 'fixed-time FIFO buffer — reception → sound latency'),
+        GMB.field('Fret → strum delay (ms)', GMB.input(p.pluck, 'fretToPluckMs',
+          { type: 'number', min: 0, max: 1000 }), 'wait after the finger is seated before the plectrum strikes'),
+        GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs',
+          { type: 'number', min: 0, max: 2000 }), 'lower the strum lift early (0 = off)')
+      ])
+    ]));
+
+    // Current management.
+    body.appendChild(h('div.card.inset', [
+      h('h3', 'Current management'),
+      h('p.muted',
+        'Limit PCA9685 in-rush current. Idle fingers cut their PWM (per servo), only one ' +
+        'finger presses per string at a time, and the governor staggers how many servos start ' +
+        'moving together — important when a chord re-frets several strings at once.'),
+      h('div.grid2', [
+        GMB.field('Max servos moving at once', GMB.input(p.power, 'maxConcurrentMoves',
+          { type: 'number', min: 1, max: 32 }), 'lower = gentler on the power supply'),
+        GMB.field('Stagger between starts (ms)', GMB.input(p.power, 'staggerMs',
+          { type: 'number', min: 0, max: 200 }), '0 disables staggering')
+      ])
     ]));
   }
 
