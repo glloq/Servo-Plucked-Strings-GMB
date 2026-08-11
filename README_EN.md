@@ -112,9 +112,9 @@ mapping still stays free per servo.
 
 All configuration happens in the browser (served by the ESP32, or by opening
 `web-interface/index.html` in **demo mode**). The interface is just **three main
-pages** — Instrument, Calibration, Wiring & GPIO — and everything else (instrument
-configuration, MIDI, network, advanced) lives in the **Settings** modal (gear
-button). Detailed overview of every part:
+pages** — Instrument, Setup, Wiring & GPIO. The **whole instrument creation is one
+ordered flow on the Setup page**; only device Wi-Fi and the diagnostic tools live in
+the gear modal. Detailed overview of every part:
 [`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
 
 **Instrument** — a GMB-style playable neck: a note-name circle on each equipped
@@ -122,9 +122,12 @@ fret and open string, a big emergency STOP + Re-arm, a play-mode selector, and a
 chord bar that strums a chord across several strings.
 <p align="center"><img src="img/screenshots/fretboard.png" alt="Instrument page" width="90%"/></p>
 
-**Calibration** — **hand** tuning of the servos (contact angle + rotation
-direction) and a test bench, in three steps: Frets → Plucking → Test.
-<p align="center"><img src="img/screenshots/calibration.png" alt="Calibration page" width="90%"/></p>
+**Setup** — the complete instrument creation in one flow: **Instrument → Frets →
+Plucking → MIDI → Timing → Test → Validation**. Define the instrument (identity,
+mechanics, ESP32 board, wiring), calibrate what you defined by hand (contact / stroke
+angles + rotation direction), set its MIDI behaviour and timing, then test and save.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Setup page — Instrument step" width="90%"/></p>
+<p align="center"><img src="img/screenshots/calibration.png" alt="Setup page — Frets calibration" width="90%"/></p>
 
 **Wiring & GPIO** — the current instrument's ESP32 + PCA9685 harness (one or two
 I²C buses, addresses, per-pin string·role, live conflict checks), and the
@@ -132,10 +135,6 @@ I²C buses, addresses, per-pin string·role, live conflict checks), and the
 used pins highlighted.
 <p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="GPIO pins + board pinout" width="90%"/></p>
-
-**Settings** — the instrument-configuration wizard (all its pages: Instrument →
-MIDI → Power → Validation), plus network and advanced tools.
-<p align="center"><img src="img/screenshots/wizard.png" alt="Settings modal — Configuration" width="90%"/></p>
 
 ## 🔌 Hardware
 
@@ -209,8 +208,8 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ ESP32 adapters (Wi-Fi, web server, ServoBank, storage)
 │   ├── src/main.cpp        Hardware integration + servo-per-fret scheduler
 │   └── test/               Native tests (g++) + hostcheck + profilecheck
-├── web-interface/          Web interface (3 pages: Instrument, Calibration,
-│                           Wiring & GPIO + Settings modal)
+├── web-interface/          Web interface (3 pages: Instrument, Setup,
+│                           Wiring & GPIO + gear modal for device/diagnostics)
 ├── instrument-profiles/    Ready-made profiles (ukulele + geared variant, guitar,
 │                           bass, mandolin, banjo)
 ├── board-profiles/         ESP32 board profiles (S3, WROOM-32, DevKit v1)

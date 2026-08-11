@@ -13,6 +13,7 @@
   var GMB = global.GMB, h = GMB.h;
 
   var board = null;
+  var boardId = null;   // profile id the cached `board` was fetched for
 
   function render(host) {
     // Clear first: this view can re-enter itself once the board profile resolves
@@ -20,23 +21,25 @@
     // stack real cards under the "Loading…" placeholder.
     host.innerHTML = '';
     var p = GMB.state.profile;
-    if (!board) {
+    // Re-fetch when the board chosen on the Setup page no longer matches the cache.
+    if (!board || boardId !== p.board.profile) {
+      boardId = p.board.profile;
       GMB.api.getBoard(p.board.profile).then(function (b) { board = b; render(host); });
       host.appendChild(h('div.card', 'Loading board profile…'));
       return;
     }
 
-    // Controls.
+    // Controls. The board itself (and native-USB reservation) is chosen on the Setup
+    // page — this reference page just assigns pins on it, so it shows the board
+    // read-only and keeps the assignment tools.
     host.appendChild(h('div.card', [
       h('div.card-head', [h('h2', 'Pin assignment — ' + board.displayName),
         h('span.muted', GMB.isAdvanced() ? 'Advanced: manual assignment + caution pins' : 'Simplified: recommended pins only')]),
-      h('div.form-grid', [
-        GMB.field('ESP32 board', boardSelect(host), 'the pin map, diagram and validation adapt to the board')
-      ]),
+      h('p.muted', ['Board ', h('strong', board.displayName || p.board.profile),
+        (p.board.reserveUsb ? ' · native USB reserved' : ''),
+        ' — change the board and USB reservation on the Setup page (Instrument › Board).']),
       h('div.toolbar', [
         h('label.inline', [GMB.input(p.board, 'automaticPinAssignment', { type: 'checkbox' }), h('span', 'Automatic pin assignment')]),
-        h('label.inline', [GMB.input(p.board, 'reserveUsb', { type: 'checkbox', onChange: function () { validate(); } }),
-          h('span', 'Reserve native-USB pins')]),
         h('span.spacer'),
         GMB.button('Assign automatically', autoAssign, 'primary'),
         GMB.button('Validate', validate)
@@ -250,22 +253,6 @@
     });
   }
 
-  // ---- ESP32 board selector -------------------------------------------------
-  function boardSelect(host) {
-    var p = GMB.state.profile;
-    var sel = h('select');
-    (GMB.boardList ? GMB.boardList() : []).forEach(function (b) {
-      sel.appendChild(h('option', { value: b.id, selected: b.id === p.board.profile }, b.name));
-    });
-    if (p.board.profile) sel.value = p.board.profile;
-    sel.addEventListener('change', function () {
-      p.board.profile = sel.value;
-      board = null;        // force a re-fetch of the newly chosen board profile
-      GMB.markDirty();
-      render(host);        // re-render the whole page with the new board
-    });
-    return sel;
-  }
 
   // ---- graphical pinout -----------------------------------------------------
   var SVGNS = 'http://www.w3.org/2000/svg';

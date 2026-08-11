@@ -9,14 +9,16 @@
  *   • PLUCK — the plectrum / strum servo that sounds the string, plus the optional
  *            strum-lift and damper. Step "Plucking".
  *
- * The step functions are shared by two FLOWS (UI redesign):
- *   • CONFIG flow (hosted in the Settings modal — GMB.renderConfigWizard):
- *       Instrument (Builder) -> MIDI -> Power -> Validation. The instrument
- *       definition — nothing that moves a servo.
- *   • CALIBRATION flow (a main page — GMB.views.calibration):
- *       Frets -> Plucking -> Test. The physical servo tuning + test bench.
- * Each flow keeps its own current step and mount element, so the Calibration page
- * and the (modal) config wizard can be open at the same time without clashing.
+ * ONE complete SETUP flow (GMB.views.setup — a main page) walks the whole
+ * creation of an instrument in order, so nothing is split across pages/modals:
+ *
+ *     Instrument (Builder) -> Frets -> Plucking -> MIDI -> Timing -> Test -> Validation
+ *
+ * i.e. define the instrument (identity, strings, mechanics, board, wiring), then
+ * calibrate what you defined (finger servos, then strikers), then its MIDI
+ * behaviour and timing, then test it and save. Only device connectivity (Wi-Fi)
+ * and the diagnostic tools (SysEx / MIDI monitor) stay in the gear modal — they
+ * are not part of the instrument.
  *
  * Every actuator step carries an Arm control and a "test bench" that drives ONE
  * servo or a whole GROUP (sweep every fret of a string, pluck every string, test
@@ -28,26 +30,25 @@
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
-  // Two flows over the same step functions (UI redesign). The CONFIG flow lives in
-  // the Settings modal (instrument definition); the CALIBRATION flow is a main page
-  // (servo tuning + test). Each keeps its own current-step index and host element,
-  // so both can be mounted at once (the page under the open modal) without clashing.
+  // One unified SETUP flow over the step functions (UI redesign): the complete,
+  // ordered creation of an instrument on a single main page — define, calibrate,
+  // MIDI, timing, test, save — so no instrument setting is split across a page and
+  // a modal. The gear modal keeps only device Wi-Fi and the diagnostic tools.
   var STEP_DEFS = {
     builder:    { label: 'Instrument', fn: stepBuilder },
     midi:       { label: 'MIDI',       fn: stepMidiSettings },
-    power:      { label: 'Power',      fn: stepPower },
+    power:      { label: 'Timing',     fn: stepPower },
     validation: { label: 'Validation', fn: stepValidation },
     frets:      { label: 'Frets',      fn: stepFrets },
     plucking:   { label: 'Plucking',   fn: stepPluck },
     test:       { label: 'Test',       fn: stepTest }
   };
   var FLOWS = {
-    config: ['builder', 'midi', 'power', 'validation'],
-    calibration: ['frets', 'plucking', 'test']
+    setup: ['builder', 'frets', 'plucking', 'midi', 'power', 'test', 'validation']
   };
-  var flowStep = { config: 0, calibration: 0 };        // current step index per flow
-  var flowHost = { config: null, calibration: null };  // mount element per flow
-  var currentFlow = 'calibration';                     // which flow a bare drawStep() targets
+  var flowStep = { setup: 0 };        // current step index
+  var flowHost = { setup: null };     // mount element
+  var currentFlow = 'setup';          // which flow a bare drawStep() targets
 
   var activeStr = 0;        // per-string steps show one string at a time
   var expandedFrets = {};   // Frets step: which fret rows show their calibration editor
@@ -946,22 +947,27 @@
         capacityReport()
       ]));
 
-      body.appendChild(builderSection('Board & network', [
+      var boardOpts = (GMB.boardList ? GMB.boardList() : []).map(function (b) {
+        return { value: b.id, label: b.name };
+      });
+      body.appendChild(builderSection('Board', [
         h('div.grid2', [
-          GMB.field('Reserve native USB (GPIO19/20)', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' })),
-          GMB.field('Network mode', GMB.input(p.network, 'mode',
-            { type: 'select', options: [{ value: 'accessPoint', label: 'Access point' }, { value: 'station', label: 'Wi-Fi client' }] })),
-          GMB.field('AP SSID', GMB.input(p.network, 'apSsid')),
-          GMB.field('Station SSID', GMB.input(p.network, 'ssid')),
-          GMB.field('Hostname', GMB.input(p.network, 'hostname'))
-        ])
+          GMB.field('ESP32 board', GMB.input(p.board, 'profile', {
+            type: 'select', options: boardOpts,
+            onChange: function () { GMB.markDirty(); drawStep(); } }),
+            'the pinout everything wires to — the full map is on the Wiring & GPIO page'),
+          GMB.field('Reserve native USB (GPIO19/20)', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' }))
+        ]),
+        h('p.muted', 'Wi-Fi / hostname live in the gear menu (⚙ Network) — they belong to the device, not the instrument.')
       ]));
     }
 
     // Summary + CTA. Advanced keeps an explicit Generate button (for hand-edited
-    // wiring); Simplified auto-generates, so it only offers "Go to calibration".
+    // wiring); Simplified auto-generates. Either way the next step is calibrating the
+    // frets, which is the very next step of this same flow.
     var preview = previewServos(), auxN = auxServos().length;
     var boards = {}; preview.forEach(function (s) { if (s.source === 'pca') boards[s.pcaBoard] = 1; });
+    var toFrets = function () { goto('setup', FLOWS.setup.indexOf('frets')); };
     var summaryKids = [
       h('div.summary', [
         h('div', [h('strong', strings.length + ' strings'),
@@ -977,11 +983,11 @@
         GMB.button('Generate wiring', function () {
           if (applyBuilder()) { GMB.toast('Wiring generated.', 'ok'); drawStep(); }
         }, 'primary'),
-        GMB.button('Go to calibration →', function () { if (GMB.openCalibration) GMB.openCalibration(); }, 'ghost')
+        GMB.button('Next: calibrate frets →', toFrets, 'ghost')
       ]));
     } else {
       summaryKids.push(h('div.row', [
-        GMB.button('Go to calibration →', function () { if (GMB.openCalibration) GMB.openCalibration(); }, 'primary')
+        GMB.button('Next: calibrate frets →', toFrets, 'primary')
       ]));
     }
     body.appendChild(builderSection(adv ? 'Generate wiring' : 'Ready', summaryKids));
@@ -1186,10 +1192,10 @@
     var id = h('div.fret-line-id', [h('strong', 'Fret ' + fret), h('span.muted', note)]);
 
     // Only equipped frets are calibrated here; which frets carry a servo (and their
-    // gearing / wiring) is defined in Settings › Configuration, not on this page.
+    // gearing / wiring) is defined in the Instrument step, not on this page.
     if (!sv) {
       return h('div.fret-line.empty', [id, h('span.spacer'),
-        h('span.muted', 'no servo — add it in Settings › Configuration')]);
+        h('span.muted', 'no servo — add it in the Instrument step')]);
     }
     var geared = isGeared(sv);
     // Side-B fret of a geared servo: it is calibrated on its side-A (owner) row.
@@ -1296,7 +1302,7 @@
       'Frets — calibrate each finger servo by hand. For every equipped fret, set its ' +
       'contact angle (and reverse the rotation direction if it moves the wrong way), test ' +
       'it live and play the note. Which frets carry a servo — and their gearing and wiring — ' +
-      'is defined in Settings › Configuration.'));
+      'is defined in the Instrument step.'));
 
     body.appendChild(armToolbar());
     body.appendChild(testBench('Fret test bench', [
@@ -1308,11 +1314,11 @@
     body.appendChild(stringTabs());
     if (GMB.isAdvanced()) body.appendChild(pcaMap(activeStr));
 
-    // An open-only string (chosen in Settings) has no fret servos to calibrate.
+    // An open-only string (chosen on the Instrument step) has no fret servos to calibrate.
     if (s.maxFret > 0 && GMB.availableFrets(p, activeStr).length === 0) {
       body.appendChild(h('div.note-box',
         'This string has no finger servos — it plays its open note only. Equip its frets in ' +
-        'Settings › Configuration.'));
+        'the Instrument step.'));
       return;
     }
 
@@ -1408,12 +1414,12 @@
   // instrument (common to every string). Per-string tabs below only carry the
   // physical angles.
   function pluckGlobalCard() {
-    var p = GMB.state.profile, pk = p.pluck, midi = p.midi;
+    var p = GMB.state.profile, pk = p.pluck;
     var hasLift = anyRole('strumLift');
 
     // Gesture — stroke shaping common to every string. The two global delays
-    // (action delay / FIFO buffer and fret → strum delay) live in
-    // Settings › Configuration, not here.
+    // (action delay / FIFO buffer and fret → strum delay) live on the Timing step,
+    // not here.
     var gesture = h('div.card.inset', [
       h('h3', 'Gesture'),
       h('div.grid2', [
@@ -1460,8 +1466,7 @@
             ? 'rest = plectrum on the string; on a note it raises, holds, then lowers to mute'
             : 'rest = plectrum away; on a note it lowers to strike then raises') +
             ' — recalibrate the lift rest/active angles if you change the direction'),
-          GMB.field('Lead (ms)', GMB.input(midi, 'strumLeadMs', { type: 'number', min: 0, max: 2000 }),
-            'engage the lift early — plectrum in place right at the strike')
+          h('p.muted', 'The strum lead (how early the lift engages) is set on the Timing step.')
         ])
       ]);
     }
@@ -1481,8 +1486,8 @@
       'mounting: the plectrum rests against the string (contact angle) ready to strum, ' +
       'then sweeps to the down-stroke and up-stroke angles on either side for alternating ' +
       'strokes. Set the contact / down / up angles and the rotation direction by hand, ' +
-      'then test. Which strings have a plucker / lift / damper is defined in ' +
-      'Settings › Configuration; the global delays live there too.'));
+      'then test. Which strings have a plucker / lift / damper is defined on the ' +
+      'Instrument step; the two global delays live on the Timing step.'));
 
     body.appendChild(pluckGlobalCard());
     body.appendChild(armToolbar());
@@ -1571,11 +1576,11 @@
       ]));
     } else {
       body.appendChild(h('div.card', [h('h3', 'Plucker · string ' + (activeStr + 1)),
-        h('p.muted', 'This string has no plucker — add one in Settings › Configuration (sounding mechanism).')]));
+        h('p.muted', 'This string has no plucker — add one in the Instrument step (sounding mechanism).')]));
     }
 
     // Optional per-string actuators (strum lift, damper): calibrated here when present.
-    // Whether a string has them is defined in Settings › Configuration.
+    // Whether a string has them is defined in the Instrument step.
     var lift = perStringServo(activeStr, 'strumLift');
     var damp = perStringServo(activeStr, 'damper');
     var opt = [];
@@ -1588,7 +1593,7 @@
     if (damp) opt.push(actuatorBlock('Damper', damp,
       { rest: 'off the string', active: 'muting the string' }));
     if (!lift && !damp)
-      opt.push(h('p.muted', 'No strum lift or damper on this string. Add them in Settings › Configuration.'));
+      opt.push(h('p.muted', 'No strum lift or damper on this string. Add them in the Instrument step.'));
     body.appendChild(h('div.card', [
       h('div.card-head', [h('h3', 'Optional actuators · string ' + (activeStr + 1)),
         h('span.muted', 'calibrate strum lift / damper when present')]),
@@ -1757,21 +1762,26 @@
     return out;
   };
 
-  // Calibration is a main page; the config-instrument wizard is hosted inside the
-  // Settings modal (GMB.renderConfigWizard). Both drive the same step functions,
-  // each with its own current step and mount element.
-  GMB.views.calibration = {
-    render: function (host) { renderFlow(host, 'calibration'); },
-    teardown: function () { flowHost.calibration = null; }
+  // The whole instrument setup is one main page (Instrument -> Frets -> Plucking ->
+  // MIDI -> Timing -> Test -> Validation). Teardown releases the live MIDI socket the
+  // MIDI step may hold and stops any running test sequence.
+  GMB.views.setup = {
+    render: function (host) { renderFlow(host, 'setup'); },
+    teardown: function () {
+      flowHost.setup = null;
+      if (GMB.midiSettings && GMB.midiSettings.teardown) GMB.midiSettings.teardown();
+      if (GMB.testRunner && GMB.testRunner.stop) GMB.testRunner.stop();
+    }
   };
-  GMB.renderConfigWizard = function (host) { renderFlow(host, 'config'); };
-  GMB.configWizard = {
-    render: function (host) { renderFlow(host, 'config'); },
-    teardown: function () { flowHost.config = null; }
+  // Jump straight to a named step of the setup page (e.g. from the Instrument view).
+  GMB.gotoSetupStep = function (stepId) {
+    var i = FLOWS.setup.indexOf(stepId);
+    GMB.navigate('setup');
+    if (i >= 0) { flowStep.setup = i; if (flowHost.setup) renderFlow(flowHost.setup, 'setup'); }
   };
-  // Jump from the config wizard (in the modal) to the Calibration page.
+  // Back-compat: the old "go to calibration" entry point now lands on the Frets step.
   GMB.openCalibration = function () {
     if (GMB.closeSettings) GMB.closeSettings();
-    GMB.navigate('calibration');
+    GMB.gotoSetupStep('frets');
   };
 })(window);

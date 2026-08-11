@@ -488,8 +488,8 @@
 
     if (!strings.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No strings configured yet.'),
-        h('p.muted', 'Configure the instrument first (Settings › Configuration).'),
-        h('div.row', [GMB.button('Open configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
+        h('p.muted', 'Set the instrument up first — the Setup page walks the whole build.'),
+        h('div.row', [GMB.button('Go to setup', function () { GMB.navigate('setup'); }, 'primary')])]));
       return;
     }
 
@@ -499,7 +499,7 @@
     if (!anyStriker)
       host.appendChild(h('div.note-box', [
         'No plucker on any string yet, so notes cannot sound. ',
-        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
+        GMB.button('Go to setup', function () { GMB.navigate('setup'); }, 'ghost')]));
     else
       host.appendChild(chordBar());
   }

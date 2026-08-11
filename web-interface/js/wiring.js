@@ -590,14 +590,14 @@
         '5–6 V servo supply, one PCA9685 per board actually used (at its I²C address), the shared ' +
         'power + /OE buses, and any direct-GPIO servos. Boards can be split across the ESP32-S3’s two ' +
         'I²C buses (SDA/SCL and SDA2/SCL2). Each occupied channel is labelled with its string and fret, so a ' +
-        'PCA9685 shared across several strings stays unambiguous. It updates with each change made in the ' +
-        'instrument configuration (Settings) and the GPIO sub-tab.')
+        'PCA9685 shared across several strings stays unambiguous. It updates with each change made on the ' +
+        'Setup page and the GPIO sub-tab.')
     ]));
 
     if (!servos.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No servos configured yet.'),
-        h('p.muted', 'Configure the instrument first (Settings › Configuration) — the wiring map is built from its servos.'),
-        h('div.row', [GMB.button('Open configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
+        h('p.muted', 'Set the instrument up first (Setup page) — the wiring map is built from its servos.'),
+        h('div.row', [GMB.button('Go to setup', function () { GMB.navigate('setup'); }, 'primary')])]));
       return;
     }
 

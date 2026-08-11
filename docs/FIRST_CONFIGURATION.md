@@ -38,10 +38,11 @@ obtained by DHCP — a fixed static IP is not currently configurable. If the
 connection fails several times, the system automatically reverts to access-point
 mode. A long press on the **BOOT** button forces the hotspot back on at any time.
 
-The wizard has **7 steps**: **Builder** → **Frets** → **Plucking** → MIDI →
-Power → Test → Validation. Step 1 (the Builder) makes the *mechanical* choices
-and generates the wiring; the frets (frettes) and the plucking (grattage) of each
-string are then calibrated and tested on their **own steps**.
+The whole setup is **one ordered flow on the Setup page** — **7 steps**:
+**Instrument** → **Frets** → **Plucking** → MIDI → Timing → Test → Validation. Step 1
+(the Instrument builder) makes the *mechanical* choices and generates the wiring; the
+frets (frettes) and the plucking (grattage) of each string are then calibrated and
+tested on their **own steps**, all without leaving the page.
 
 ---
 
@@ -55,10 +56,9 @@ The instrument **type is cosmetic** — an instrument is defined by its
   to load a tuning + GM tags, or **Custom** for your own. The type only tags the
   name / GM program.
 * **Strings & tuning** — **number of strings** (1–6), each string's
-  **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`),
-  plus a **tuning helper** (named tunings for the string count, or shift every
-  string ±1 semitone). A string is just an open pitch plus its top fret — no
-  vibrating length, transmission or steps/mm.
+  **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`).
+  A string is just an open pitch plus its top fret — no vibrating length,
+  transmission or steps/mm.
 * **Fretting mechanism** — **one servo per fret** (full chromatic) ·
   **geared low neck** (pair the wide low frets on one antagonistic servo each,
   narrow high frets stay single — halves the low-neck servo count) ·
@@ -72,11 +72,13 @@ The instrument **type is cosmetic** — an instrument is defined by its
   appears when the committed wiring no longer matches. Auxiliary servos and any
   string still classified *custom* are preserved.
 
-Advanced mode adds transpose / GM tags and a **Board & network** card
-(board is fixed to **ESP32-S3-DevKitC-1**; network mode access point / Wi-Fi
-client). The tuning sets the note range announced to General-Midi-Boop (see
+Advanced mode adds transpose / GM tags and a **Board** card — the **ESP32 board
+selector** (ESP32-S3-DevKitC-1 · ESP32-WROOM-32 · ESP32 DevKit v1) plus the
+native-USB reserve. Wi-Fi / hostname are **not** here — they live in the gear modal
+(⚙ Network), because they belong to the device, not the instrument. The tuning sets
+the note range announced to General-Midi-Boop (see
 [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3). The mechanical choice is **not stored**
-in the profile — the Builder re-derives it from the servo list on entry.
+in the profile — the builder re-derives it from the servo list on entry.
 
 ---
 
@@ -130,7 +132,7 @@ Each actuator has **Contact / Down-stroke / Up-stroke** test buttons and a
 every plucker, and tests the strum lifts / dampers. Every string needs a plucker
 to sound (the validation step flags a string that has none). The two global
 delays — the **action delay** (a fixed-time FIFO buffer) and the **fret → strum
-delay** — are set once on the **Power** step, not here.
+delay** — are set once on the **Timing** step, not here.
 
 ---
 
@@ -138,13 +140,13 @@ delay** — are set once on the **Power** step, not here.
 
 Global MIDI channel, Omni, sustain pedal, velocity curve, and **string/fret
 selection**: `CC20` selects the string and `CC21` the fret before a `Note On`
-(General-Midi-Boop tablature). The full CC/selection editor and the GMB
-identity/capabilities live on the **MIDI tab** (see
-[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3).
+(General-Midi-Boop tablature). The full CC/selection editor is on this step in
+**Advanced** mode; the GMB identity/capabilities and the live MIDI monitor are in
+the gear modal (Advanced) — see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3.
 
 ---
 
-## 6. Step 5 — Power
+## 6. Step 5 — Timing
 
 Two cards. **Timing** sets the two global delays: the **action delay** — a
 fixed-time FIFO buffer (`noteExecutionDelayMs`) that holds every incoming note by

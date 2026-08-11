@@ -113,9 +113,10 @@ mapping reste néanmoins libre par servo.
 
 Toute la configuration se fait dans le navigateur (servie par l'ESP32, ou en
 ouvrant `web-interface/index.html` en **mode démo**). L'interface se réduit à
-**trois pages principales** — Instrument, Calibration, Câblage & GPIO — et tout
-le reste (configuration de l'instrument, MIDI, réseau, avancé) est regroupé dans
-le **modal Réglages** (bouton engrenage). Aperçu détaillé de chaque partie :
+**trois pages principales** — Instrument, Setup, Câblage & GPIO. **Toute la création
+d'un instrument tient dans un seul parcours ordonné sur la page Setup** ; seuls le
+Wi-Fi de l'appareil et les outils de diagnostic restent dans le modal engrenage.
+Aperçu détaillé de chaque partie :
 [`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
 
 **Instrument** — manche jouable façon GMB : un cercle de note par frette utilisée
@@ -123,9 +124,13 @@ et par corde à vide, gros arrêt d'urgence + ré-armement, sélecteur de mode d
 et une barre d'accords qui gratte l'accord sur plusieurs cordes.
 <p align="center"><img src="img/screenshots/fretboard.png" alt="Page Instrument" width="90%"/></p>
 
-**Calibration** — réglage **manuel** des servos (angle de contact + sens de
-rotation) et banc de test, en trois étapes : Frettes → Grattage → Test.
-<p align="center"><img src="img/screenshots/calibration.png" alt="Page Calibration" width="90%"/></p>
+**Setup** — la création complète de l'instrument en un seul parcours :
+**Instrument → Frettes → Grattage → MIDI → Timing → Test → Validation**. On définit
+l'instrument (identité, mécanique, carte ESP32, câblage), on calibre à la main ce
+qu'on a défini (angles de contact / grattage + sens de rotation), on règle le MIDI et
+le timing, puis on teste et on enregistre.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Page Setup — étape Instrument" width="90%"/></p>
+<p align="center"><img src="img/screenshots/calibration.png" alt="Page Setup — calibration des frettes" width="90%"/></p>
 
 **Câblage & GPIO** — le faisceau ESP32 + PCA9685 de l'instrument courant (un ou
 deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit), et le
@@ -133,10 +138,6 @@ deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit), et le
 les broches utilisées surlignées.
 <p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="Broches GPIO + brochage de la carte" width="90%"/></p>
-
-**Réglages** — l'assistant de configuration de l'instrument (toutes ses pages :
-Instrument → MIDI → Alimentation → Validation), plus réseau et outils avancés.
-<p align="center"><img src="img/screenshots/wizard.png" alt="Modal Réglages — Configuration" width="90%"/></p>
 
 ## 🔌 Matériel
 
@@ -210,8 +211,8 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ Adaptateurs ESP32 (Wi-Fi, serveur web, ServoBank, stockage)
 │   ├── src/main.cpp        Intégration matérielle + scheduler servo-par-frette
 │   └── test/               Tests natifs (g++) + hostcheck + profilecheck
-├── web-interface/          Interface web (3 pages : Instrument, Calibration,
-│                           Câblage & GPIO + modal Réglages)
+├── web-interface/          Interface web (3 pages : Instrument, Setup,
+│                           Câblage & GPIO + modal engrenage appareil/diagnostic)
 ├── instrument-profiles/    Profils prêts (ukulélé + variante à engrenage, guitare,
 │                           basse, mandoline, banjo)
 ├── board-profiles/         Profils de carte ESP32 (S3, WROOM-32, DevKit v1)
