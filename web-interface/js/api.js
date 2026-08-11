@@ -455,7 +455,7 @@
         mode: 'accessPoint', ssid: '', hostname: 'gmb-ukulele',
         apSsid: 'Servo-Plucked-Strings-GMB', staticIp: false
       },
-      power: { maxConcurrentMoves: 3, staggerMs: 8 },
+      power: { maxConcurrentMoves: 3, maxConcurrentPerBoard: 0, staggerMs: 8 },
       pluck: {
         strokeMs: 0, minStrikePct: 0, fretToPluckMs: 0, muteSource: 'auto',
         muteHoldMs: 60, liftMuteOnNoteOff: false, liftEngage: 'lowerToPlay'

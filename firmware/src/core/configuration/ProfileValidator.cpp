@@ -363,10 +363,11 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
             err("strings", "At least one string must be enabled");
     }
 
-    // Servo current-draw governor.
-    if (p.power.maxConcurrentMoves == 0)
-        err("power.maxConcurrentMoves",
-            "At least one servo must be allowed to move at a time");
+    // Servo current-draw governor. Each cap is optional (0 = no limit); a per-PCA
+    // board never has more than its 16 channels moving at once.
+    if (p.power.maxConcurrentPerBoard > 16)
+        err("power.maxConcurrentPerBoard",
+            "Per-board concurrent moves exceeds a PCA9685's 16 channels");
     if (p.power.staggerMs > 1000)
         err("power.staggerMs", "Servo start stagger exceeds a sane bound (1000 ms)");
 

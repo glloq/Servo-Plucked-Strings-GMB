@@ -1374,7 +1374,10 @@
 
   function stepPower(body) {
     var p = GMB.state.profile;
-    if (!p.power) p.power = { maxConcurrentMoves: 3, staggerMs: 8 };
+    if (!p.power) p.power = {};
+    if (p.power.maxConcurrentMoves === undefined) p.power.maxConcurrentMoves = 3;
+    if (p.power.maxConcurrentPerBoard === undefined) p.power.maxConcurrentPerBoard = 0;
+    if (p.power.staggerMs === undefined) p.power.staggerMs = 8;
     ensurePluckConfig(p);
 
     // Timing — the two global delays that shape when every note fires.
@@ -1395,20 +1398,37 @@
       ])
     ]));
 
-    // Current management.
-    body.appendChild(h('div.card.inset', [
-      h('h3', 'Current management'),
+    // Current management — an OPTIONAL governor. A servo peaks its current in the
+    // first milliseconds of a move; the governor staggers how many servos START
+    // together so a chord re-fretting many strings doesn't brown out the 5–6 V rail.
+    var pw = p.power;
+    var limitOn = (pw.maxConcurrentMoves > 0) || (pw.maxConcurrentPerBoard > 0);
+    var limitToggle = h('input', { type: 'checkbox', checked: limitOn });
+    limitToggle.addEventListener('change', function () {
+      if (limitToggle.checked) {
+        if (!(pw.maxConcurrentMoves > 0) && !(pw.maxConcurrentPerBoard > 0)) pw.maxConcurrentMoves = 3;
+      } else { pw.maxConcurrentMoves = 0; pw.maxConcurrentPerBoard = 0; }
+      GMB.markDirty(); drawStep();
+    });
+    var cmKids = [
       h('p.muted',
-        'Limit PCA9685 in-rush current. Idle fingers cut their PWM (per servo), only one ' +
-        'finger presses per string at a time, and the governor staggers how many servos start ' +
-        'moving together — important when a chord re-frets several strings at once.'),
-      h('div.grid2', [
-        GMB.field('Max servos moving at once', GMB.input(p.power, 'maxConcurrentMoves',
-          { type: 'number', min: 1, max: 32 }), 'lower = gentler on the power supply'),
-        GMB.field('Stagger between starts (ms)', GMB.input(p.power, 'staggerMs',
+        'Optional — limits PCA9685 in-rush current by staggering how many servos start ' +
+        'moving at once (idle fingers already cut their PWM, and only one finger presses per ' +
+        'string at a time). Turn it off to let everything move together.'),
+      h('label.inline.builder-opt', [limitToggle,
+        h('span', 'Limit how many servos start moving at once')])
+    ];
+    if (limitOn) {
+      cmKids.push(h('div.grid3', [
+        GMB.field('Max at once — whole instrument', GMB.input(pw, 'maxConcurrentMoves',
+          { type: 'number', min: 0, max: 32 }), '0 = no overall cap'),
+        GMB.field('Max at once — per PCA board', GMB.input(pw, 'maxConcurrentPerBoard',
+          { type: 'number', min: 0, max: 16 }), '0 = no per-board cap (each board has its own supply)'),
+        GMB.field('Stagger between starts (ms)', GMB.input(pw, 'staggerMs',
           { type: 'number', min: 0, max: 200 }), '0 disables staggering')
-      ])
-    ]));
+      ]));
+    }
+    body.appendChild(h('div.card.inset', [h('h3', 'Current management'), cmKids]));
   }
 
   // ---- Step 6: Test (whole instrument) --------------------------------------
@@ -1524,8 +1544,10 @@
       if (s.maxFret > 0 && GMB.availableFrets(p, i).length === 0)
         out.push({ level: 'warning', field: 'string ' + i, message: 'no finger servo — only the open string plays' });
     });
-    if (p.power && p.power.maxConcurrentMoves < 1)
-      out.push({ level: 'error', field: 'power', message: 'at least one servo must be allowed to move' });
+    // The servo-start caps are optional (0 = no limit); a per-board cap can't exceed
+    // a PCA9685's 16 channels.
+    if (p.power && (p.power.maxConcurrentPerBoard || 0) > 16)
+      out.push({ level: 'error', field: 'power', message: 'per-board concurrent moves exceeds a PCA9685 (16 channels)' });
     return out;
   };
 

@@ -132,10 +132,13 @@ fixed-time FIFO buffer (`noteExecutionDelayMs`) that holds every incoming note b
 the same amount so chords land together and the feel stays even — and the
 **fret → strum delay** (`fretToPluckMs`) that waits after a finger has seated a
 fret before the plectrum strikes (plus the strum **lead**). **Current management**
-limits PCA9685 in-rush current: idle fingers cut their PWM (`disableAtRest`), only
-**one finger presses per string at a time**, and the governor **staggers** how
-many servos start moving together (`maxConcurrentMoves`, `staggerMs`) — important
-when a chord re-frets several strings at once.
+is an **optional** governor (a toggle turns it off): it limits PCA9685 in-rush
+current by staggering how many servos start moving at once. When on you cap the
+starts **whole-instrument** (`maxConcurrentMoves`) and **per PCA board**
+(`maxConcurrentPerBoard`) — each **0 = no cap**, and each physical board has its own
+power input, so the per-board cap bounds one board's in-rush even under the global
+one — spaced by `staggerMs`. (Idle fingers already cut their PWM and only one finger
+presses per string at a time.)
 
 ---
 
