@@ -30,13 +30,28 @@
     host.appendChild(h('div.card', [
       h('div.card-head', [h('h2', 'Pin assignment — ' + board.displayName),
         h('span.muted', GMB.isAdvanced() ? 'Advanced: manual assignment + caution pins' : 'Simplified: recommended pins only')]),
+      h('div.form-grid', [
+        GMB.field('ESP32 board', boardSelect(host), 'the pin map, diagram and validation adapt to the board')
+      ]),
       h('div.toolbar', [
         h('label.inline', [GMB.input(p.board, 'automaticPinAssignment', { type: 'checkbox' }), h('span', 'Automatic pin assignment')]),
         h('label.inline', [GMB.input(p.board, 'reserveUsb', { type: 'checkbox', onChange: function () { validate(); } }),
-          h('span', 'Reserve GPIO19/20 for future USB')]),
+          h('span', 'Reserve native-USB pins')]),
         h('span.spacer'),
         GMB.button('Assign automatically', autoAssign, 'primary'),
         GMB.button('Validate', validate)
+      ])
+    ]));
+
+    // Board diagram — the selected ESP32 with its used pins highlighted.
+    host.appendChild(h('div.card', [
+      h('div.card-head', [h('h2', 'Board pinout'),
+        h('span.muted', board.layout ? 'physical header layout — used pins highlighted' : 'schematic (pin order by number)')]),
+      h('div.esp-scroll', boardDiagram()),
+      h('div.esp-legend', [
+        legend('recommended', 'Recommended'), legend('caution', 'Caution'),
+        legend('reserved', 'Reserved / input-only'), legend('used', 'Used'),
+        h('span.legend-item', [h('span.swatch.esp-sw-power'), h('span', 'Power / GND')])
       ])
     ]));
 
@@ -233,6 +248,108 @@
         h('div.err-reason', e.message)
       ]));
     });
+  }
+
+  // ---- ESP32 board selector -------------------------------------------------
+  function boardSelect(host) {
+    var p = GMB.state.profile;
+    var sel = h('select');
+    (GMB.boardList ? GMB.boardList() : []).forEach(function (b) {
+      sel.appendChild(h('option', { value: b.id, selected: b.id === p.board.profile }, b.name));
+    });
+    if (p.board.profile) sel.value = p.board.profile;
+    sel.addEventListener('change', function () {
+      p.board.profile = sel.value;
+      board = null;        // force a re-fetch of the newly chosen board profile
+      GMB.markDirty();
+      render(host);        // re-render the whole page with the new board
+    });
+    return sel;
+  }
+
+  // ---- graphical pinout -----------------------------------------------------
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svg(tag, attrs, kids) {
+    var el = document.createElementNS(SVGNS, tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'text') el.textContent = v;
+      else el.setAttribute(k, v);
+    });
+    (function add(kids) {
+      if (kids == null) return;
+      if (Array.isArray(kids)) { kids.forEach(add); return; }
+      if (kids.nodeType) { el.appendChild(kids); return; }
+      el.appendChild(document.createTextNode(String(kids)));
+    })(kids);
+    return el;
+  }
+
+  // GPIO -> short label of what uses it (a board signal, or a direct-GPIO servo).
+  function usedGpioMap() {
+    var p = GMB.state.profile, m = {};
+    (p.pins || []).forEach(function (a) { if (a.gpio >= 0) m[a.gpio] = a.signal; });
+    (p.servos || []).forEach(function (s) {
+      if (s.source === 'gpio' && s.gpio >= 0 && !m[s.gpio])
+        m[s.gpio] = (s.stringIndex >= 0 ? 'S' + (s.stringIndex + 1) + '·' : '') + s.function;
+    });
+    return m;
+  }
+
+  // A board's physical header order, or a schematic two-column fallback (by GPIO#).
+  function layoutFor(b) {
+    if (b.layout && b.layout.length) return b.layout;
+    var gs = b.pins.map(function (p) { return p.gpio; }).sort(function (a, c) { return a - c; });
+    var half = Math.ceil(gs.length / 2), out = [];
+    gs.forEach(function (g, i) { out.push({ side: i < half ? 'L' : 'R', label: 'IO' + g, gpio: g, power: false }); });
+    return out;
+  }
+
+  function pinCat(pinDef, cap, used) {
+    if (pinDef.power || pinDef.gpio == null) return 'power';
+    if (used) return 'used';
+    if (!cap) return 'reserved';
+    if (cap.reserved || cap.preference === 'reserved' || !cap.output) return 'reserved';
+    return cap.preference;   // recommended | caution
+  }
+
+  function boardDiagram() {
+    var b = board, used = usedGpioMap();
+    var capByGpio = {}; b.pins.forEach(function (p) { capByGpio[p.gpio] = p; });
+    var layout = layoutFor(b);
+    var left = layout.filter(function (x) { return x.side === 'L'; });
+    var right = layout.filter(function (x) { return x.side === 'R'; });
+    var n = Math.max(left.length, right.length);
+    var ROW = 22, BY = 30, BX = 176, BW = 168, PAD = 16;
+    var bodyH = PAD + n * ROW + 12;
+    var VBW = 512, VBH = BY + bodyH + 34;
+
+    var root = svg('svg', { class: 'esp-svg', viewBox: '0 0 ' + VBW + ' ' + VBH,
+      preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': b.displayName + ' pinout' });
+    // Antenna hint + module body + USB connector.
+    root.appendChild(svg('rect', { class: 'esp-ant', x: BX + BW / 2 - 26, y: 8, width: 52, height: 16, rx: 3 }));
+    root.appendChild(svg('rect', { class: 'esp-body', x: BX, y: BY, width: BW, height: bodyH, rx: 10 }));
+    root.appendChild(svg('rect', { class: 'esp-usb', x: BX + BW / 2 - 17, y: BY + bodyH - 4, width: 34, height: 13, rx: 2 }));
+    root.appendChild(svg('text', { class: 'esp-usb-lbl', x: BX + BW / 2, y: BY + bodyH + 20, 'text-anchor': 'middle', text: 'USB' }));
+
+    function drawPin(pd, side, i) {
+      var isL = side === 'L', y = BY + PAD + i * ROW;
+      var cap = pd.gpio != null ? capByGpio[pd.gpio] : null;
+      var u = pd.gpio != null ? used[pd.gpio] : null;
+      var cat = pinCat(pd, cap, u);
+      var nubX = isL ? BX - 12 : BX + BW;
+      root.appendChild(svg('rect', { class: 'esp-nub ' + cat, x: nubX, y: y - 6, width: 12, height: 12, rx: 2 }));
+      root.appendChild(svg('text', { class: 'esp-pinlabel', x: isL ? BX + 7 : BX + BW - 7, y: y + 4,
+        'text-anchor': isL ? 'start' : 'end', text: pd.label }));
+      if (u) root.appendChild(svg('text', { class: 'esp-use', x: isL ? BX - 18 : BX + BW + 18, y: y + 4,
+        'text-anchor': isL ? 'end' : 'start', text: u }));
+      var tip = pd.gpio != null ? ('GPIO' + pd.gpio + (u ? ' — ' + u : (cap ? ' — ' + cat : ''))) : pd.label;
+      root.appendChild(svg('title', null, tip));
+    }
+    left.forEach(function (pd, i) { drawPin(pd, 'L', i); });
+    right.forEach(function (pd, i) { drawPin(pd, 'R', i); });
+    return root;
   }
 
   GMB.views.pins = { render: render, reset: function () { board = null; } };

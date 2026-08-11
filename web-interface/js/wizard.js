@@ -698,6 +698,12 @@
   // The ESP32-S3 has two hardware I²C controllers; splitting the PCA boards over
   // both buses halves the traffic and refreshes the servos faster on large rigs.
 
+  // Recommended pin map for the current board (board-aware SDA2/SCL2/OE2 defaults).
+  function rec() {
+    var id = GMB.state.profile.board && GMB.state.profile.board.profile;
+    return (GMB.recommendedFor && GMB.recommendedFor(id)) || GMB.RECOMMENDED || {};
+  }
+
   function distinctPcaBoards() {
     var set = {}, out = [];
     GMB.state.profile.servos.forEach(function (s) {
@@ -723,7 +729,7 @@
     p.pins = p.pins || [];
     var has = function (sig) { return p.pins.some(function (x) { return x.signal === sig; }); };
     if (anyBus1()) {
-      var R = GMB.RECOMMENDED || {};
+      var R = rec();
       if (!has('SDA2')) p.pins.push({ signal: 'SDA2', kind: 'sda', gpio: R.SDA2 != null ? R.SDA2 : 38 });
       if (!has('SCL2')) p.pins.push({ signal: 'SCL2', kind: 'scl', gpio: R.SCL2 != null ? R.SCL2 : 39 });
     } else {
@@ -737,7 +743,7 @@
     var p = GMB.state.profile; p.pins = p.pins || [];
     if (on) {
       if (!hasOe2()) {
-        var R = GMB.RECOMMENDED || {};
+        var R = rec();
         p.pins.push({ signal: 'SERVO_OE2', kind: 'servoOe', gpio: R.SERVO_OE2 != null ? R.SERVO_OE2 : 21 });
       }
     } else {
@@ -762,7 +768,7 @@
   function busTopology() {
     var boards = distinctPcaBoards();
     var two = anyBus1();
-    var R = GMB.RECOMMENDED || {};
+    var R = rec();
     var toggle = h('input', { type: 'checkbox', checked: two });
     toggle.addEventListener('change', function () { setSecondBus(toggle.checked); drawStep(); });
     var kids = [h('label.inline.builder-opt', [toggle,

@@ -783,3 +783,22 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 
 /* Emergency-stop action row on the Instrument (fretboard) page. */
 .panic-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+/* ---- ESP32 board pinout diagram (GPIO sub-tab) --------------------------- */
+.esp-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.esp-svg { display: block; width: 100%; height: auto; max-width: 560px; min-width: 400px; margin: 0 auto; }
+.esp-svg text { font-family: var(--mono); }
+.esp-body { fill: #12433a; stroke: rgba(0, 0, 0, .35); stroke-width: 1.4; }
+.esp-ant { fill: #bdb49d; stroke: rgba(0, 0, 0, .3); stroke-width: 1; }
+.esp-usb { fill: #9aa3ad; stroke: rgba(0, 0, 0, .3); stroke-width: 1; }
+.esp-usb-lbl { fill: var(--muted); font-size: 10px; }
+.esp-pinlabel { fill: #eef4f1; font-size: 11px; font-weight: 600; }
+.esp-use { fill: var(--accent); font-size: 10px; font-weight: 700; }
+.esp-nub { stroke: rgba(0, 0, 0, .25); stroke-width: .8; }
+.esp-nub.recommended { fill: var(--recommended); }
+.esp-nub.caution { fill: var(--caution); }
+.esp-nub.reserved { fill: var(--reserved); }
+.esp-nub.used { fill: var(--accent); }
+.esp-nub.power { fill: var(--used); }
+.esp-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; }
+.swatch.esp-sw-power { background: var(--used); }
