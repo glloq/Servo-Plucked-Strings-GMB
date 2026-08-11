@@ -94,28 +94,27 @@ lives in the **Settings** modal (the gear button, top-right).
 **Instrument** — playable neck drawn to scale (equal temperament); press-and-hold a fret to sound the string. A prominent emergency **STOP** sits at the top.
 <p align="center"><img src="../img/screenshots/fretboard.png" alt="Instrument page" width="100%"/></p>
 
-**Calibration** — the physical servo tuning + test bench: per-fret contact angle (Frettes), plucking (Grattage) and Test.
+**Calibration** — hand tuning of the servos + test bench (Frets → Plucking → Test). Each equipped finger gets its contact angle, a Reverse rotation direction control and a live test.
 <p align="center"><img src="../img/screenshots/calibration.png" alt="Calibration page" width="100%"/></p>
 
-**Câblage & GPIO** — the hardware page (two sub-tabs). The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards at their address, per-pin string·role, live conflict checks, SVG export…
-<p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map (Câblage sub-tab)" width="100%"/></p>
+**Wiring & GPIO** — the hardware page (two sub-tabs). The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards at their address, per-pin string·role, live conflict checks, SVG export…
+<p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map (Wiring diagram sub-tab)" width="100%"/></p>
 
-…and the board GPIO map + per-signal assignment (I²C SDA/SCL, /OE, optional second bus).
-<p align="center"><img src="../img/screenshots/pins.png" alt="GPIO grid (Broches GPIO sub-tab)" width="100%"/></p>
+…and the board GPIO map + per-signal assignment with an **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) and a **graphical board pinout** that highlights the used pins.
+<p align="center"><img src="../img/screenshots/pins.png" alt="GPIO grid + board pinout (GPIO pins sub-tab)" width="100%"/></p>
 
 #### Settings modal (gear button)
 
-**Configuration** — the instrument-configuration wizard with **every page** reachable: Instrument → MIDI → Alimentation → Validation.
+**Configuration** — the instrument-configuration wizard with **every page** reachable: Instrument → MIDI → Power → Validation.
 <p align="center"><img src="../img/screenshots/wizard.png" alt="Settings — Configuration wizard" width="100%"/></p>
 
 **MIDI** — string/fret CC selection and playback parameters (a page of the config wizard).
 <p align="center"><img src="../img/screenshots/midi.png" alt="Settings — MIDI page" width="100%"/></p>
 
-**Avancé** — GMB identity & computed capabilities + the SysEx tester, and the live MIDI monitor.
-<p align="center"><img src="../img/screenshots/sysex.png" alt="Settings — Avancé (GMB / SysEx)" width="100%"/></p>
+**Advanced** — GMB identity & computed capabilities + the SysEx tester, and the live MIDI monitor.
+<p align="center"><img src="../img/screenshots/sysex.png" alt="Settings — Advanced (GMB / SysEx)" width="100%"/></p>
 
-**Profils** — save / load / copy / rename / export / import profile slots.
-<p align="center"><img src="../img/screenshots/profiles.png" alt="Settings — Profils" width="100%"/></p>
+Profiles are intentionally not exposed (a hidden, non-user setting).
 
 ### 3.1 Dashboard (§19)
 

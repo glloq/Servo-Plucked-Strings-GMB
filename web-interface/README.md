@@ -69,20 +69,24 @@ button, top-right).
 
 - **Instrument** (`fretboard.js`) — the default landing page: a prominent
   **emergency stop** (STOP + reset/re-arm) and the **playable fretboard**.
-- **Calibration** (`wizard.js`, calibration flow) — the physical servo tuning
-  and test bench: **Frettes → Grattage → Test**.
-- **Câblage & GPIO** (`hardware.js`) — the hardware page, with two sub-tabs:
-  the **wiring diagram** (`wiring.js`) and the **GPIO pin grid** (`pins.js`).
+- **Calibration** (`wizard.js`, calibration flow) — hand tuning of the servos and
+  a test bench: **Frets → Plucking → Test**. Each equipped finger gets its
+  contact angle, a Reverse rotation direction control and a test; the servos
+  themselves (which frets, gearing, wiring) are defined in Settings.
+- **Wiring & GPIO** (`hardware.js`) — the hardware page, with two sub-tabs: the
+  **wiring diagram** (`wiring.js`) and the **GPIO pin grid + board pinout**
+  (`pins.js`, with an ESP32 board selector).
 
-The **Settings modal** (`settings.js`) has four tabs:
+The **Settings modal** (`settings.js`) has three tabs:
 
 - **Configuration** — the instrument-configuration wizard with **every page**
-  reachable: **Instrument → MIDI → Alimentation → Validation** (`wizard.js`
-  config flow; the MIDI page is the full string/fret selection + params).
-- **Réseau** — network mode, SSIDs, hostname, Wi-Fi credentials, hotspot switch.
-- **Profils** — saved device profile slots (`profiles.js`).
-- **Avancé** — GMB identity & capabilities + SysEx tester (`sysex.js`) and the
+  reachable: **Instrument → MIDI → Power → Validation** (`wizard.js` config flow;
+  the MIDI page is the full string/fret selection + params).
+- **Network** — network mode, SSIDs, hostname, Wi-Fi credentials, hotspot switch.
+- **Advanced** — GMB identity & capabilities + SysEx tester (`sysex.js`) and the
   live MIDI monitor + integrated tester (`midiselect.js` tools).
+
+Profiles are intentionally **not** exposed (a hidden, non-user setting).
 
 ## Structure
 
@@ -94,15 +98,15 @@ web-interface/
 │   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
 │   ├── app.js            shell, 3-page routing, DOM helpers, draft-profile state, mode toggle
 │   ├── fretboard.js      Instrument page — emergency stop + playable fretboard (press-and-hold)
-│   ├── hardware.js       Câblage & GPIO page — sub-tab switch over wiring.js / pins.js
-│   ├── pins.js           GPIO assignment grid (§11)
+│   ├── hardware.js       Wiring & GPIO page — sub-tab switch over wiring.js / pins.js
+│   ├── pins.js           GPIO grid + ESP32 board selector + graphical board pinout (§11)
 │   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram)
 │   ├── wizard.js         shared step engine: config flow (Settings modal) + calibration flow (page) (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
 │   ├── midiselect.js     MIDI settings (§14/§18) + live monitor/test tools (§16), split for the modal
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
-│   ├── profiles.js       profile list/create/copy/rename/delete/export/import/restore (§20)
-│   └── settings.js       Settings modal — Configuration / Réseau / Profils / Avancé tabs
+│   ├── profiles.js       profile slots (§20) — loaded but not exposed in the UI (hidden setting)
+│   └── settings.js       Settings modal — Configuration / Network / Advanced tabs
 └── README.md
 ```
 
