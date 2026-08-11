@@ -46,91 +46,70 @@ tested on their **own steps**, all without leaving the page.
 
 ---
 
-## 2. Step 1 — Instrument Builder
+## 2. Step 1 — Instrument
 
-The instrument **type is cosmetic** — an instrument is defined by its
-**mechanics**. This one adaptive screen makes those choices explicit and
-**generates the servo wiring** for you:
+Pick a starting point and name your instrument — the mechanics are set per-servo on
+the Frets / Plucking steps, so this first screen stays short:
 
 * **Starting point** — pick a **preset** (ukulele, guitar, bass, mandolin, banjo)
   to load a tuning + GM tags, or **Custom** for your own. The type only tags the
   name / GM program.
 * **Strings & tuning** — **number of strings** (1–6), each string's
   **open-string MIDI note** (fret 0) and **highest reachable fret** (`maxFret`).
-  A string is just an open pitch plus its top fret — no vibrating length,
-  transmission or steps/mm.
-* **Fretting mechanism** — **one servo per fret** (full chromatic) ·
-  **geared low neck** (pair the wide low frets on one antagonistic servo each,
-  narrow high frets stay single — halves the low-neck servo count) ·
-  **open-string-only** (no frets) · **custom** (keep the current hand-tuned
-  wiring). Each option shows its **live finger-servo count**.
-* **Sounding mechanism** — individual **pick** (a plectrum per string) vs
-  per-string **strum**, plus optional **strum-lift** and **per-string damper**.
-* **Wiring & capacity** — one PCA9685 board per string by default, with a
-  **capacity meter** (channels per board vs 16, boards vs 8, direct-GPIO vs 8).
-* **Generate wiring** — builds the servo list from the choices; a *pending* pill
-  appears when the committed wiring no longer matches. Auxiliary servos and any
-  string still classified *custom* are preserved.
+  A string is just an open pitch plus its top fret.
+* **Board** — the **ESP32 board selector** (ESP32-S3-DevKitC-1 · ESP32-WROOM-32 ·
+  ESP32 DevKit v1) plus the native-USB reserve. Wi-Fi / hostname are **not** here —
+  they live in the gear modal (⚙ Network), because they belong to the device.
 
-Advanced mode adds transpose / GM tags and a **Board** card — the **ESP32 board
-selector** (ESP32-S3-DevKitC-1 · ESP32-WROOM-32 · ESP32 DevKit v1) plus the
-native-USB reserve. Wi-Fi / hostname are **not** here — they live in the gear modal
-(⚙ Network), because they belong to the device, not the instrument. The tuning sets
-the note range announced to General-Midi-Boop (see
-[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3). The mechanical choice is **not stored**
-in the profile — the builder re-derives it from the servo list on entry.
+A preset produces a working instrument and the wiring is generated automatically;
+changing the string count or a max fret re-generates it. The tuning sets the note
+range announced to General-Midi-Boop (see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3).
 
 ---
 
 ## 3. Step 2 — Frets (frettes)
 
-This step configures the **finger servos only** — the part that presses the
-string against a fret. Each fret position has its **own dedicated finger servo**.
-For every string (string-tab strip) you can:
+This step sets up the **finger servos** — the part that presses the string against a
+fret. A clickable **coverage strip** shows which frets carry a servo (geared marked
+⚙). **Tap a fret** to open its **servo div**, where everything for that servo lives
+in one place:
 
-* **equip any fret** — gaps are allowed (for example frets 1, 3, 5, 12);
-* set each finger's **rest ↔ contact angle** and its **rotation direction**
-  (`inverted`), so the servo can be mounted either way;
-* **gear a finger** — one servo drives two adjacent frets of the same string
-  through antagonistic fingers (`fretB` + `activeBUs`, neutral = both lifted),
-  to halve the servo count on the wide low frets (see
-  [`GEARED_FINGERS.md`](GEARED_FINGERS.md));
-* choose the **signal source per servo** (Advanced) — a **PCA9685** channel *or*
-  a **direct ESP32 GPIO**, mixable on the same instrument.
+* **One servo drives 2 frets (geared)** — a toggle that pairs this fret with the
+  next through a gear (`fretB` + `activeBUs`), to halve the servo count on the wide
+  low frets (see [`GEARED_FINGERS.md`](GEARED_FINGERS.md));
+* the **PCA board** (address 0x40–0x47) and **PCA pin** (channel 0–15) the servo
+  plugs into;
+* the **angle(s)** on precise **− / + steppers** (1° each) — a plain finger has a
+  **contact** and a **rest** angle; a **geared** servo has one press angle **per
+  fret**, and its **rest sits at their midpoint automatically** (both fingers lifted);
+* the **rotation direction** (`inverted`), so the servo can be mounted either way.
 
-A clickable **coverage strip** shows which frets are equipped, geared and
-calibrated. Clicking a fret opens its **inline guided calibration**: **arm the
-instrument first** (servo tests are refused until armed), adjust the contact and
-rest angles until the finger cleanly frets the string (each move previewed live),
-**test rest / press**, **play the note**, then **mark it calibrated**. A geared
-finger calibrates three positions — neutral (both lifted), side A, side B. A
-**test bench** sweeps every fret of the string, or of all strings, in one click.
-See [`CALIBRATION.md`](CALIBRATION.md). The default wiring is **one PCA9685 per
-string**: that string's fret fingers on channels `0 … maxFret−1`.
+**Arm the instrument first** (servo tests are refused until armed): every − / + step
+drives the servo to that exact angle so it previews live, and the **play** buttons
+sound the note. A geared fret's paired row shows *"paired with fret N on one geared
+servo"* and is adjusted on the owner row. A **test bench** sweeps every fret of the
+string, or of all strings, in one click. See [`CALIBRATION.md`](CALIBRATION.md).
 
 ---
 
 ## 4. Step 3 — Plucking (grattage)
 
-This step configures the **plucking mechanism only** — the part that sounds the
-string. Every striker uses the **same model**, only the angles change with the
-mounting: the plectrum **rests against the string** (contact angle, e.g. 90°)
-ready to strum, then sweeps to the **down-stroke** and **up-stroke** angles on
-either side (e.g. ±20°) for alternating strokes. For every string you can:
+This step sets up the **sounding servo** — the part that plucks the string. There is
+**one per string**; set just two angles:
 
-* **add a plucker** (pluck/strum servo) and set its **contact / down-stroke /
-  up-stroke angles** and rotation direction (the up-stroke angle may be left at 0
-  to mirror the down-stroke about contact);
-* add an optional **strum lift** — it lowers the plucker onto the string for a
-  stroke, then raises it (with an engage delay);
-* add an optional **damper** — it presses the string to mute it;
-* add global **auxiliary** actuators (not tied to a string).
+* the **contact angle** — the plectrum resting against the string;
+* the **strum angle** — how far it sweeps to each side of contact (e.g. 20°).
 
-By default the plucker sits on its string's PCA9685 board (channel `maxFret`).
-Each actuator has **Contact / Down-stroke / Up-stroke** test buttons and a
-**▶ Pluck open** button, and a **test bench** plucks every open string, sweeps
-every plucker, and tests the strum lifts / dampers. Every string needs a plucker
-to sound (the validation step flags a string that has none). The two global
+The servo **always alternates** its stroke direction (down = contact + strum, up =
+contact − strum), so there are no direction options. Pick the servo's **PCA board +
+pin**, then — the **second way to strum** — optionally **add a descent servo**: a
+second servo that lowers the plectrum onto the string only while the string plays
+(its own PCA/pin plus a raised and a lowered angle).
+
+By default the sounding servo sits on its string's PCA9685 board. Each control has a
+live test (→ contact / → down-stroke / → up-stroke, ▶ Pluck open), and a **test
+bench** plucks every open string and sweeps the strum servos. Every string needs a
+sounding servo (the validation step flags a string that has none). The two global
 delays — the **action delay** (a fixed-time FIFO buffer) and the **fret → strum
 delay** — are set once on the **Timing** step, not here.
 

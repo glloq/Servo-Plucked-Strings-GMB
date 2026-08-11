@@ -144,15 +144,10 @@
     if (b) b.classList.add('visible');
   };
 
-  GMB.isAdvanced = function () { return state.mode === 'advanced'; };
-
-  function setMode(mode) {
-    state.mode = mode;
-    document.body.setAttribute('data-mode', mode);
-    var s = document.getElementById('mode-simplified'), a = document.getElementById('mode-advanced');
-    if (s && a) { s.classList.toggle('active', mode === 'simplified'); a.classList.toggle('active', mode === 'advanced'); }
-    render();
-  }
+  // Expert mode removed — the interface is simplified-only. Kept as a stable no-op
+  // so any lingering caller (or an old saved profile's mode field) is harmless.
+  GMB.isAdvanced = function () { return false; };
+  function setMode() { state.mode = 'simplified'; document.body.setAttribute('data-mode', 'simplified'); }
   GMB.setMode = setMode;
 
   function navigate(id) {
@@ -241,10 +236,6 @@
         }, [h('span.nav-icon', t.icon), h('span.nav-label', t.label)]);
       })),
       h('div.nav-footer', [
-        h('div.mode-toggle', [
-          h('button#mode-simplified.active', { onclick: function () { setMode('simplified'); } }, 'Simplified'),
-          h('button#mode-advanced', { onclick: function () { setMode('advanced'); } }, 'Advanced')
-        ]),
         h('button.btn.danger.panic-side', { onclick: doPanic }, 'STOP')
       ])
     ]);

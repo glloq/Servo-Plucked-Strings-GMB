@@ -58,8 +58,8 @@
       ])
     ]));
 
-    // ---- Advanced ------------------------------------------------------------
-    if (GMB.isAdvanced()) {
+    // ---- Advanced GMB options (this is the diagnostics tab — always shown) ----
+    {
       host.appendChild(h('div.card', [
         h('h2', 'Advanced GMB options'),
         h('div.form-grid', [

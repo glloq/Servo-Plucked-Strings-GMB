@@ -327,36 +327,25 @@ GPIO19 and GPIO20 remain reserved by default to preserve the ability to later us
 
 The interface must let a beginner configure the instrument without modifying the source code. It must work from a computer, tablet or phone, with no dedicated application.
 
-## 9.2 Two interface levels
+## 9.2 One simplified interface
 
-### Simplified mode
+The interface is **simplified-only** (no expert mode). A beginner configures the
+instrument end-to-end without modifying the source code:
 
-Intended for beginners. It offers:
+* step-by-step wizard, recommended values, automatic pin assignment;
+* per-servo **PCA board + pin** and **angle(s)** set right where you calibrate
+  (precise **− / + steppers**, no sliders);
+* wiring diagrams, test buttons;
+* automatic validation and understandable error messages.
 
-* step-by-step wizard;
-* recommended values;
-* automatic pin assignment;
-* wiring diagrams;
-* test buttons;
-* automatic validation;
-* understandable error messages.
-
-### Advanced mode
-
-Intended for fine-tuning. It allows:
-
-* manual GPIO assignment;
-* servo timing adjustment (travel / settle / delays);
-* modification of velocity curves;
-* access to diagnostics;
-* editing of detailed servo parameters;
-* JSON import and export.
+Diagnostics (SysEx / MIDI monitor) remain available in the gear modal. Fine servo
+timing (travel / settle / pulse window) uses sane defaults and is not surfaced.
 
 ---
 
 # 10. First-configuration wizard
 
-The web wizard guides the user through **seven steps**, in Simplified or Advanced mode.
+The web wizard guides the user through **seven steps** on the Setup page.
 
 ## Step 1 — Instrument Builder
 
