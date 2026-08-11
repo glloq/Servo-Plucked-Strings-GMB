@@ -213,7 +213,8 @@ void applyProfile() {
     }
     g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"),
                    pinOf("SDA2"), pinOf("SCL2"), pinOf("SERVO_OE2"));
-    g_governor.configure(g_profile.power.maxConcurrentMoves, g_profile.power.staggerMs);
+    g_governor.configure(g_profile.power.maxConcurrentMoves,
+                         g_profile.power.maxConcurrentPerBoard, g_profile.power.staggerMs);
 
     // The E-stop pin belongs to the (possibly new) profile.
     g_estopPin = pinOf("ESTOP");
@@ -644,7 +645,8 @@ void tickString(size_t i, uint32_t nowMs) {
             // Ask the governor for a start permit before driving the finger, so a
             // chord's presses are staggered and the PCA in-rush stays bounded.
             if (!sch.fingerPressStarted) {
-                if (!g_governor.requestStart(nowMs)) break;  // wait for a permit
+                // Permit gated by both the global and this finger's PCA-board cap.
+                if (!g_governor.requestStart(nowMs, g_servos.board(sch.fingerIndex))) break;
                 // A direct sweep travels farther than a press from neutral (it crosses
                 // the whole A..B span), so budget the wait by the real pulse distance;
                 // a normal press from neutral uses the calibrated travelMs. Compute it

@@ -227,10 +227,14 @@ TEST(zero_enabled_strings_rejected) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
-// The current-draw governor must allow at least one move at a time.
-TEST(zero_concurrent_moves_rejected) {
+// The current-draw governor is optional: a global cap of 0 means "no limit" and is
+// a valid profile (the per-board cap can still bound it). A per-board cap above a
+// PCA9685's 16 channels, however, is rejected.
+TEST(zero_concurrent_moves_means_unlimited) {
     Profile p = uke();
     p.power.maxConcurrentMoves = 0;
+    CHECK(ProfileValidator::isActivatable(p));
+    p.power.maxConcurrentPerBoard = 17;
     CHECK(!ProfileValidator::isActivatable(p));
 }
 

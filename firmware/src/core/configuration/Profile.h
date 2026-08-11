@@ -157,13 +157,20 @@ struct ServoConfig {
 // Servo current-draw management (limit PCA9685 overload). A servo is heaviest
 // while it is actively driving toward a new position; a chord that re-frets many
 // strings at once would stack those in-rush peaks. The scheduler asks a governor
-// for a "start permit" before each press so no more than maxConcurrentMoves servos
-// begin moving together, spaced by staggerMs. Combined with per-servo
+// for a "start permit" before each press so no more servos begin moving together
+// than the caps below allow, spaced by staggerMs. Combined with per-servo
 // disableAtRest (idle fingers cut their PWM) and the release-before-press sequence
 // (one finger per string at a time), this keeps the peak current bounded.
+//
+// The limit is OPTIONAL: a cap of 0 means "no limit" for that scope, so setting
+// both caps to 0 turns the governor off entirely. The per-board cap is applied in
+// ADDITION to the global one — each physical PCA9685 has its own power input, so a
+// per-board cap bounds the in-rush on any single board even when the whole
+// instrument is under the global cap.
 struct PowerConfig {
-    uint8_t maxConcurrentMoves = 3;  // servos allowed to start moving at once
-    uint16_t staggerMs = 8;          // spacing between successive start permits
+    uint8_t maxConcurrentMoves = 3;    // global: servos allowed to start at once (0 = no limit)
+    uint8_t maxConcurrentPerBoard = 0; // per PCA9685 board: starts at once (0 = no limit)
+    uint16_t staggerMs = 8;            // spacing between successive start permits
 };
 
 // Where a Note Off's damping comes from. `Auto` keeps the historical behaviour: a

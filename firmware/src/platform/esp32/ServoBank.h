@@ -111,6 +111,15 @@ public:
     uint16_t travelMs(int index) const {
         return (index >= 0 && index < (int)servos_.size()) ? servos_[index].travelMs : 0;
     }
+    // Distinct physical PCA9685 board for a servo, as (i2cBus, pcaBoard) folded into
+    // 0..15 — the bucket the activation governor caps per-board. 0xFF for a servo on
+    // no board (direct GPIO), which the governor leaves out of any per-board window.
+    uint8_t board(int index) const {
+        if (index < 0 || index >= (int)servos_.size()) return 0xFF;
+        const ServoConfig& s = servos_[index];
+        return s.source == ServoSource::Pca
+            ? static_cast<uint8_t>((s.i2cBus & 1) * 8 + (s.pcaBoard & 7)) : 0xFF;
+    }
     uint16_t settleMs(int index) const {
         return (index >= 0 && index < (int)servos_.size()) ? servos_[index].settleMs : 0;
     }

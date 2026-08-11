@@ -35,7 +35,7 @@ diagnostic tools live in the gear modal.
 | 2 | **Frets** | the **finger servos**, per string (string-tab strip). A clickable **coverage strip** shows which frets carry a servo (geared marked ⚙); **tap a fret** to open its **servo div** — a **"One servo drives 2 frets (geared)"** toggle, its **PCA board + pin**, the **angle(s)** set with precise **− / + steppers** (a geared servo shows both press angles; its rest sits at their midpoint automatically), and the **rotation direction**. Every change drives the servo live; **play the note** to check. An open-only string shows a one-click *Equip frets*. A **test bench** sweeps one string or all strings |
 | 3 | **Plucking** | one **sounding servo** per string: its **PCA board + pin**, the **contact angle** (plectrum against the string) and the **strum angle** (how far it sweeps, e.g. 20°) — the servo **always alternates** its stroke, so there are no direction options. Plus the **second way to strum**: an optional **descent servo** that lowers the plectrum onto the string only while it plays (its own PCA/pin + raised / lowered angles). A **test bench** plucks every open string and sweeps the strum servos |
 | 4 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On. The live MIDI monitor + tester stay in the gear modal (Advanced) |
-| 5 | **Timing** | two cards. **Timing** — the two global delays: the **action delay** (fixed-time FIFO buffer) and the **fret → strum delay**, plus the strum lead. **Current management** — max servos moving at once, stagger between starts |
+| 5 | **Timing** | two cards. **Timing** — the two global delays: the **action delay** (fixed-time FIFO buffer) and the **fret → strum delay**, plus the strum lead. **Current management** — an **optional** governor (a toggle turns it off): cap how many servos start moving at once **whole-instrument** and **per PCA board** (each 0 = no cap), plus the stagger between starts |
 | 6 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); a full-instrument **test bench**; STOP (panic) |
 | 7 | **Validation** | "No problems found" or a precise list of problems; the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
 
@@ -119,7 +119,7 @@ angle (always alternating), and an optional descent servo (the second way to str
 **MIDI** — channel, omni, velocity, enable string/fret selection + GMB preset:
 <p align="center"><img src="../img/screenshots/midi.png" alt="Setup — MIDI" width="100%"/></p>
 
-**Timing** — the two global delays (action delay / FIFO buffer, fret → strum delay, strum lead) + the PCA9685 in-rush current governor:
+**Timing** — the two global delays (action delay / FIFO buffer, fret → strum delay, strum lead) + the **optional** PCA9685 in-rush governor (whole-instrument and per-board caps):
 <p align="center"><img src="../img/screenshots/power.png" alt="Setup — Timing" width="100%"/></p>
 
 **Test** — full-instrument group tests: play every open string, sweep every finger / plucker, run a scale, test everything (Validation is the final step, then Save):
@@ -241,7 +241,7 @@ restore, set the startup slot. **JSON** exchange format:
   "instrument": { "name": "Ukulele GCEA", "stringCount": 4, "type": "ukulele" },
   "board": { "profile": "esp32-s3-devkitc-1", "reserveUsb": true },
   "network": { "mode": "accessPoint", "apSsid": "Servo-Plucked-Strings-GMB", "hostname": "gmb-ukulele" },
-  "power": { "maxConcurrentMoves": 3, "staggerMs": 8 },
+  "power": { "maxConcurrentMoves": 3, "maxConcurrentPerBoard": 0, "staggerMs": 8 },
   "strings": [ { "enabled": true, "openNote": 67, "maxFret": 12 } ],
   "servos": [
     { "function": "finger", "stringIndex": 0, "fret": 1,

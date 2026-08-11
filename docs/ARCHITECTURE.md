@@ -204,7 +204,7 @@ in [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md#3-protocole-sysex-gmb).
 | `network` | `NetworkConfig` | AP/station mode, SSID, hostname, `apSsid`, static IP |
 | `midi` | `MidiConfig` | channel, Omni, transpose, chord window, velocity curve, sustain pedal, timing leads |
 | `selector` | `SelectorConfig` | string/fret selection (CC20/CC21, mode, timeout, FIFO…) |
-| `power` | `PowerConfig` | current governor (`maxConcurrentMoves`, `staggerMs`) |
+| `power` | `PowerConfig` | optional current governor (`maxConcurrentMoves`, `maxConcurrentPerBoard`, `staggerMs`; caps 0 = no limit) |
 | `strings` | `vector<StringConfig>` | per string: `{ enabled, openNote, maxFret }` |
 | `servos` | `vector<ServoConfig>` | finger / pluck / strumLift / damper / aux servos (PCA channel or direct GPIO) |
 | `capabilitiesRevision` | `uint32_t` | revision counter (Block 8 notification) |

@@ -282,6 +282,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
 
     JsonObject pw = doc["power"].to<JsonObject>();
     pw["maxConcurrentMoves"] = p.power.maxConcurrentMoves;
+    pw["maxConcurrentPerBoard"] = p.power.maxConcurrentPerBoard;
     pw["staggerMs"] = p.power.staggerMs;
 
     // Global plucking gesture + Note-Off mute behaviour, common to all strings.
@@ -429,6 +430,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
 
     JsonObjectConst pw = doc["power"];
     out.power.maxConcurrentMoves = pw["maxConcurrentMoves"] | 3;
+    out.power.maxConcurrentPerBoard = pw["maxConcurrentPerBoard"] | 0;
     out.power.staggerMs = pw["staggerMs"] | 8;
 
     // Global plucking config. Absent -> all defaults -> historical behaviour.

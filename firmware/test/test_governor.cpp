@@ -61,3 +61,39 @@ TEST(governor_fans_out_large_chord) {
     for (int i = 0; i < 6; ++i) if (g.requestStart(2005)) ++granted;
     CHECK_EQ(granted, 2);
 }
+
+// A global cap of 0 means "no limit": every request is granted (even with a stagger).
+TEST(governor_global_cap_zero_is_unlimited) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/0, /*stagger*/10);
+    for (int i = 0; i < 20; ++i) CHECK(g.requestStart(1000));  // all at the same instant
+}
+
+// The per-PCA-board cap throttles one board without touching the others.
+TEST(governor_per_board_cap_is_independent) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/0, /*perBoard*/1, /*stagger*/10);
+    CHECK(g.requestStart(1000, /*board*/0));    // board 0: granted
+    CHECK(!g.requestStart(1000, /*board*/0));   // board 0 again, same instant: denied
+    CHECK(g.requestStart(1000, /*board*/1));    // a different board is unaffected
+    CHECK(g.requestStart(1000, /*board*/2));
+    CHECK(g.requestStart(1010, /*board*/0));    // board 0 frees after the stagger
+}
+
+// A servo on no board (0xFF, e.g. direct GPIO) is bounded by the global cap only.
+TEST(governor_boardless_servo_uses_global_only) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/1, /*perBoard*/1, /*stagger*/10);
+    CHECK(g.requestStart(1000, 0xFF));          // global slot: granted
+    CHECK(!g.requestStart(1000, 0xFF));         // global full: denied
+}
+
+// Global and per-board caps are enforced together: a free board is still denied when
+// the whole-instrument cap is already spent.
+TEST(governor_global_and_per_board_both_apply) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/2, /*perBoard*/1, /*stagger*/10);
+    CHECK(g.requestStart(1000, /*board*/0));    // global 1 / board 0
+    CHECK(g.requestStart(1000, /*board*/1));    // global 2 / board 1 — global now full
+    CHECK(!g.requestStart(1000, /*board*/2));   // board 2 free, but the global cap is hit
+}
