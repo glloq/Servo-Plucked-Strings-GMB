@@ -9,22 +9,16 @@ required.
 
 ---
 
-## 1. Two interface levels (§9.2)
+## 1. One simplified interface
 
-### Simplified mode (beginner)
-
-Step-by-step wizard, recommended values, automatic pin assignment, wiring
-diagrams, test buttons, automatic validation, understandable error messages. By
-default it shows only the **green** GPIOs (see
-[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)), and it hides each servo's wiring
-(auto-assigned) and fine timing.
-
-### Advanced mode (fine-tuning)
-
-Manual GPIO assignment (including the **yellow** pins, with an explanation),
-per-servo **wiring** (a PCA9685 channel **or** a direct ESP32 GPIO), the pulse
-window / travel / settle timing, optional **strum-lift / damper / auxiliary**
-actuators, SysEx block toggles, raw byte views, JSON import/export.
+The interface is deliberately **simplified-only** — there is no expert / advanced
+toggle. A step-by-step wizard with recommended values, automatic pin assignment,
+wiring diagrams, test buttons, automatic validation and understandable error
+messages. It shows only the **green** GPIOs (see
+[`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)) and keeps each step to the few
+choices that matter: per-servo you set the **PCA board + pin** and the **angle(s)**
+right where you calibrate; the fine timing (pulse window, travel/settle) uses sane
+defaults and is not surfaced.
 
 ---
 
@@ -37,42 +31,40 @@ diagnostic tools live in the gear modal.
 
 | Step | Title | Content |
 | ----- | ----- | ------- |
-| 1 | **Instrument** | the **Instrument Builder** — one adaptive screen driven by the *mechanical* choices. Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), set **strings & tuning** (count 1–6, per-string open note + max fret), then choose the **fretting mechanism** (one servo per fret · **geared low neck** · open-string-only · custom) and the **sounding mechanism** (individual **pick** vs per-string **strum**, + optional strum-lift / damper). Live **finger-servo counts** and a **capacity meter** (PCA channels/boards, direct-GPIO limit) update as you choose; **Generate wiring** builds the servo list. Advanced adds transpose / GM tags and the **Board** card — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB reserve |
-| 2 | **Frets** | the **finger servos only**, per string (string-tab strip): **one finger servo per fret** 1..maxFret — frets need not be contiguous — with a coarse contact angle and a **Geared** toggle (one servo → two frets). A clickable **coverage strip** shows equipped / geared / calibrated frets; clicking a fret opens its **inline guided calibration** (contact + rest angle previewed live, rotation direction, test rest/press, **play the note**, mark calibrated). An open-only string shows a banner with a one-click *Equip frets*. Advanced adds the PCA channel map and per-servo wiring. A **test bench** sweeps one string or all strings |
-| 3 | **Plucking** | the **plucking mechanism only**, per string. Every striker uses the **same model**, only the angles change with the mounting: the plectrum **rests against the string** (contact angle, e.g. 90°) then sweeps to the **down-stroke** and **up-stroke** angles on either side (e.g. ±20°) for alternating strokes — set contact / down / up angles + rotation direction. Plus an optional **strum lift** and **damper**, and global **auxiliary** actuators. A **test bench** plucks every open string, sweeps every plucker, runs a strum down/up stroke, and tests the strum lifts / dampers |
+| 1 | **Instrument** | Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), name it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the **Board** — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB reserve. A preset produces a working instrument and the wiring is (re)generated automatically; the mechanics live per-servo on the Frets / Plucking steps |
+| 2 | **Frets** | the **finger servos**, per string (string-tab strip). A clickable **coverage strip** shows which frets carry a servo (geared marked ⚙); **tap a fret** to open its **servo div** — a **"One servo drives 2 frets (geared)"** toggle, its **PCA board + pin**, the **angle(s)** set with precise **− / + steppers** (a geared servo shows both press angles; its rest sits at their midpoint automatically), and the **rotation direction**. Every change drives the servo live; **play the note** to check. An open-only string shows a one-click *Equip frets*. A **test bench** sweeps one string or all strings |
+| 3 | **Plucking** | one **sounding servo** per string: its **PCA board + pin**, the **contact angle** (plectrum against the string) and the **strum angle** (how far it sweeps, e.g. 20°) — the servo **always alternates** its stroke, so there are no direction options. Plus the **second way to strum**: an optional **descent servo** that lowers the plectrum onto the string only while it plays (its own PCA/pin + raised / lowered angles). A **test bench** plucks every open string and sweeps the strum servos |
 | 4 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On. The live MIDI monitor + tester stay in the gear modal (Advanced) |
 | 5 | **Timing** | two cards. **Timing** — the two global delays: the **action delay** (fixed-time FIFO buffer) and the **fret → strum delay**, plus the strum lead. **Current management** — max servos moving at once, stagger between starts |
 | 6 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); a full-instrument **test bench**; STOP (panic) |
-| 7 | **Validation** | "No problems found" or a precise list of problems (incl. guard-rail warnings: contact≈rest angle, geared neutral outside press A/B); the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
+| 7 | **Validation** | "No problems found" or a precise list of problems; the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
 
-**Board** selection lives in the **Instrument** step (Advanced → Board); **Network**
-(Wi-Fi) settings are in the gear modal — they belong to the device, not the
-instrument. The **automatic pin assignment** is a button on the **GPIO Pins** page;
-neither is a separate setup step.
+**Board** selection lives in the **Instrument** step; **Network** (Wi-Fi) settings are
+in the gear modal — they belong to the device, not the instrument. The **automatic
+pin assignment** is a button on the **GPIO Pins** page; neither is a separate setup
+step.
 
 The per-string steps (**Frets** and **Plucking**) show **one string at a time** via
-a string-tab strip, so a 6-string instrument stays navigable. The frets (frettes)
-and the plucking (grattage) of each string are configured on their **own steps**, so
-each can be equipped, calibrated and tested independently. The
-**Simplified / Advanced** toggle hides the fine tuning (pulse window, travel/settle,
-per-servo wiring) in Simplified mode. General MIDI parameters (sustain, chord
-**saturation strategy**, velocity curve…) live on the **MIDI** step.
+a string-tab strip, so a 6-string instrument stays navigable. Each servo carries its
+own **PCA board + pin** and **angle(s)** right where you calibrate it; the fine timing
+(pulse window, travel/settle) uses sane defaults and is not surfaced. General MIDI
+parameters (sustain, chord **saturation strategy**, velocity curve…) live on the
+**MIDI** step.
 
 **Testing one servo or a group.** The Frets, Plucking and Test steps each carry an
-**Arm** control and a **test bench**: single-servo rest/press buttons, plus group
-tests (sweep every fret of a string or all strings, pluck every open string, sweep
-every plucker, play a scale, test everything) run through a cancellable client-side
-sequencer with a live status line and a **Stop** button.
+**Arm** control and a **test bench**: single-servo buttons, plus group tests (sweep
+every fret of a string or all strings, pluck every open string, sweep every strum
+servo, test everything) run through a cancellable client-side sequencer with a live
+status line and a **Stop** button.
 
 The step-by-step detail is in [`FIRST_CONFIGURATION.md`](FIRST_CONFIGURATION.md).
 
-**Geared (paired) fingers.** On the *Frets* step, a finger card offers a
-**"Geared (drives a 2nd fret)"** checkbox: one servo then presses two antagonistic
-frets through a gear (side A = `fret`, side B = `fretB`, neutral = both lifted). The
-card gains a second-fret picker and **Press A / Press B / Neutral** angle fields; the
-paired fret's own row shows *"side B of the geared servo on fret N"*. The inline
-calibration on the Frets step sets the three positions and previews each one live on
-the hardware. Full study and calibration procedure:
+**Geared (paired) fingers.** On the *Frets* step, a fret's servo div offers a
+**"One servo drives 2 frets (geared)"** toggle: one servo then presses two antagonistic
+frets through a gear (side A = `fret`, side B = `fretB`). The div shows **both press
+angles** (one per fret); the **rest sits at their midpoint automatically** (both
+fingers lifted). The paired fret's own row shows *"paired with fret N on one geared
+servo"*. Full study and calibration procedure:
 [`GEARED_FINGERS.md`](GEARED_FINGERS.md).
 
 **Gear modal (device only).** A gear button (⚙) in the top bar opens the device
@@ -111,23 +103,20 @@ Plucking → MIDI → Timing → Test → Validation. Define the instrument, cal
 you defined, set its MIDI behaviour and timing, then test and save — nothing is split
 across a page and a modal.
 
-**Instrument** — the **Simplified** path is minimal: pick a preset, name it, set the
-tuning; the servo wiring is (re)generated automatically (no "Generate" button, no
-mechanics to wade through):
-<p align="center"><img src="../img/screenshots/wizard.png" alt="Setup — Instrument (simplified)" width="100%"/></p>
+**Instrument** — minimal: pick a preset, name it, set the tuning, pick the ESP32
+board; the servo wiring is (re)generated automatically (no mechanics to wade through):
+<p align="center"><img src="../img/screenshots/wizard.png" alt="Setup — Instrument" width="100%"/></p>
 
-**Advanced** mode reveals the full mechanics on the same step — fretting / sounding
-mechanism, the second-I²C-bus split + capacity meter, the **Board** card (ESP32 board
-selector), and an explicit "Generate wiring":
-<p align="center"><img src="../img/screenshots/creation-advanced.png" alt="Setup — Instrument (advanced)" width="70%"/></p>
-
-**Frets** — per equipped fret: contact angle, Reverse rotation direction, live test.
+**Frets** — tap a fret to open its servo div: the geared (2-fret) toggle, its PCA
+board + pin, the angle(s) on precise − / + steppers, and the rotation direction (a
+geared servo shows both press angles; its rest is their midpoint):
 <p align="center"><img src="../img/screenshots/calibration.png" alt="Setup — Frets" width="100%"/></p>
 
-**Plucking** — the plectrum / strum servo per string (contact / down-stroke / up-stroke angle, direction) plus the instrument-wide gesture & muting.
+**Plucking** — one sounding servo per string: PCA board + pin, contact angle + strum
+angle (always alternating), and an optional descent servo (the second way to strum):
 <p align="center"><img src="../img/screenshots/calibration-plucking.png" alt="Setup — Plucking" width="100%"/></p>
 
-**MIDI** — essentials (channel, omni, velocity, enable string/fret selection + GMB preset); the fine CC settings (numbers, numbering, mapping, policies) are Advanced:
+**MIDI** — channel, omni, velocity, enable string/fret selection + GMB preset:
 <p align="center"><img src="../img/screenshots/midi.png" alt="Setup — MIDI" width="100%"/></p>
 
 **Timing** — the two global delays (action delay / FIFO buffer, fret → strum delay, strum lead) + the PCA9685 in-rush current governor:

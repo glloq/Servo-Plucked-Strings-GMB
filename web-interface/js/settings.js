@@ -49,7 +49,6 @@
       ]),
       h('div.settings-body', { id: 'settings-body' }),
       h('div.settings-actions', [
-        modeToggle(),
         h('span.muted', GMB.api.mock ? 'Demo / mock backend' : ''),
         h('span.spacer'),
         GMB.button('Close', close, 'ghost'),
@@ -60,22 +59,6 @@
     overlay = h('div.settings-overlay', { onclick: close }, [panel]);
     document.body.appendChild(overlay);
     drawTab();
-  }
-
-  // Simplified / Advanced mirror (the sidebar toggle is hidden behind the modal).
-  function modeToggle() {
-    var mode = GMB.state.mode;
-    return h('div.mode-toggle.mini', [
-      h('button' + (mode === 'simplified' ? '.active' : ''),
-        { type: 'button', onclick: function () { setMode('simplified'); } }, 'Simplified'),
-      h('button' + (mode === 'advanced' ? '.active' : ''),
-        { type: 'button', onclick: function () { setMode('advanced'); } }, 'Advanced')
-    ]);
-  }
-  function setMode(m) {
-    if (GMB.state.mode === m) return;
-    GMB.setMode(m);   // updates body[data-mode], sidebar toggle, re-renders the page
-    rebuild();        // re-render the modal so mode-gated fields appear/disappear
   }
 
   function drawTab() {
@@ -95,15 +78,6 @@
       b.classList.toggle('active', TABS[i] && TABS[i].id === id);
     });
     drawTab();
-  }
-
-  // Rebuild the whole panel, preserving the active tab and the open state.
-  function rebuild() {
-    var wasOpen = overlay && overlay.classList.contains('open');
-    teardownTab();
-    if (overlay) overlay.remove();
-    build();
-    if (wasOpen && overlay) overlay.classList.add('open');
   }
 
   // Release anything live a tab may hold (MIDI socket, running test sequence).

@@ -94,94 +94,69 @@ web-interface/
 ├── css/style.css         responsive styling, light/dark via prefers-color-scheme
 ├── js/
 │   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
-│   ├── app.js            shell, 3-page routing, DOM helpers, draft-profile state, mode toggle
+│   ├── app.js            shell, 3-page routing, DOM helpers, draft-profile state
 │   ├── fretboard.js      Instrument page — emergency stop + playable fretboard (press-and-hold)
 │   ├── hardware.js       Wiring & GPIO page — sub-tab switch over wiring.js / pins.js
 │   ├── pins.js           GPIO grid + ESP32 board selector + graphical board pinout (§11)
 │   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram)
 │   ├── wizard.js         single setup-flow step engine: Instrument → Frets → Plucking → MIDI → Timing → Test → Validation (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
-│   ├── midiselect.js     MIDI settings (§14/§18, the Setup MIDI step) + live monitor/test tools (§16, Advanced tab)
+│   ├── midiselect.js     MIDI settings (§14/§18, the Setup MIDI step) + live monitor/test tools (§16, gear-modal Advanced tab)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
 │   ├── profiles.js       profile slots (§20) — loaded but not exposed in the UI (hidden setting)
 │   └── settings.js       gear modal — Network / Advanced (device + diagnostics) tabs
 └── README.md
 ```
 
-## Simplified vs Advanced mode
+## Simplified-only (no expert mode)
 
-A toggle in the sidebar switches between **Simplified** (beginner: recommended
-values, hidden fine-tuning, only recommended GPIOs, servo wiring auto-assigned)
-and **Advanced** (manual GPIO assignment including caution pins, per-servo wiring
-— PCA9685 channel or direct GPIO — plus pulse/travel/settle parameters, strum-lift
-/ damper / auxiliary actuators, SysEx block toggles, raw byte views), per
-SPECIFICATION.md §9.2.
+The interface is deliberately **simplified-only** — there is no Simplified/Advanced
+toggle. Each step keeps to the few choices that matter: per-servo you set the **PCA
+board + pin** and the **angle(s)** right where you calibrate (precise − / + steppers,
+no sliders); recommended GPIOs only; the fine timing (pulse window, travel/settle)
+uses sane defaults and is not surfaced.
 
-## Instrument Builder — mechanical-choice-driven creation (Setup → Instrument step)
+## Instrument step — preset + tuning + board (Setup → Instrument step)
 
-The **type is cosmetic**; an instrument is defined by its **mechanics**. The
-**Instrument** step of the Setup flow is one adaptive **Builder** screen that
-makes those choices explicit and generates the
-servo wiring for you, so any plucked/strummed string instrument (1–6 strings) can
-be set up quickly:
-
-- **Starting point** — a preset (ukulele/guitar/bass/mandolin/banjo) loads a tuning
-  + GM tags, or **Custom** for your own. Type only tags the name / GM program.
-- **Strings & tuning** — string count, per-string open note + max fret.
-- **Fretting mechanism** — *one servo per fret* (full chromatic) · **geared low
-  neck** (pair the wide low frets on one antagonistic servo each, plain high frets;
-  halves the low-neck servo count) · **open-string-only** (no frets) · **custom**
-  (keep hand-tuned wiring). Each card shows the **live finger-servo count**.
-- **Sounding mechanism** — individual **pick** (a plectrum per string) vs per-string
-  **strum**, plus optional **strum-lift** and **damper**.
-- **Wiring & capacity** — one PCA9685 per string by default, with a **capacity
-  meter** (channels per board vs 16, boards vs 8, direct-GPIO vs 8).
-- **Board** — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB
-  reserve. Wi-Fi / hostname are in the gear modal (device, not instrument).
-- **Generate wiring** — builds the servo list from the choices (a *pending* pill
-  tells you when the committed wiring no longer matches). Auxiliary servos and any
-  string still marked *custom* are preserved.
-
-The mechanical choice is **not stored** in the profile (the firmware derives frets
-from the servo list); the Builder re-derives it from the current servos on entry.
+The **type is cosmetic**. The **Instrument** step of the Setup flow is one short
+screen — pick a **preset** (ukulele/guitar/bass/mandolin/banjo, or **Custom**), name
+it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the
+**Board** (ESP32 board selector S3 / WROOM-32 / DevKit v1 + native-USB reserve;
+Wi-Fi / hostname are in the gear modal, device not instrument). A preset generates a
+working servo wiring automatically; changing the string count or a max fret
+re-generates it. The **mechanics** — gearing, PCA board + pin, angles — are then set
+per-servo on the Frets / Plucking steps.
 
 ## Frets and Plucking — calibrated in the same flow (Setup page)
 
-On the **Setup** page, the two physical halves of each string are calibrated
-and tested on their **own steps** (Frets → Plucking → Test), right after the
-Instrument step, so the frets (frettes) and the plucking (grattage) can each
-be tuned independently. Each fret position has its own finger servo plus a
-pluck/strum servo per string, **with or without a PCA9685**. Both steps adapt to the
-Builder's choices (open-only → a banner; strum → its stroke controls) and carry an
-**Arm** control and a **test bench** (below).
+On the **Setup** page, the two physical halves of each string are calibrated and
+tested on their **own steps** (Frets → Plucking → Test), right after the Instrument
+step. Both carry an **Arm** control and a **test bench**.
 
-- **Frets (Frettes step) — the finger servos only.** Per string (string-tab strip), add
-  **one finger servo per fret** (1..`maxFret`; frets need not be contiguous — gaps
-  are allowed); a finger can be **geared** (one servo drives two frets: side A =
-  `fret`, side B = `fretB`/`activeBUs`, neutral = both lifted). A clickable
-  **coverage strip** shows which frets are equipped, geared (⚙) and calibrated;
-  clicking a fret opens its **inline guided calibration** — set the contact / rest
-  angle with a slider (previewed live on the servo), **test rest / press**, **play
-  the note** (`POST /api/test/note`) and **mark it calibrated**. A geared finger
-  calibrates three positions — **neutral / press A / press B** — each driven to its
-  exact `us` pulse and held (`POST /api/test/servo` with `us`).
+- **Frets step — the finger servos.** Per string (string-tab strip), a **coverage
+  strip** shows which frets carry a servo (geared ⚙). **Tap a fret** to open its
+  **servo div**: a **"One servo drives 2 frets (geared)"** toggle (side A = `fret`,
+  side B = `fretB`/`activeBUs`, rest = their **midpoint**, computed automatically),
+  the **PCA board + pin**, the **angle(s)** on precise **− / + steppers** (plain =
+  contact + rest; geared = one press angle per fret) and the **rotation direction**.
+  Each step drives the servo to that `us` pulse live (`POST /api/test/servo`); **play
+  the note** checks it (`POST /api/test/note`).
 
-- **Plucking (Grattage step) — the plectrum and its helpers only.** Per string, calibrate
-  the **pluck/strum** servo (rest + strike angle); a **strum** striker also exposes
-  its **stroke shaping** (alternate up/down, up-stroke angle, stroke time, min strike
-  depth). Optionally add a **strum lift** (lowers the plucker onto the string for a
-  stroke, then raises it) and a **damper** (mutes the string). Global **auxiliary**
-  actuators (`stringIndex = -1`) live here too. Test **rest / strike** and **pluck
-  the open string**.
+- **Plucking step — the sounding servo.** Per string, one **pluck/strum** servo: its
+  **PCA board + pin**, a **contact angle** and a **strum angle** (it always alternates
+  down/up = contact ± strum). Optionally add a **descent servo** (`strumLift`) — the
+  second way to strum — that lowers the plectrum onto the string only while it plays,
+  with its own PCA/pin + raised / lowered angles. Test → contact / down-stroke /
+  up-stroke and **pluck the open string**.
 
-Each servo picks its signal **source** (shown in Advanced mode):
-- **PCA9685** — choose `pcaBoard` (**0–7**, addresses 0x40–0x47), the **I²C bus**
-  (`i2cBus` **0** = SDA/SCL, **1** = SDA2/SCL2) and `channel` (0–15). A compact
-  channel-availability map flags a duplicate `board+channel` in red.
-- **Direct GPIO** — choose a free ESP32 pin, filtered with the same green/yellow/red
-  capability rules as the pin grid (reserved/USB pins hidden, caution pins
-  Advanced-only, pins already used by a board signal or another servo excluded). At
-  most **8 direct-GPIO servos** (one LEDC channel each).
+Each servo carries a signal **source** in the profile (the simplified editors assign
+a **PCA board + pin**; direct-GPIO servos remain valid in the data model and the
+wiring diagram):
+- **PCA9685** — `pcaBoard` (**0–7**, addresses 0x40–0x47), the **I²C bus** (`i2cBus`
+  **0** = SDA/SCL, **1** = SDA2/SCL2) and `channel` (0–15).
+- **Direct GPIO** — a free ESP32 pin (green pins), filtered with the same
+  capability rules as the pin grid; at most **8 direct-GPIO servos** (one LEDC
+  channel each).
 
 **Two I²C buses.** The ESP32-S3 has two hardware I²C controllers, so the PCA9685
 boards can be split across a second bus (`Wire1`, pins **SDA2/SCL2**) to halve the
