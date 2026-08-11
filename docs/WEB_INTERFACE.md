@@ -91,7 +91,7 @@ lives in the **Settings** modal (the gear button, top-right).
 
 #### Main pages
 
-**Instrument** — playable neck drawn to scale (equal temperament); press-and-hold a fret to sound the string. A prominent emergency **STOP** sits at the top.
+**Instrument** — a clean playable neck (GMB-style): a note-name circle on each equipped fret and the open string, press-and-hold to play. A big emergency **STOP** + Re-arm and the play-mode selector sit on top; a chord bar below strums common chords across the strings.
 <p align="center"><img src="../img/screenshots/fretboard.png" alt="Instrument page" width="100%"/></p>
 
 **Calibration** — hand tuning of the servos + test bench (Frets → Plucking → Test). Each equipped finger gets its contact angle, a Reverse rotation direction control and a live test.
