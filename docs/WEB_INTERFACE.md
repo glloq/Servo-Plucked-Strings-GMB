@@ -122,12 +122,19 @@ at their address, per-pin string·role, live conflict checks, SVG export…
 
 #### Settings modal (gear button)
 
-**Configuration** — the instrument-configuration wizard, every page reachable:
+**Configuration** — the instrument-configuration wizard (Instrument → MIDI → Power → Validation),
+every page reachable.
 
-Instrument (type, strings, tuning, fretting / sounding mechanism, I²C-bus split, generate wiring):
-<p align="center"><img src="../img/screenshots/wizard.png" alt="Settings — Configuration: Instrument" width="100%"/></p>
+Instrument — the **Simplified** path is minimal: pick a preset, name it, set the tuning; the servo
+wiring is (re)generated automatically (no "Generate" button, no mechanics to wade through):
+<p align="center"><img src="../img/screenshots/wizard.png" alt="Settings — Configuration: Instrument (simplified)" width="100%"/></p>
 
-MIDI (string/fret CC selection + playback parameters):
+**Advanced** mode reveals the full mechanics on the same page — fretting / sounding mechanism, the
+second-I²C-bus split + capacity meter, board & network, and an explicit "Generate wiring":
+<p align="center"><img src="../img/screenshots/creation-advanced.png" alt="Settings — Configuration: Instrument (advanced)" width="70%"/></p>
+
+MIDI — essentials only (channel, omni, velocity, enable string/fret selection + GMB preset); the fine
+CC settings (numbers, numbering, mapping, timing, policies) are Advanced:
 <p align="center"><img src="../img/screenshots/midi.png" alt="Settings — Configuration: MIDI" width="100%"/></p>
 
 Power (PCA9685 in-rush current limits + latency):
