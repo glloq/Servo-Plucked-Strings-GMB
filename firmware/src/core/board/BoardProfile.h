@@ -63,8 +63,13 @@ struct BoardProfile {
     bool supports(int8_t gpio, SignalKind kind) const;
 };
 
-// Built-in profile for the reference board (spec 11.4 / 11.5).
+// Built-in profiles (spec 11.4 / 11.5). The S3-DevKitC-1 is the reference board;
+// the classic ESP32-WROOM-32 (38-pin DevKitC) and ESP32 DevKit v1 (30-pin) are
+// the common cheaper boards — same die, so they share a GPIO capability model and
+// differ only in which pins are broken out.
 BoardProfile makeEsp32S3DevKitC1();
+BoardProfile makeEsp32Wroom32();
+BoardProfile makeEsp32DevKitV1();
 
 // Returns the built-in profile with a matching identifier, or nullptr.
 const BoardProfile* builtinBoardProfile(const std::string& identifier);

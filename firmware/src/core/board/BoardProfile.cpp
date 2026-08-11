@@ -80,6 +80,25 @@ PinCapability reservedPin(int8_t gpio, const char* note, bool strapping = false,
     return c;
 }
 
+// Input-only GPIO (classic ESP32 34/35/36/39): usable as a sensor input but never
+// as an output, so it can carry none of our signals (I2C / servo / /OE). Marked
+// Reserved because pinSupports() rejects it for every output signal.
+PinCapability inputOnlyPin(int8_t gpio, const char* note) {
+    PinCapability c;
+    c.gpio = gpio;
+    c.exposed = true;
+    c.input = true;
+    c.output = false;
+    c.interrupt = true;
+    c.highSpeedOutput = false;
+    c.internalPullUp = false;
+    c.internalPullDown = false;
+    c.adc = true;
+    c.preference = PinPreference::Reserved;
+    c.note = note;
+    return c;
+}
+
 }  // namespace
 
 BoardProfile makeEsp32S3DevKitC1() {
@@ -141,9 +160,75 @@ BoardProfile makeEsp32S3DevKitC1() {
     return b;
 }
 
+// ---------------------------------------------------------------------------
+// Classic ESP32 (ESP32-WROOM-32 / ESP32-D0WD). Shared GPIO capability model for
+// the 38-pin DevKitC and 30-pin DevKit v1 boards; they differ only in whether the
+// SPI-flash pads (6..11) are broken out.
+//   • Input-only: 34, 35, 36 (VP), 39 (VN) — no output, can't carry our signals.
+//   • Strapping (caution): 0, 2, 5, 12, 15.
+//   • Reserved: 1/3 (UART0), 6..11 (SPI flash).
+//   • GPIO 20, 24, 28..31, 37, 38 do not exist / are not broken out.
+// ---------------------------------------------------------------------------
+namespace {
+
+void addClassicEsp32Pins(BoardProfile& b, bool includeFlash) {
+    auto add = [&](PinCapability c) { b.pins.push_back(c); };
+    add(normalPin(0, PinPreference::Caution, true, "BOOT strapping pin"));
+    add(reservedPin(1, "UART0 TX (programming / diagnostics)", false, false, true));
+    add(normalPin(2, PinPreference::Caution, true, "Strapping / on-board LED on many boards"));
+    add(reservedPin(3, "UART0 RX (programming / diagnostics)", false, false, true));
+    add(normalPin(4, PinPreference::Recommended, true));
+    add(normalPin(5, PinPreference::Caution, false, "Strapping pin (must be HIGH at boot)"));
+    if (includeFlash) {
+        for (int g = 6; g <= 11; ++g) add(reservedPin(static_cast<int8_t>(g), "Connected to the SPI flash"));
+    }
+    add(normalPin(12, PinPreference::Caution, true, "MTDI strapping pin (flash voltage)"));
+    add(normalPin(13, PinPreference::Recommended, true));
+    add(normalPin(14, PinPreference::Recommended, true));
+    add(normalPin(15, PinPreference::Caution, true, "MTDO strapping pin"));
+    add(normalPin(16, PinPreference::Recommended, false, "Used by PSRAM on WROVER modules — verify yours"));
+    add(normalPin(17, PinPreference::Recommended, false, "Used by PSRAM on WROVER modules — verify yours"));
+    add(normalPin(18, PinPreference::Recommended, false));
+    add(normalPin(19, PinPreference::Recommended, false));
+    add(normalPin(21, PinPreference::Recommended, false, "Recommended I2C SDA"));
+    add(normalPin(22, PinPreference::Recommended, false, "Recommended I2C SCL"));
+    add(normalPin(23, PinPreference::Recommended, false, "Recommended PCA9685 /OE"));
+    add(normalPin(25, PinPreference::Recommended, true));
+    add(normalPin(26, PinPreference::Recommended, true));
+    add(normalPin(27, PinPreference::Recommended, true));
+    add(normalPin(32, PinPreference::Recommended, true));
+    add(normalPin(33, PinPreference::Recommended, true));
+    add(inputOnlyPin(34, "Input-only (ADC1) — cannot drive I2C / servo / /OE"));
+    add(inputOnlyPin(35, "Input-only (ADC1) — cannot drive I2C / servo / /OE"));
+    add(inputOnlyPin(36, "Input-only sensor VP (ADC1) — cannot output"));
+    add(inputOnlyPin(39, "Input-only sensor VN (ADC1) — cannot output"));
+}
+
+}  // namespace
+
+BoardProfile makeEsp32Wroom32() {
+    BoardProfile b;
+    b.identifier = "esp32-wroom-32";
+    b.displayName = "ESP32-WROOM-32 (DevKitC, 38-pin)";
+    addClassicEsp32Pins(b, /*includeFlash=*/true);
+    return b;
+}
+
+BoardProfile makeEsp32DevKitV1() {
+    BoardProfile b;
+    b.identifier = "esp32-devkit-v1";
+    b.displayName = "ESP32 DevKit v1 (30-pin)";
+    addClassicEsp32Pins(b, /*includeFlash=*/false);
+    return b;
+}
+
 const BoardProfile* builtinBoardProfile(const std::string& identifier) {
-    static const BoardProfile devkit = makeEsp32S3DevKitC1();
-    if (identifier == devkit.identifier) return &devkit;
+    static const BoardProfile s3 = makeEsp32S3DevKitC1();
+    static const BoardProfile wroom = makeEsp32Wroom32();
+    static const BoardProfile devkitv1 = makeEsp32DevKitV1();
+    if (identifier == s3.identifier) return &s3;
+    if (identifier == wroom.identifier) return &wroom;
+    if (identifier == devkitv1.identifier) return &devkitv1;
     return nullptr;
 }
 

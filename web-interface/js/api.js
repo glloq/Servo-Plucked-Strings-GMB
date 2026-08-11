@@ -1067,8 +1067,10 @@
       });
     },
     autoPins: function (req) {
+      // Tell the firmware which board the draft targets (board-aware auto-assign).
+      var body = Object.assign({ board: currentBoardId() }, req);
       return this._call('/api/pins/auto', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       }, function () { return mockAutoAssign(req); });
     },
     // POST /api/pins/validate -> { ok, issues:[{field,message,severity}] }.

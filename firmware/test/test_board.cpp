@@ -90,3 +90,61 @@ TEST(signal_kind_from_name) {
     CHECK(signalKindFromName("STEP1") == SignalKind::Generic);
     CHECK(signalKindFromName("MYSTERY") == SignalKind::Generic);
 }
+
+// ---- classic ESP32 boards (WROOM-32 / DevKit v1) --------------------------
+
+TEST(builtin_profiles_resolved_by_id) {
+    CHECK(builtinBoardProfile("esp32-s3-devkitc-1") != nullptr);
+    CHECK(builtinBoardProfile("esp32-wroom-32") != nullptr);
+    CHECK(builtinBoardProfile("esp32-devkit-v1") != nullptr);
+    CHECK(builtinBoardProfile("no-such-board") == nullptr);
+}
+
+// The classic ESP32 has input-only pins (34/35/36/39): usable as inputs but never
+// as outputs, so they can carry none of our (output) signals.
+TEST(wroom_input_only_pins_cannot_output) {
+    BoardProfile b = makeEsp32Wroom32();
+    for (int8_t g : {34, 35, 36, 39}) {
+        const PinCapability* p = b.find(g);
+        CHECK(p != nullptr);
+        CHECK(p->input);
+        CHECK(!p->output);
+        CHECK(!b.supports(g, SignalKind::ServoOe));
+        CHECK(!b.supports(g, SignalKind::I2cSda));
+        CHECK(!b.supports(g, SignalKind::Generic));
+    }
+    // GPIO 20 / 24 do not exist on the classic ESP32.
+    CHECK(b.find(20) == nullptr);
+    CHECK(b.find(24) == nullptr);
+    // The recommended I2C pins are usable both ways.
+    CHECK(b.supports(21, SignalKind::I2cSda));
+    CHECK(b.supports(22, SignalKind::I2cScl));
+    CHECK(b.supports(23, SignalKind::ServoOe));
+}
+
+// The 30-pin DevKit v1 does not break out the SPI-flash pads (6..11).
+TEST(devkitv1_omits_flash_pins) {
+    BoardProfile b = makeEsp32DevKitV1();
+    for (int g = 6; g <= 11; ++g) CHECK(b.find(static_cast<int8_t>(g)) == nullptr);
+    // Still a full classic-ESP32 otherwise.
+    CHECK(b.find(21) != nullptr);
+    CHECK(b.find(34) != nullptr);
+}
+
+// Auto-assign on a classic ESP32 places I2C + /OE on real output pins.
+TEST(wroom_auto_assign_places_valid_pins) {
+    BoardProfile b = makeEsp32Wroom32();
+    PinManager pm(b);
+    PinRequest req;
+    req.stringCount = 4;
+    CHECK(pm.autoAssign(req));
+    for (const char* sig : {"SDA", "SCL", "SERVO_OE"}) {
+        int8_t g = pm.gpioOf(sig);
+        CHECK(g != kNoPin);
+        const PinCapability* p = b.find(g);
+        CHECK(p != nullptr);
+        CHECK(p->output);
+        CHECK(!p->reserved);
+    }
+    CHECK(pm.validate(true).empty());
+}
