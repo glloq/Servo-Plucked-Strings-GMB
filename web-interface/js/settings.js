@@ -2,20 +2,20 @@
  * settings.js — the consolidated Settings modal (gear button, top-right).
  *
  * UI redesign: the three main pages a player needs (Instrument, Calibration,
- * Câblage & GPIO) stay in the nav; EVERYTHING else a user configures lives here,
- * behind four tabs:
+ * Wiring & GPIO) stay in the nav; EVERYTHING else a user configures lives here,
+ * behind three tabs:
  *
  *   • Configuration — the instrument-configuration wizard (all its pages:
- *                     Instrument → MIDI → Alimentation → Validation), hosted via
- *                     GMB.renderConfigWizard. This is the "wizard config instrument"
+ *                     Instrument -> MIDI -> Power -> Validation), hosted via
+ *                     GMB.renderConfigWizard. This is the config-instrument wizard
  *                     with every page reachable, not just the first.
- *   • Réseau        — network mode, SSIDs, hostname, Wi-Fi credentials (write-only)
+ *   • Network       — network mode, SSIDs, hostname, Wi-Fi credentials (write-only)
  *                     and the on-demand hotspot switch.
- *   • Profils       — saved device profile slots (load / copy / rename / export…).
- *   • Avancé        — GMB identity & capabilities (SysEx) + the live MIDI monitor
+ *   • Advanced      — GMB identity & capabilities (SysEx) + the live MIDI monitor
  *                     and integrated tester.
  *
- * The Simplified / Advanced toggle is mirrored in the footer because the overlay
+ * Profiles are intentionally not exposed here (a hidden, non-user setting). The
+ * Simplified / Advanced toggle is mirrored in the footer because the overlay
  * covers the sidebar. Tabs that own a live socket (Advanced, and the config
  * wizard's MIDI step) are torn down on every tab switch and on close.
  */
@@ -29,9 +29,8 @@
 
   var TABS = [
     { id: 'config',   label: 'Configuration' },
-    { id: 'network',  label: 'Réseau' },
-    { id: 'profiles', label: 'Profils' },
-    { id: 'advanced', label: 'Avancé' }
+    { id: 'network',  label: 'Network' },
+    { id: 'advanced', label: 'Advanced' }
   ];
 
   function section(title, children, hint) {
@@ -45,8 +44,8 @@
     var panel = h('div.settings-panel', { onclick: function (e) { e.stopPropagation(); } }, [
       h('div.settings-head', [
         h('div.settings-head-top', [
-          h('h2', 'Réglages'),
-          h('button.settings-close', { type: 'button', title: 'Fermer', onclick: close }, '×')
+          h('h2', 'Settings'),
+          h('button.settings-close', { type: 'button', title: 'Close', onclick: close }, '×')
         ]),
         h('div.settings-tabs', TABS.map(function (t) {
           return h('button.settings-tab' + (t.id === activeTab ? '.active' : ''),
@@ -56,10 +55,10 @@
       h('div.settings-body', { id: 'settings-body' }),
       h('div.settings-actions', [
         modeToggle(),
-        h('span.muted', GMB.api.mock ? 'Démo / backend simulé' : ''),
+        h('span.muted', GMB.api.mock ? 'Demo / mock backend' : ''),
         h('span.spacer'),
-        GMB.button('Fermer', close, 'ghost'),
-        GMB.button('Enregistrer & publier', save, 'primary')
+        GMB.button('Close', close, 'ghost'),
+        GMB.button('Save & publish', save, 'primary')
       ])
     ]);
 
@@ -73,9 +72,9 @@
     var mode = GMB.state.mode;
     return h('div.mode-toggle.mini', [
       h('button' + (mode === 'simplified' ? '.active' : ''),
-        { type: 'button', onclick: function () { setMode('simplified'); } }, 'Simplifié'),
+        { type: 'button', onclick: function () { setMode('simplified'); } }, 'Simplified'),
       h('button' + (mode === 'advanced' ? '.active' : ''),
-        { type: 'button', onclick: function () { setMode('advanced'); } }, 'Avancé')
+        { type: 'button', onclick: function () { setMode('advanced'); } }, 'Advanced')
     ]);
   }
   function setMode(m) {
@@ -91,7 +90,6 @@
     body.innerHTML = '';
     if (activeTab === 'config') GMB.renderConfigWizard(body);
     else if (activeTab === 'network') networkTab(body);
-    else if (activeTab === 'profiles') { if (GMB.views.profiles) GMB.views.profiles.render(body); }
     else if (activeTab === 'advanced') advancedTab(body);
   }
 
@@ -122,46 +120,46 @@
     if (GMB.testRunner && GMB.testRunner.stop) GMB.testRunner.stop();
   }
 
-  // ---- Réseau tab -----------------------------------------------------------
+  // ---- Network tab ----------------------------------------------------------
   function networkTab(host) {
     var net = GMB.state.profile.network;
 
-    host.appendChild(section('Réseau', h('div.form-grid', [
+    host.appendChild(section('Network', h('div.form-grid', [
       GMB.field('Mode', GMB.input(net, 'mode', {
         type: 'select',
-        options: [{ value: 'accessPoint', label: 'Point d’accès (hotspot)' },
-                  { value: 'station', label: 'Client Wi-Fi' }],
+        options: [{ value: 'accessPoint', label: 'Access point (hotspot)' },
+                  { value: 'station', label: 'Wi-Fi client' }],
         onChange: drawTab
       })),
-      GMB.field('SSID du point d’accès', GMB.input(net, 'apSsid')),
-      net.mode === 'station' ? GMB.field('SSID (station)', GMB.input(net, 'ssid')) : null,
-      GMB.field('Nom d’hôte', GMB.input(net, 'hostname'))
-    ]), 'Les changements réseau s’appliquent après un redémarrage. Utilisez « Démarrer le hotspot » pour basculer immédiatement en point d’accès.'));
+      GMB.field('Access-point SSID', GMB.input(net, 'apSsid')),
+      net.mode === 'station' ? GMB.field('Station SSID', GMB.input(net, 'ssid')) : null,
+      GMB.field('Hostname', GMB.input(net, 'hostname'))
+    ]), 'Network changes apply after a reboot. Use “Start hotspot” to switch to the access point immediately.'));
 
-    host.appendChild(section('Identifiants Wi-Fi', h('div.form-grid', [
+    host.appendChild(section('Wi-Fi credentials', h('div.form-grid', [
       net.mode === 'station'
-        ? GMB.field('Mot de passe station', GMB.input(wifi, 'stationPassword', { type: 'password' }))
+        ? GMB.field('Station password', GMB.input(wifi, 'stationPassword', { type: 'password' }))
         : null,
-      GMB.field('Mot de passe point d’accès', GMB.input(wifi, 'apPassword', { type: 'password' }))
-    ]), 'En écriture seule — jamais affichés ni exportés. Laisser vide pour ne pas changer. Appliqués après redémarrage.'));
+      GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' }))
+    ]), 'Write-only — never displayed or exported. Leave blank to keep unchanged. Applied after a reboot.'));
 
     host.appendChild(section('Hotspot', h('div.toolbar', [
-      GMB.button('Démarrer le hotspot maintenant', startHotspot, 'ghost')
-    ]), 'Bascule immédiatement en point d’accès avec portail captif : rejoindre le Wi-Fi de l’appareil ouvre cette page. Aussi disponible en maintenant le bouton BOOT ~2 s.'));
+      GMB.button('Start hotspot now', startHotspot, 'ghost')
+    ]), 'Switch to the access point now with a captive portal: joining the device’s Wi-Fi opens this page. Also available by holding the board BOOT button for ~2 s.'));
   }
 
-  // ---- Avancé tab -----------------------------------------------------------
+  // ---- Advanced tab ---------------------------------------------------------
   function advancedTab(host) {
     host.appendChild(h('div.note-box',
-      'Outils avancés. Identité & capacités GMB (SysEx), moniteur MIDI temps réel et ' +
-      'testeur intégré. Basculez en mode « Avancé » ci-dessous pour les options détaillées.'));
+      'Advanced tools. GMB identity & capabilities (SysEx), the live MIDI monitor and the ' +
+      'integrated tester. Switch to “Advanced” below for the detailed options.'));
     if (GMB.views.sysex && GMB.views.sysex.render) GMB.views.sysex.render(host);
     if (GMB.midiSettings && GMB.midiSettings.tools) GMB.midiSettings.tools(host);
   }
 
   // ---- open / close ---------------------------------------------------------
   function open(tab) {
-    if (!GMB.state.profile) { GMB.toast('Configuration en cours de chargement…', 'warn'); return; }
+    if (!GMB.state.profile) { GMB.toast('Configuration still loading…', 'warn'); return; }
     activeTab = (tab && TABS.some(function (t) { return t.id === tab; })) ? tab : 'config';
     if (overlay) overlay.remove();
     build();
@@ -199,20 +197,20 @@
       GMB.api.setWifi({ stationPassword: wifi.stationPassword, apPassword: wifi.apPassword })
         .then(function () {
           wifi.stationPassword = ''; wifi.apPassword = '';
-          GMB.toast('Identifiants Wi-Fi enregistrés (redémarrer pour appliquer).', 'ok');
+          GMB.toast('Wi-Fi credentials stored (reboot to apply).', 'ok');
           saveDraft();
         })
-        .catch(function (e) { GMB.toast('Échec Wi-Fi : ' + (e && e.message || e), 'error'); });
+        .catch(function (e) { GMB.toast('Wi-Fi save failed: ' + (e && e.message || e), 'error'); });
     } else {
       saveDraft();
     }
   }
 
   function startHotspot() {
-    if (!confirm('Basculer vers le hotspot Wi-Fi (point d’accès) maintenant ?\n\nSi vous êtes connecté en Wi-Fi vous serez déconnecté — rejoignez le réseau de l’appareil (la page de config s’ouvre automatiquement).')) return;
+    if (!confirm('Switch to the Wi-Fi hotspot (access point) now?\n\nIf you are connected over Wi-Fi you will be disconnected — rejoin the device’s network (the config page opens automatically).')) return;
     GMB.api.startHotspot().then(function (r) {
-      GMB.toast((r && r.note) || 'Hotspot en démarrage…', 'warn');
-    }).catch(function (e) { GMB.toast('Échec de la demande hotspot : ' + (e && e.message || e), 'error'); });
+      GMB.toast((r && r.note) || 'Hotspot starting…', 'warn');
+    }).catch(function (e) { GMB.toast('Hotspot request failed: ' + (e && e.message || e), 'error'); });
   }
 
   GMB.views = GMB.views || {};

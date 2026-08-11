@@ -16,7 +16,7 @@
 
   function render(host) {
     // Clear first: this view can re-enter itself once the board profile resolves
-    // (and is embedded in the Câblage & GPIO page), so the async pass must not
+    // (and is embedded in the Wiring & GPIO page), so the async pass must not
     // stack real cards under the "Loading…" placeholder.
     host.innerHTML = '';
     var p = GMB.state.profile;

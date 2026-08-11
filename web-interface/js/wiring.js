@@ -591,13 +591,13 @@
         'power + /OE buses, and any direct-GPIO servos. Boards can be split across the ESP32-S3’s two ' +
         'I²C buses (SDA/SCL and SDA2/SCL2). Each occupied channel is labelled with its string and fret, so a ' +
         'PCA9685 shared across several strings stays unambiguous. It updates with each change made in the ' +
-        'instrument configuration (Réglages) and the GPIO sub-tab.')
+        'instrument configuration (Settings) and the GPIO sub-tab.')
     ]));
 
     if (!servos.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No servos configured yet.'),
-        h('p.muted', 'Configure the instrument first (Réglages → Configuration) — the wiring map is built from its servos.'),
-        h('div.row', [GMB.button('Ouvrir la configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
+        h('p.muted', 'Configure the instrument first (Settings › Configuration) — the wiring map is built from its servos.'),
+        h('div.row', [GMB.button('Open configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
       return;
     }
 

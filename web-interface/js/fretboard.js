@@ -505,18 +505,18 @@
   // and a Reset that recovers from an E-stop and re-arms.
   function emergencyStopCard() {
     return h('div.card.panic-card', [
-      h('div', [h('h2', 'Arrêt d’urgence'),
-        h('p.muted', 'Neutralise les servos (PCA9685 /OE) et vide la file MIDI.')]),
+      h('div', [h('h2', 'Emergency stop'),
+        h('p.muted', 'Neutralises the servos (PCA9685 /OE) and flushes the MIDI queue.')]),
       h('div.panic-actions', [
         h('button.btn.danger.panic-big', { onclick: GMB.doPanic }, 'STOP'),
-        GMB.button('Reset & ré-armer', function () {
+        GMB.button('Reset & re-arm', function () {
           GMB.api.resetSystem().then(function (res) {
             if (res && res.ok === false) {
-              GMB.toast('Reset refusé : ' + (res.error || 'E-stop actif ou config invalide') + '.', 'warn');
+              GMB.toast('Reset refused: ' + (res.error || 'E-stop active or invalid config') + '.', 'warn');
             } else {
-              GMB.toast('Reset accepté — ré-armement.', 'ok');
+              GMB.toast('Reset accepted — re-arming.', 'ok');
             }
-          }).catch(function (e) { GMB.toast('Reset échoué : ' + (e && e.message || e), 'error'); });
+          }).catch(function (e) { GMB.toast('Reset failed: ' + (e && e.message || e), 'error'); });
         })
       ])
     ]);
@@ -552,18 +552,18 @@
 
     if (!strings.length) {
       host.appendChild(h('div.card', [h('div.pill.warn', 'No strings configured yet.'),
-        h('p.muted', 'Configure the instrument first (Réglages → Configuration).'),
-        h('div.row', [GMB.button('Ouvrir la configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
+        h('p.muted', 'Configure the instrument first (Settings › Configuration).'),
+        h('div.row', [GMB.button('Open configuration', function () { if (GMB.openSettings) GMB.openSettings('config'); }, 'primary')])]));
       return;
     }
     if (!anyStriker)
       host.appendChild(h('div.note-box', [
         'None of the strings has a plucker / strum servo yet, so notes cannot sound. ',
-        GMB.button('Aller à la calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
+        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
     else if (!anyFinger)
       host.appendChild(h('div.note-box', [
         'No finger servos are equipped — only the open strings can be played. ',
-        GMB.button('Aller à la calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
+        GMB.button('Go to calibration', function () { GMB.navigate('calibration'); }, 'ghost')]));
 
     // The board itself (scrolls horizontally on narrow screens so tap targets
     // stay usable rather than shrinking to nothing).
