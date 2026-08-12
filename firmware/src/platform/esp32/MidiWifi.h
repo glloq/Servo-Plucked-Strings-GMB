@@ -13,6 +13,7 @@
 
 #include "../../core/midi/MidiParser.h"
 #include "../../core/midi/MidiTransport.h"
+#include "../../core/net/UdpSourceGate.h"
 
 #if defined(ARDUINO)
 #include <WiFiUdp.h>
@@ -64,6 +65,15 @@ public:
     uint32_t droppedEvents() const { return droppedEvents_; }
     uint32_t droppedPackets() const { return droppedPackets_; }
 
+    // UDP source posture (P1.11). Default Open = accept any sender (unchanged
+    // behaviour). LockToFirst pins the session to the first sender; Disabled refuses
+    // all UDP. INERT until a runtime/DeviceConfig calls setSourcePolicy — the reject
+    // path is exercised by host tests, but the live-socket behaviour needs bench
+    // validation. rejectedCount() surfaces datagrams the gate refused (diagnostics).
+    void setSourcePolicy(UdpSourcePolicy p) { gate_.setPolicy(p); }
+    UdpSourcePolicy sourcePolicy() const { return gate_.policy(); }
+    uint32_t rejectedPackets() const { return gate_.rejectedCount(); }
+
 private:
     static constexpr int kMaxPacketsPerTick = 8;
     static constexpr size_t kMaxEventsPerTick = 128;
@@ -75,6 +85,7 @@ private:
     uint16_t lastSenderPort_ = 0;
     uint32_t droppedEvents_ = 0;
     uint32_t droppedPackets_ = 0;
+    UdpSourceGate gate_;  // P1.11 source posture (Open by default -> no behaviour change)
 #if defined(ARDUINO)
     WiFiUDP udp_;
     IPAddress lastSenderIp_;

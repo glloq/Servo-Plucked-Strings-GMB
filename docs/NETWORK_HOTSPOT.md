@@ -115,14 +115,22 @@ transport principal).
 * **`POST /api/panic` reste accessible sans authentification** — c'est **volontaire** :
   un arrêt d'urgence ne doit jamais dépendre d'un token (voir [`SAFETY.md`](SAFETY.md)).
 
-### Durcissement MIDI UDP — optionnel, à venir
+### Durcissement MIDI UDP — kernel en place, activation à venir
 
-Le MIDI UDP est non authentifié par nature. Options **éventuelles** (non implémentées),
-à réserver aux déploiements où l'UDP reste le transport principal :
+Le MIDI UDP est non authentifié par nature. La **logique de filtrage** est désormais
+implémentée et testée en hôte — `UdpSourceGate` (`core/net/UdpSourceGate.h`), tenu par
+`MidiWifi` — avec trois postures :
 
-* **whitelist d'IP** (n'accepter que des expéditeurs connus) ;
-* **session/contrôleur reconnu** (verrouiller sur le premier expéditeur) ;
-* **désactivation du transport UDP** en mode Performance (jouer via USB/DIN).
+* **`Open`** — accepte tout expéditeur (défaut ; comportement actuel inchangé) ;
+* **`LockToFirst`** — **session/contrôleur reconnu** : verrouille sur le premier
+  expéditeur, puis n'accepte plus que lui (un appareil pirate du réseau ne peut plus
+  injecter de notes une fois qu'un contrôleur parle) ;
+* **`Disabled`** — **désactivation du transport UDP** (jouer via USB/DIN en Performance).
 
-Ces options appartiennent au futur `DeviceConfig` (P1.13) et doivent arriver **avec**
-le câblage runtime qui les honore, pas comme un simple champ (cf. P1.9/P1.10).
+Chaque datagramme refusé incrémente `MidiWifi::rejectedPackets()` (observable). Le gate
+est **inerte** (`Open`) tant qu'un runtime/`DeviceConfig` (P1.13) n'appelle pas
+`setSourcePolicy()` — comme pour les autres options réseau, l'activation doit arriver
+**avec** le câblage qui l'honore, pas comme un simple champ (cf. P1.9/P1.10). Une
+**whitelist d'IP** explicite (plusieurs expéditeurs autorisés) reste une extension
+possible du gate. *Non validé sur socket réel* : seule la règle d'acceptation/refus est
+testée en hôte ; le comportement réseau reste à valider au banc.

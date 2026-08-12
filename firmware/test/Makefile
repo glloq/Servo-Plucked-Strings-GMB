@@ -50,7 +50,8 @@ TEST_SRC := \
   test_holdbutton.cpp \
   test_profile_activation.cpp \
   test_app_phase.cpp \
-  test_readiness.cpp
+  test_readiness.cpp \
+  test_udp_source_gate.cpp
 
 BIN := run_tests
 
