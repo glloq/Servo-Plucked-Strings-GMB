@@ -248,6 +248,14 @@ void WebApi::registerRoutes() {
         req->send(200, "application/json", String(s.c_str()));
     });
 
+    // ---- GET /api/diagnostics (runtime telemetry for the bench, P2.19) ----
+    // The body is built by loop() via the callback (reads accumulated counters +
+    // cached PCA health), so the async web task never touches live I2C or state.
+    server_->on("/api/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        std::string s = ctx_.diagnosticsJson ? ctx_.diagnosticsJson() : "{}";
+        req->send(200, "application/json", String(s.c_str()));
+    });
+
     // ---- GET /api/commands?id=N (result of a 202-accepted command) ----
     server_->on("/api/commands", HTTP_GET, [this](AsyncWebServerRequest* req) {
         JsonDocument doc;

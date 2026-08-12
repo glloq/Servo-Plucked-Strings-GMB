@@ -34,12 +34,12 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P1.16 | CI GitHub Actions complète | **DONE** | `a1ca8b7` |
 | P2.17 | Réduire `main.cpp` (ApplicationRuntime, PlaybackScheduler…) | **NOT STARTED** | — |
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
-| P2.19 | Télémétrie / `GET /api/diagnostics` | **NOT STARTED** | — |
+| P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**13 DONE · 2 PARTIAL · 4 NOT STARTED.** Les 6 items restants (P1.6, P1.7, P1.11,
-P1.13, P2.17, P2.19) sont les gros refactors architecturaux que la mission
-elle-même demande de faire *progressivement, par composants avec tests de
-non-régression* — voir §6 pour l'approche recommandée.
+**14 DONE · 2 PARTIAL · 3 NOT STARTED.** Les 5 items restants (P1.6, P1.7, P1.11,
+P1.13, P2.17) sont les gros refactors architecturaux que la mission elle-même
+demande de faire *progressivement, par composants avec tests de non-régression* —
+voir §6 pour l'approche recommandée.
 
 ---
 
@@ -49,8 +49,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **206 tests, 3566 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **206 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **211 tests, 3597 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **211 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -191,12 +191,18 @@ mais pas de classes `ApplicationRuntime` / `PlaybackScheduler` / `ActuatorManage
 un seul seam (`frettedNote()`), et esquisse l'abstraction `Voice/Course`. Aucune
 réécriture (conforme à la consigne). Pointeur ajouté dans `Types.h`.
 
-### P2.19 — Diagnostics (NOT STARTED)
-`GET /api/status` expose déjà : state, faults (source/message/atMs), stringsReady,
-safety, capabilitiesRevision. Manquent : uptime, reset reason, heap/min-heap,
-compteurs MIDI/UDP perdus, high-water queue, latence/jitter scheduler, compteur de
-mouvements servo, throttles governor, reconnects Wi-Fi, statut PCA par carte, et un
-`GET /api/diagnostics` dédié. Approche en §6.
+### P2.19 — Diagnostics (DONE)
+Accumulateur `Diagnostics` (cœur, **testable nativement** : high-water, latence/
+jitter, compteurs) alimenté depuis `loop()`, exposé par **`GET /api/diagnostics`** :
+uptime, reset reason, free/min heap, événements MIDI + perdus + datagrammes perdus,
+`cmdQueueHighWater`, latence/jitter/moyenne scheduler, `faults`, `servoMoves`
+(compteur ServoBank), `governorThrottles` (compteur governor), `wifiReconnects`, et
+**statut PCA par carte** (santé + carte défaillante nommée) mis en cache côté loop
+pour que la tâche web ne touche jamais l'I2C. *Fichiers* : `core/diagnostics/
+Diagnostics.h` (nouveau), `ServoBank.*` (`moveCount`), `ServoActivationGovernor.h`
+(`throttleCount`), `main.cpp`, `WebApi.*`, `WEB_INTERFACE.md`. *Tests* :
+`test_diagnostics.cpp` (5 cas) + `governor_throttle_count_is_cumulative`. *Reste* :
+latence par corde et compteurs par transport (dépend de P1.7).
 
 ---
 
@@ -251,5 +257,3 @@ non-régression à chaque étape) :
   d'`InstrumentProfile`, migration v2→v3, puis modes Setup/Performance + whitelist UDP.
 - **P2.17** : sortir la FSM de `tickString()` dans un `PlaybackScheduler`, puis
   `ApplicationRuntime`/`CommandDispatcher`/… un composant à la fois.
-- **P2.19** : accumulateur `Diagnostics` (cœur, testable) alimenté depuis la boucle +
-  endpoint `GET /api/diagnostics`.

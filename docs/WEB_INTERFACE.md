@@ -343,3 +343,23 @@ Notes:
 * `POST /api/pins/auto` and `/api/pins/validate` map directly to
   `PinManager::autoAssign` / `validate` (see [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)).
 * `POST /api/panic` and the safety state: see [`SAFETY.md`](SAFETY.md).
+
+### 4.3 Diagnostics — `GET /api/diagnostics` (P2.19)
+
+Runtime telemetry for a future physical bench (JSON). Read-only, no auth. The body
+is built on the loop side and read as a snapshot by the web task (it never touches
+live I2C or state). Fields:
+
+| Champ | Sens |
+| ----- | ---- |
+| `uptimeMs` / `resetReason` | temps depuis boot / cause du dernier reset |
+| `freeHeap` / `minFreeHeap` | tas libre courant / minimum observé |
+| `state` | état applicatif (`configSafe`/`parking`/`ready`/…) |
+| `midi.events` / `droppedEvents` / `droppedPackets` | événements MIDI ingérés / perdus (overflow) / datagrammes perdus |
+| `scheduler.maxLatencyUs` / `jitterUs` / `meanUs` | pire période `loop()`, pire écart, moyenne lissée |
+| `cmdQueueHighWater` | profondeur max de la file web→loop |
+| `faults` / `servoMoves` / `governorThrottles` / `wifiReconnects` | compteurs cumulés |
+| `pca.used` / `healthy` / `failedBoard` | santé PCA9685 (carte défaillante nommée `bus N / 0x4A`) |
+
+Métriques non encore instrumentées (à ajouter progressivement) : latence par corde,
+compteurs par transport MIDI (voir l'abstraction transports, P1.7).

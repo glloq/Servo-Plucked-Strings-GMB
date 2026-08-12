@@ -124,6 +124,8 @@ public:
     static std::string boardName(uint8_t boardBucket);
 
     size_t count() const { return servos_.size(); }
+    // Cumulative servo pulses actually written to an output (diagnostics, P2.19).
+    uint32_t moveCount() const { return moveCount_; }
     // True if `index` refers to a real, enabled servo that can actually be driven
     // (so a web servo-test can reject an invalid/disabled index instead of
     // silently succeeding).
@@ -174,6 +176,7 @@ private:
     int8_t oePin_ = -1;
     int8_t oePin2_ = -1;          // /OE for the second I2C bus (-1 = shared with oePin_)
     int directCount_ = 0;         // number of LEDC channels handed out
+    uint32_t moveCount_ = 0;      // cumulative servo pulses written (diagnostics)
     bool pcaUsed_ = false;
     bool pcaPresent_[2][kMaxPca] = {{false}};  // [i2cBus][board]
     bool directAttachFault_ = false;

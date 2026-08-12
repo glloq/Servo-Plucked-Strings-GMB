@@ -19,6 +19,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <esp_system.h>  // esp_reset_reason() for diagnostics (P2.19)
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -29,6 +30,7 @@
 #include "core/configuration/Profile.h"
 #include "core/configuration/PluckPlan.h"
 #include "core/configuration/ProfileValidator.h"
+#include "core/diagnostics/Diagnostics.h"
 #include "core/gmb/GmbSysExService.h"
 #include "core/instrument/InstrumentController.h"
 #include "core/instrument/ServoActivationGovernor.h"
@@ -55,6 +57,9 @@ ServoActivationGovernor g_governor;
 Net g_net;
 MidiWifi g_midi;
 WebApi g_web;
+Diagnostics g_diag;  // runtime telemetry (P2.19)
+bool g_pcaHealthy = true;          // last loop-side PCA probe result (for diagnostics)
+uint8_t g_pcaFailedBoard = 0xFF;   // board bucket that failed, 0xFF = none
 
 // ConfigSafe : no valid profile — actuators locked, web/net up (P0 boot-safe).
 // Boot       : transient power-on safe, before the arming sequence starts.
@@ -130,6 +135,7 @@ struct AppCommand {
 };
 
 std::atomic<uint32_t> g_nextCmdId{1};
+std::atomic<int> g_cmdQueueDepth{0};  // live web->loop queue depth (diagnostics)
 struct CmdResult { uint32_t id = 0; uint8_t state = 0; };  // 0=queued 1=done 2=refused
 constexpr int kCmdResultRing = 16;
 CmdResult g_cmdResults[kCmdResultRing];
@@ -171,6 +177,7 @@ uint32_t enqueueCommand(const AppCommand& in) {
         delete h;
         return 0;
     }
+    g_diag.observeCmdQueueDepth(static_cast<uint32_t>(g_cmdQueueDepth.fetch_add(1) + 1));
     setCommandResult(c.id, 0);
     return c.id;
 }
@@ -471,6 +478,7 @@ void purgeCommands() {
     if (!g_cmdQueue) return;
     AppCommand* c = nullptr;
     while (xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE) {
+        g_cmdQueueDepth.fetch_sub(1);
         delete c->profile;
         delete c;
     }
@@ -507,6 +515,7 @@ void drainCommands(uint32_t nowMs) {
     AppCommand* c = nullptr;
     for (int n = 0; n < kMaxCommandsPerTick && xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE;
          ++n) {
+        g_cmdQueueDepth.fetch_sub(1);
         bool ok = true;
         switch (c->type) {
             case CmdType::Panic: doPanic(); purgeCommands(); break;
@@ -820,6 +829,79 @@ void tickString(size_t i, uint32_t nowMs) {
     }
 }
 
+// App phase as the string reported to the web/API (shared by ctx.appState and the
+// diagnostics endpoint so the two never diverge).
+const char* appStateStr() {
+    switch (g_phase) {
+        case AppPhase::Ready:         return g_degraded ? "readyDegraded" : "ready";
+        case AppPhase::Parking:       return "parking";
+        case AppPhase::Reconfiguring: return "reconfiguring";
+        case AppPhase::ConfigSafe:    return "configSafe";
+        case AppPhase::Boot:          break;
+    }
+    return "boot";
+}
+
+// ---- Diagnostics (P2.19) -----------------------------------------------------
+const char* resetReasonStr() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "power-on";
+        case ESP_RST_EXT:       return "external";
+        case ESP_RST_SW:        return "software";
+        case ESP_RST_PANIC:     return "panic";
+        case ESP_RST_INT_WDT:   return "int-wdt";
+        case ESP_RST_TASK_WDT:  return "task-wdt";
+        case ESP_RST_WDT:       return "wdt";
+        case ESP_RST_DEEPSLEEP: return "deep-sleep";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        default:                return "unknown";
+    }
+}
+
+// Push the component totals (each keeps its own running counter) + the cached PCA
+// health into g_diag from the loop side, so the web task only ever reads a snapshot.
+void feedDiagnostics() {
+    g_diag.setMidiDropped(g_midi.droppedEvents());
+    g_diag.setUdpDropped(g_midi.droppedPackets());
+    g_diag.setFaults(static_cast<uint32_t>(g_safety.faults().size()));
+    g_diag.setServoMoves(g_servos.moveCount());
+    g_diag.setGovernorThrottles(g_governor.throttleCount());
+    g_diag.setPca(g_servos.usesPca(), g_pcaHealthy, g_pcaFailedBoard);
+}
+
+// Serialise the current telemetry for GET /api/diagnostics. Reads only the g_diag
+// snapshot + always-safe ESP metrics — no live I2C / state from the web task.
+std::string buildDiagnosticsJson() {
+    const DiagCounters& c = g_diag.counters();
+    JsonDocument doc;
+    doc["uptimeMs"] = millis();
+    doc["resetReason"] = resetReasonStr();
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["minFreeHeap"] = ESP.getMinFreeHeap();
+    doc["state"] = appStateStr();
+    JsonObject midi = doc["midi"].to<JsonObject>();
+    midi["events"] = c.midiEvents;
+    midi["droppedEvents"] = c.midiDropped;
+    midi["droppedPackets"] = c.udpDropped;
+    JsonObject sched = doc["scheduler"].to<JsonObject>();
+    sched["maxLatencyUs"] = c.schedulerMaxLatencyUs;
+    sched["jitterUs"] = c.schedulerJitterUs;
+    sched["meanUs"] = c.schedulerMeanUs;
+    doc["cmdQueueHighWater"] = c.cmdQueueHighWater;
+    doc["faults"] = c.faults;
+    doc["servoMoves"] = c.servoMoves;
+    doc["governorThrottles"] = c.governorThrottles;
+    doc["wifiReconnects"] = c.wifiReconnects;
+    JsonObject pca = doc["pca"].to<JsonObject>();
+    pca["used"] = c.pcaUsed;
+    pca["healthy"] = c.pcaHealthy;
+    if (c.pcaFailedBoard != 0xFF)
+        pca["failedBoard"] = ServoBank::boardName(c.pcaFailedBoard);
+    std::string out;
+    serializeJson(doc, out);
+    return out;
+}
+
 }  // namespace
 
 void setup() {
@@ -918,16 +1000,8 @@ void setup() {
     { Preferences p; p.begin("gmb", true);
       g_authConfiguredCache = p.getString("admintoken", "").length() > 0; p.end(); }
     ctx.authConfigured = []() -> bool { return g_authConfiguredCache; };
-    ctx.appState = []() -> std::string {
-        switch (g_phase) {
-            case AppPhase::Ready:         return g_degraded ? "readyDegraded" : "ready";
-            case AppPhase::Parking:       return "parking";
-            case AppPhase::Reconfiguring: return "reconfiguring";
-            case AppPhase::ConfigSafe:    return "configSafe";
-            case AppPhase::Boot:          break;
-        }
-        return "boot";
-    };
+    ctx.appState = []() -> std::string { return appStateStr(); };
+    ctx.diagnosticsJson = []() -> std::string { return buildDiagnosticsJson(); };
     ctx.readyStrings = []() -> int {
         if (g_phase != AppPhase::Ready) return 0;
         int n = 0;
@@ -965,6 +1039,11 @@ void loop() {
     uint32_t nowUs = micros();
     uint32_t nowMs = millis();
 
+    // Scheduler latency / jitter: observe the loop() period (diagnostics, P2.19).
+    static uint32_t lastLoopUs = 0;
+    if (lastLoopUs != 0) g_diag.observeSchedulerPeriodUs(nowUs - lastLoopUs);
+    lastLoopUs = nowUs;
+
     g_net.tick(nowMs);
 
     // SAFETY FIRST: hardware E-stop (active-low), then the web/CC STOP flag.
@@ -993,6 +1072,7 @@ void loop() {
         g_instrument.panic();
         g_safety.recordFault("wifi", "Wi-Fi link lost — pending commands cancelled", nowMs);
     }
+    if (!wasConnected && nowConnected) g_diag.addWifiReconnect();  // link-up (diagnostics)
     wasConnected = nowConnected;
 
     // Deliver any scheduled test-note Note Offs that are due.
@@ -1011,6 +1091,7 @@ void loop() {
 
     // Ingest Wi-Fi MIDI (bounded per tick).
     g_midi.poll(nowUs);
+    g_diag.addMidiEvents(static_cast<uint32_t>(g_midi.events().size()));  // diagnostics
     for (auto& e : g_midi.events()) {
         g_web.broadcastMidi(e);
         if (g_phase == AppPhase::Ready) g_instrument.handleEvent(e, nowUs);
@@ -1037,7 +1118,10 @@ void loop() {
     if (g_phase == AppPhase::Ready && nowMs - lastPcaCheckMs >= 500) {
         lastPcaCheckMs = nowMs;
         uint8_t failedBoard = 0xFF;
-        if (!g_servos.pcaHealthy(failedBoard)) {
+        bool healthy = g_servos.pcaHealthy(failedBoard);
+        g_pcaHealthy = healthy;                                   // cache for diagnostics
+        g_pcaFailedBoard = healthy ? 0xFF : failedBoard;
+        if (!healthy) {
             std::string where = ServoBank::boardName(failedBoard);
             bool isolated = false;
             for (size_t i = 0; i < g_instrument.stringCount() &&
@@ -1067,6 +1151,7 @@ void loop() {
     static uint32_t lastStatusMs = 0;
     if (nowMs - lastStatusMs >= 100) {
         lastStatusMs = nowMs;
+        feedDiagnostics();  // refresh the telemetry snapshot from the loop side (P2.19)
         g_web.refreshStatus();
         g_web.broadcastStatus();
     }

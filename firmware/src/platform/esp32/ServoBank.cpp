@@ -147,6 +147,7 @@ ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
 #else
     (void)us;
 #endif
+    ++moveCount_;  // a servo pulse actually reached an output (diagnostics, P2.19)
     return ActuatorResult::Ok;
 }
 
