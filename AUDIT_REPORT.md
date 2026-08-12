@@ -203,10 +203,18 @@ hostcheck + servobankcheck), `profiles` (lint JSON + profilecheck), `web-js`
 (`node --check`), `firmware` (matrice 3 cartes + taille flash/RAM). Badge CI réel
 dans les README, nombre de tests codé en dur supprimé.
 
-### P2.17 — Réduire main.cpp (NOT STARTED)
-Amorces extraites (`serviceParking`, `hardStopAll`, `actOk`, `serviceHotspotRequests`)
-mais pas de classes `ApplicationRuntime` / `PlaybackScheduler` / `ActuatorManager` /
-`MidiManager`. La FSM mécanique de `tickString()` reste dans `main.cpp`.
+### P2.17 — Réduire main.cpp (NOT STARTED — mais amorcé par composants)
+*Déjà extrait en composants* (l'approche « par composants » demandée) : **`ActuatorManager`**
+(P1.6), **`MidiTransport`** + liste de transports façon MidiManager (P1.7),
+**`Diagnostics`** (P2.19), et des fonctions de service nommées (`serviceParking`,
+`hardStopAll`, `actOk`, `appStateStr`, `feedDiagnostics`, `serviceHotspotRequests`).
+*Reste — le gros morceau* : sortir la FSM mécanique de `tickString()` dans un
+`PlaybackScheduler`, puis `ApplicationRuntime`/`CommandDispatcher`/`ProfileManager`/
+`SafetySupervisor`. **Délibérément non fait dans cette passe** : `tickString()` est le
+code le plus critique en timing, profondément couplé aux globals, et seulement
+compilable (pas de test natif runtime). La mission demande explicitement d'« éviter une
+grosse réécriture unique » — cette extraction mérite sa propre passe dédiée avec
+validation au banc, pas un big-bang non testé au milieu du reste.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
