@@ -258,7 +258,7 @@ suivant. Vérifié en vidant le cache puis en relançant les deux harnais (verts
 
 ### P2.17 — Réduire main.cpp (PARTIAL)
 *Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
-(le point explicite de P2.17) — `main.cpp` passe de **1177 à 758 lignes (−36 %)**. La
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 692 lignes (−41 %)**. La
 FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
 contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
@@ -272,19 +272,24 @@ kernels supplémentaires ont été sortis **dans `core/app/`, host-testés** : *
 + `appPhaseName()` (la table phase→label que l'UI et `/api/diagnostics` consomment,
 pinnée) et **`Readiness`** + `applyRuntimeFaults()` (la règle *ready/degraded* de P1.5 —
 une corde n'est prête que si activée **et** non-faultée ; l'instrument est *degraded* dès
-qu'une corde activée disparaît), plus des fonctions de service nommées. *Reste* :
-`ApplicationRuntime` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
-devienne `app.begin()/app.tick()`). **Choix assumé** : le reste des fonctions libres
-(`armInstrument`/`serviceParking`/`doPanic`/`doEmergencyStop`/`faultRuntimeAxis`) est
-le cœur **stateful** de la séquence d'armement/panic (P0) ; le mettre derrière une
-classe impose d'injecter ~8 globals dans exactement le code critique-sécurité qu'on ne
-doit pas déstabiliser — gain de maintenabilité (priorité 6) contre risque sur la
-sécurité (priorité 1). Extraction arrêtée là, volontairement. La FSM déplacée reste
-compile-vérifiée (Arduino-gated), à valider au banc.
+qu'une corde activée disparaît), plus des fonctions de service nommées. Enfin, la
+**`SafetySupervisor`** regroupe le cœur **stateful** de la séquence P0 (`arm`,
+`serviceParking`, `reset`, `hardStop`, `panic`, `emergencyStop`, `faultAxis`,
+`locked`) — corps **déplacés verbatim** (les grosses méthodes aliasent leurs
+collaborateurs aux anciens noms `g_*`), les fonctions libres de `main.cpp` devenant de
+simples délégués → **tous les sites d'appel inchangés**. Elle **ne possède aucun état** :
+elle référence via `bind()` les mêmes `SafetyManager` / pile d'actionneurs / phase /
+`degraded` / vecteur de faults / pin E-stop / profil que tous les autres lecteurs, et
+3 étapes transverses (rebuild+notify capabilities, cleanup hard-stop = test-notes +
+swap en attente) sont injectées en callbacks. **Non validé au banc** : comme la FSM,
+c'est du code Arduino-gated **compile-vérifié seulement** (hostcheck) ; l'équivalence
+est garantie *par construction* (verbatim + sites inchangés), pas prouvée sur matériel.
+*Reste* : `ApplicationRuntime` / `ProfileManager` (pour que `main.cpp` devienne
+`app.begin()/app.tick()`) — étape suivante, moins critique.
 *Fichiers* : `platform/esp32/PlaybackScheduler.h`, `platform/esp32/CommandDispatcher.h`,
-`core/util/CommandResultRing.h`, `core/util/HoldButton.h`,
-`core/configuration/ProfileActivation.h`, `core/app/AppPhase.h`, `core/app/Readiness.h`
-(nouveaux), `main.cpp`.
+`platform/esp32/SafetySupervisor.h`, `core/util/CommandResultRing.h`,
+`core/util/HoldButton.h`, `core/configuration/ProfileActivation.h`,
+`core/app/AppPhase.h`, `core/app/Readiness.h` (nouveaux), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
@@ -346,9 +351,11 @@ nativement) ou des items PARTIAL/NOT STARTED.
 - l'in-rush réel d'un accord même avec governor (P1.6 non étendu aux plucks) ;
 - la détection I2C d'un PCA débranché *sous tension* (P1.5) sur le vrai bus ;
 - l'endurance MIDI / 6 cordes simultanées ;
-- que l'extraction `PlaybackScheduler` (P2.17) ne change rien au timing réel — la
-  logique est prouvée byte-for-byte identique et compile, mais elle n'a **pas** de test
-  natif runtime (Arduino-gated) : à reconfirmer au banc ;
+- que les extractions `PlaybackScheduler` **et `SafetySupervisor`** (P2.17) ne changent
+  rien au comportement réel — corps déplacés verbatim, sites d'appel inchangés, aucun
+  état déplacé, et ça compile ; mais c'est du code Arduino-gated **sans test natif
+  runtime** : la séquence armement/parking/hardStop/panic/E-stop est à **reconfirmer au
+  banc** (c'est du P0, l'équivalence est garantie par construction, pas prouvée) ;
 - que l'étalement des dampers de relâche d'accord (P1.6, `pendingDamper`, compile-
   vérifié) reste musicalement transparent sous charge réelle.
 
@@ -368,9 +375,9 @@ non-régression à chaque étape) :
   rattacher les configs transports/sécurité. **P1.11** (reste) : le gate UDP
   (`UdpSourceGate`) est fait et host-testé ; reste à câbler sa posture au mode
   Performance via le `DeviceConfig` runtime, et à valider sur réseau réel.
-- **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, `AppPhase`, `Readiness`
-  et les utilitaires sont sortis (main.cpp −36 %). Le reste (`SafetySupervisor` /
-  `ApplicationRuntime` autour de la séquence armement/panic stateful) demande d'injecter
-  ~8 globals dans le code critique-sécurité P0 : à faire **un composant à la fois avec
-  banc d'essai**, en pesant le gain maintenabilité contre le risque sécurité (cf. §3
-  P2.17). Non entamé volontairement pour ne pas déstabiliser l'armement/panic éprouvé.
+- **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, **`SafetySupervisor`**,
+  `AppPhase`, `Readiness` et les utilitaires sont sortis (**main.cpp −41 %**). La
+  `SafetySupervisor` (séquence armement/panic P0) a été extraite **verbatim, sites
+  d'appel inchangés, sans déplacer d'état** — donc compile-vérifiée (Arduino-gated),
+  **à revalider au banc**. Reste `ApplicationRuntime` / `ProfileManager` (pour aller
+  vers `app.begin()/app.tick()`), moins critique.
