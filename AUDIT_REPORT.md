@@ -22,7 +22,7 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P1.4 | API homogène `ActuatorResult` (ServoBank) | **DONE** | `f15b6a8` |
 | P1.5 | Perte PCA locale (fault des cordes concernées, pas de panic global) | **DONE** | `f30a5cb` |
 | P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **DONE** | (voir historique) |
-| P1.7 | Abstraction des transports MIDI (UDP/USB/DIN/BLE) | **PARTIAL** | (voir historique) |
+| P1.7 | Abstraction des transports MIDI (UDP+DIN fonctionnels ; USB/BLE restants) | **PARTIAL** | (voir historique) |
 | P1.8 | Cohérence doc CC120/CC123 (≠ panic verrouillé) | **DONE** | `584895f` |
 | P1.9 | `staticIp` : implémenter ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
@@ -136,15 +136,25 @@ vérifiée** (FSM Arduino-gated) — à reconfirmer au banc, comme le reste de l
 
 ### P1.7 — Transports MIDI (PARTIAL)
 *Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/
-name` ; `MidiWifi` s'y conforme (**MidiUdpTransport**, source `WifiUdp` déjà tagguée) ;
-squelette **`MidiUsbTransport`** (S3, poll no-op documenté) ; `main.cpp` alimente le
-**même** `InstrumentController` depuis une **liste de transports** (`g_transports`), et
-`MidiEvent.source` identifie l'entrée. *Test* : `test_transport.cpp` prouve que deux
-transports alimentent un seul contrôleur avec les bons tags. *Reste* : implémentation
-fonctionnelle USB natif (TinyUSB S3), puis DIN UART / BLE, et le SysEx multi-transport
-(la réponse UDP est adressée par IP, donc encore sur le transport concret).
-*Fichiers* : `core/midi/MidiTransport.h` (nouveau), `MidiUsbTransport.h` (nouveau),
-`MidiWifi.*`, `main.cpp`.
+name` ; `MidiWifi` s'y conforme (**MidiUdpTransport**, source `WifiUdp` déjà tagguée,
+**fonctionnel**) ; **`MidiDinTransport`** (DIN-5/TRS sur UART) est **fonctionnel** — la
+logique octet→événement est complète : il lit un `Stream*` à 31250 baud (lecture bornée
+par tick pour ne pas retarder la boucle de contrôle / l'E-stop) et alimente le
+`MidiParser` (source `Din`), exactement comme l'UDP ; il ne lui manque qu'un `Stream`
+(pin RX DIN) passé à `begin()` — câblé **inerte** (`begin(nullptr)`) en attendant qu'une
+config de pin l'expose ; squelette **`MidiUsbTransport`** (S3, poll no-op documenté,
+attend TinyUSB) ; `main.cpp` alimente le **même** `InstrumentController` depuis une
+**liste de transports** (`g_transports = {UDP, USB, DIN}`), et `MidiEvent.source`
+identifie l'entrée. *Test* : `test_transport.cpp` prouve que plusieurs transports
+alimentent un seul contrôleur avec les bons tags ; la branche `ARDUINO` de
+`MidiDinTransport` (lecture `Stream`) est compilée par hostcheck (`-DARDUINO=300`).
+*Reste* : implémentation fonctionnelle USB natif (TinyUSB S3), BLE, la liaison d'un
+UART réel au DIN (pin RX dans la future `DeviceConfig`), et le SysEx multi-transport
+(la réponse UDP est adressée par IP, donc encore sur le transport concret). *Non validé
+physiquement* : la réception DIN réelle (opto-coupleur 6N138 + UART) reste à valider au
+banc — seule la logique de décodage est testée en hôte.
+*Fichiers* : `core/midi/MidiTransport.h` (nouveau), `MidiDinTransport.h` (nouveau),
+`MidiUsbTransport.h` (nouveau), `MidiWifi.*`, `main.cpp`.
 
 ### P1.8 — Doc CC120/CC123 (DONE)
 Le code faisait déjà le standard MIDI (All Sound Off / All Notes Off, l'instrument
@@ -301,8 +311,10 @@ non-régression à chaque étape) :
 - **P1.6** : fait (attaque + relâche d'accord gouvernées). Au banc : confirmer que
   l'étalement des dampers ne crée pas d'artefact audible et évaluer si le strum-lift
   mérite d'être gouverné (gain in-rush vs. risque de timing).
-- **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
-  `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
+- **P1.7** (reste) : UDP + DIN fonctionnels (logique complète) ; lier un vrai UART au
+  DIN (pin RX dans `DeviceConfig`) et valider la réception au banc (opto 6N138) ;
+  implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette `MidiUsbTransport`,
+  puis BLE ; généraliser le SysEx multi-transport.
 - **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
   ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
   transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.

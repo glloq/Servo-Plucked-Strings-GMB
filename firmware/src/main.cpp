@@ -42,6 +42,7 @@
 #include "core/util/HoldButton.h"
 #include "core/midi/MidiTransport.h"
 #include "platform/esp32/CommandDispatcher.h"
+#include "platform/esp32/MidiDinTransport.h"
 #include "platform/esp32/MidiUsbTransport.h"
 #include "platform/esp32/MidiWifi.h"
 #include "platform/esp32/Net.h"
@@ -65,8 +66,9 @@ PlaybackScheduler g_scheduler;  // P2.17: the per-string mechanical FSM (was tic
 Net g_net;
 MidiWifi g_midi;                 // Wi-Fi UDP transport (spec §8.3, priority 1)
 MidiUsbTransport g_usbMidi;      // native USB-MIDI (S3) — P1.7 skeleton, inert until wired
-// Every MIDI transport feeds the SAME InstrumentController (P1.7). Add DIN/BLE here.
-MidiTransport* const g_transports[] = {&g_midi, &g_usbMidi};
+MidiDinTransport g_dinMidi;      // DIN-5/TRS UART — P1.7 functional, inert until a RX pin is bound
+// Every MIDI transport feeds the SAME InstrumentController (P1.7). Add BLE here.
+MidiTransport* const g_transports[] = {&g_midi, &g_usbMidi, &g_dinMidi};
 WebApi g_web;
 Diagnostics g_diag;  // runtime telemetry (P2.19)
 bool g_pcaHealthy = true;          // last loop-side PCA probe result (for diagnostics)
@@ -549,6 +551,7 @@ void setup() {
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
     g_usbMidi.begin();  // P1.7: inert until wired to native USB-MIDI (no-op elsewhere)
+    g_dinMidi.begin(nullptr);  // P1.7: byte->event logic ready; inert until a DIN RX UART is bound here
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
     g_bootHold.configure(kBootHoldMs);
 
