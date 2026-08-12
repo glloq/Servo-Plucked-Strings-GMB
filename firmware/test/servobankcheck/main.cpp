@@ -66,6 +66,33 @@ int main() {
           "bus-1 servo -> 0x42 channel 5");
   }
 
+  // --- P0.2/P0.3: controlled-park helpers -----------------------------------
+  // moveAllToRest() drives every servo to its REST pulse (fingers up) with outputs
+  // kept live — phase 1 of both the arming park and a controlled park.
+  g_pwmLog.clear();
+  bank.moveAllToRest();
+  CHECK(g_pwmLog.size() == 2, "moveAllToRest commands both servos");
+  bool allRest = !g_pwmLog.empty();
+  for (const auto& w : g_pwmLog)
+    if (w.off || w.us != 1000) allRest = false;  // restUs == 1000 for both
+  CHECK(allRest, "moveAllToRest writes the rest pulse to every servo");
+
+  // parkDurationMs() is the mechanical wait an arming/controlled park must allow:
+  // max(travelMs + settleMs) across the ENABLED servos, ignoring disabled ones.
+  {
+    std::vector<ServoConfig> timed = {
+        pca("finger", 0, 0, 0, 0),   // travel 120 + settle 30 = 150 (defaults)
+        pca("finger", 1, 0, 0, 1),   // overridden below to 300 + 40 = 340
+        pca("finger", 2, 0, 0, 2),   // disabled below — must be ignored
+    };
+    timed[1].travelMs = 300; timed[1].settleMs = 40;   // slowest -> 340
+    timed[2].travelMs = 9000; timed[2].settleMs = 9000;
+    timed[2].enabled = false;                          // disabled: excluded
+    ServoBank b2;
+    b2.begin(timed, 40, 41, 47);
+    CHECK(b2.parkDurationMs() == 340, "parkDurationMs = max(travel+settle) of enabled servos");
+  }
+
   std::printf(g_fail ? "\nSERVOBANKCHECK FAILED (%d)\n" : "\nservobankcheck OK\n", g_fail);
   return g_fail ? 1 : 0;
 }

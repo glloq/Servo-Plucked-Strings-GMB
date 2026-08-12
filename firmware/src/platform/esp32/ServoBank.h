@@ -68,7 +68,23 @@ public:
 
     // Hardware safety: enable/disable all PCA outputs via /OE.
     void outputEnable(bool on);
-    void neutraliseAll();
+
+    // Immediate HARD STOP (E-stop / panic / major hardware fault): PCA /OE OFF and
+    // direct-GPIO PWM OFF at once, no mechanical wait, all runtime state cleared.
+    // This must never depend on a mechanical movement completing first (spec P0 §21.2).
+    void hardStop();
+
+    // Controlled park, phase 1: command every servo to its REST position with the
+    // outputs kept ENABLED (fingers up, strikers home). Non-blocking — the caller
+    // times the travel with parkDurationMs(), then either arms (keep outputs live) or
+    // calls hardStop() to cut power once the servos have settled (normal stop /
+    // profile change / reconfiguration).
+    void moveAllToRest();
+
+    // Longest mechanical settle across all enabled servos: max(travelMs + settleMs).
+    // The wait a controlled park / arming must allow after moveAllToRest() before the
+    // servos are guaranteed home.
+    uint32_t parkDurationMs() const;
 
     // Lookup by role + string (-1 for shared roles). Returns -1 if absent.
     int servoIndex(const std::string& function, int stringIndex) const;

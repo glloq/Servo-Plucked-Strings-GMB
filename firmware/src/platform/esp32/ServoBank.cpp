@@ -77,7 +77,7 @@ void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t
 #else
     (void)sda; (void)scl; (void)sda2; (void)scl2;
 #endif
-    neutraliseAll();
+    hardStop();
 }
 
 bool ServoBank::attachDirect(int index) {
@@ -287,9 +287,11 @@ bool ServoBank::pcaHealthy() const {
 #endif
 }
 
-void ServoBank::neutraliseAll() {
+void ServoBank::hardStop() {
     // Immediate hard cut: PCA via /OE, direct servos by cutting their PWM now
-    // (do not wait for settleMs), regardless of disableAtRest.
+    // (do not wait for settleMs), regardless of disableAtRest. Used for E-stop /
+    // panic / major fault and as the final cut of a controlled park. Never gated on
+    // a mechanical movement completing (spec P0 §21.2).
     outputEnable(false);
     for (int i = 0; i < (int)servos_.size(); ++i) {
         if (servos_[i].source == ServoSource::DirectGpio)
@@ -298,6 +300,23 @@ void ServoBank::neutraliseAll() {
             toRest(i);
         if (i < (int)rt_.size()) rt_[i] = Rt{};
     }
+}
+
+void ServoBank::moveAllToRest() {
+    // Controlled park phase 1: drive every servo to rest with outputs kept live. Each
+    // release() writes the rest pulse and lets update()/disableAtRest cut idle PWM in
+    // the normal way; the caller waits parkDurationMs() for the travel to finish.
+    for (int i = 0; i < (int)servos_.size(); ++i) release(i);
+}
+
+uint32_t ServoBank::parkDurationMs() const {
+    uint32_t w = 0;
+    for (const auto& s : servos_) {
+        if (!s.enabled) continue;
+        uint32_t t = static_cast<uint32_t>(s.travelMs) + s.settleMs;
+        if (t > w) w = t;
+    }
+    return w;
 }
 
 int ServoBank::servoIndex(const std::string& function, int stringIndex) const {

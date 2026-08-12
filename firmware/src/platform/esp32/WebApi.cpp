@@ -82,7 +82,9 @@ bool fingerDown(StringState s, bool openString) {
 
 const char* safetyStateName(SafetyState s) {
     switch (s) {
+        case SafetyState::ConfigSafe:    return "configSafe";
         case SafetyState::PowerOnSafe:   return "powerOnSafe";
+        case SafetyState::Parking:       return "parking";
         case SafetyState::Armed:         return "armed";
         case SafetyState::Panic:         return "panic";
         case SafetyState::EmergencyStop: return "emergencyStop";

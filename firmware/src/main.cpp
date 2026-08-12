@@ -56,7 +56,12 @@ Net g_net;
 MidiWifi g_midi;
 WebApi g_web;
 
-enum class AppPhase { Boot, Reconfiguring, Ready };
+// ConfigSafe : no valid profile — actuators locked, web/net up (P0 boot-safe).
+// Boot       : transient power-on safe, before the arming sequence starts.
+// Parking    : profile validated, servos travelling to rest — no MIDI/test yet (P0).
+// Reconfiguring : an old profile's fingers are lifting before a swap.
+// Ready      : armed and playable.
+enum class AppPhase { ConfigSafe, Boot, Parking, Reconfiguring, Ready };
 AppPhase g_phase = AppPhase::Boot;
 bool g_degraded = false;  // Ready but with one or more strings disabled by a fault
 
@@ -251,7 +256,7 @@ void notifyCapabilitiesChanged() {
     if (!msg.empty()) g_midi.notifyLastSender(msg.data(), msg.size());
 }
 
-void neutraliseAll();  // fwd
+void hardStopAll();  // fwd (immediate, no mechanical wait — panic/E-stop/fault)
 
 // Lift the finger currently pressed on a string (if any). Returns its travel time
 // so the caller can wait for it to physically lift before pressing the next one.
@@ -280,7 +285,7 @@ void faultRuntimeAxis(size_t i, const char* reason, uint32_t nowMs) {
     int working = rebuildRuntimeCapabilities();
     notifyCapabilitiesChanged();
     if (working <= 0) {
-        neutraliseAll();
+        hardStopAll();
         g_safety.panic("no operational strings remain", nowMs);
     }
 }
@@ -290,9 +295,16 @@ bool safetyLocked() {
     return s == SafetyState::Panic || s == SafetyState::EmergencyStop;
 }
 
-// Park every finger at rest and arm for play. No homing: servos have known
-// positions. Refuses if a panic/E-stop is latched, the profile is invalid, or a
-// servo/PCA channel could not attach or respond (spec §13/§21).
+// Begin the arming sequence (spec §13/§21, P0): validate, then PARK every servo at
+// rest with the outputs live and wait the mechanical settle before declaring Ready.
+// No homing: servos have known positions. Refuses (leaving the caller to fall back
+// to a safe state) if a panic/E-stop is latched, the profile is invalid, or a
+// servo/PCA channel could not attach or respond.
+//
+// This only STARTS parking (phase -> Parking); serviceParking() finishes it once the
+// mechanical time has elapsed (Parking -> Ready). No MIDI note or mechanical test can
+// run until then — the note engine and doTestServo both require actuatorsAllowed(),
+// which is false throughout Parking.
 bool armInstrument(uint32_t nowMs) {
     if (safetyLocked()) return false;
     if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) {
@@ -304,7 +316,7 @@ bool armInstrument(uint32_t nowMs) {
         g_safety.recordFault("attach", "a servo/PCA9685 could not attach or respond", nowMs);
         return false;
     }
-    g_safety.reset();  // -> PowerOnSafe
+    g_safety.reset();  // -> PowerOnSafe (clean slate before parking)
     g_degraded = false;
     g_governor.reset();
     for (size_t i = 0; i < g_profile.strings.size(); ++i) {
@@ -312,11 +324,21 @@ bool armInstrument(uint32_t nowMs) {
             g_instrument.string(i).disable();  // a disabled string never plays
         if (i < g_currentFinger.size()) g_currentFinger[i] = -1;
     }
-    g_servos.neutraliseAll();     // all servos to rest (fingers up)
-    g_servos.outputEnable(true);  // keep outputs live for play
-    g_phase = AppPhase::Ready;
-    g_safety.arm(true, true);     // profile already validated
+    // Parking: outputs live, drive every servo to rest, then wait max(travel+settle)
+    // before arming so nothing is commanded to play while a finger is still moving.
+    g_servos.outputEnable(true);
+    g_servos.moveAllToRest();
+    uint32_t parkMs = g_servos.parkDurationMs();
+    if (!g_safety.beginParking(true, true, parkMs, nowMs)) return false;
+    g_phase = AppPhase::Parking;
     return true;
+}
+
+// Finish the arming sequence: once the mechanical settle has elapsed, Parking -> Ready
+// and the note engine is allowed to run. Called every loop; a no-op outside Parking.
+void serviceParking(uint32_t nowMs) {
+    if (g_phase != AppPhase::Parking) return;
+    if (g_safety.tickParking(nowMs)) g_phase = AppPhase::Ready;  // Armed
 }
 
 // Explicit recovery after a panic / E-stop.
@@ -335,9 +357,12 @@ bool doReset(uint32_t nowMs) {
     return armInstrument(nowMs);
 }
 
-void neutraliseAll() {
+// Immediate hard stop (E-stop / panic / major fault): cut PCA /OE and direct PWM at
+// once with no mechanical wait, cancel all commands, lock the state. Never gated on a
+// servo movement completing (spec P0 §21.2) — that is what controlledPark is for.
+void hardStopAll() {
     g_instrument.panic();
-    g_servos.neutraliseAll();
+    g_servos.hardStop();
     g_governor.reset();
     for (auto& s : g_sched) s = StringSched{};
     for (auto& f : g_currentFinger) f = -1;
@@ -348,13 +373,13 @@ void neutraliseAll() {
 }
 
 void doPanic() {
-    neutraliseAll();
+    hardStopAll();
     if (g_safety.state() != SafetyState::EmergencyStop)
         g_safety.panic("web/CC panic", millis());
 }
 
 void doEmergencyStop() {
-    neutraliseAll();
+    hardStopAll();
     g_safety.emergencyStop(millis());
 }
 
@@ -371,16 +396,13 @@ bool doActivateProfile(const Profile& p, uint32_t nowMs) {
     g_safety.reset();
     g_phase = AppPhase::Reconfiguring;
 
-    // Drive every current servo to rest (fingers up) before the old config is
-    // destroyed, and wait for the slowest to travel + settle.
+    // Controlled park (spec P0 §21): drive every current servo to rest (fingers up)
+    // with the outputs kept live before the old config is destroyed, and wait for the
+    // slowest to travel + settle. The final power cut happens in phase 2, AFTER the
+    // mechanical wait — never before (that is hardStop's job, not a profile change).
     g_servos.outputEnable(true);
-    uint32_t wait = 0;
-    for (size_t i = 0; i < g_servos.count(); ++i) {
-        g_servos.release(static_cast<int>(i));
-        uint32_t w = static_cast<uint32_t>(g_servos.travelMs(static_cast<int>(i))) +
-                     g_servos.settleMs(static_cast<int>(i));
-        if (w > wait) wait = w;
-    }
+    g_servos.moveAllToRest();
+    uint32_t wait = g_servos.parkDurationMs();
     for (auto& f : g_currentFinger) f = -1;
     delete g_pendingProfile;
     g_pendingProfile = new Profile(p);
@@ -388,11 +410,12 @@ bool doActivateProfile(const Profile& p, uint32_t nowMs) {
     return true;
 }
 
-// Phase 2: once the old fingers have lifted, tear down and swap in the new one.
+// Phase 2: once the old fingers have lifted (controlled park complete), cut power,
+// tear down, and swap in the new profile.
 void servicePendingActivation(uint32_t nowMs) {
     if (!g_pendingProfile) return;
     if (static_cast<int32_t>(nowMs - g_pendingActivateAtMs) < 0) return;
-    g_servos.neutraliseAll();
+    g_servos.hardStop();  // controlled park done: safe to cut before teardown
     {
         StateGuard lock;
         g_profile = *g_pendingProfile;
@@ -806,12 +829,17 @@ void setup() {
             "LittleFS unmountable — profiles unavailable; POST /api/storage/format "
             "to reformat", millis());
     }
-    // Never configure GPIO / I2C / PCA / LEDC from a profile that fails validation:
-    // fall back to the safe default (§21.1).
-    if (!g_storage.load(g_storage.startupSlot(), g_profile) ||
-        !ProfileValidator::isActivatable(g_profile)) {
-        g_profile = Profile::makeDefault("Ukulele", 4, {67, 60, 64, 69}, 12);
-    }
+    // Never configure GPIO / I2C / PCA / LEDC from a profile that fails validation.
+    // P0 boot-safe: if none loads or it is invalid we do NOT fabricate and arm a
+    // default profile — that could drive a real machine's actuators to positions that
+    // don't match its wiring. Instead we stay in CONFIG_SAFE with an EMPTY profile
+    // (no servos, no actuator pins → nothing is ever driven) and bring up only the
+    // network + web UI so the user can build or load a valid profile and arm it
+    // explicitly. The Ukulele template stays available in the UI, never auto-applied.
+    bool haveValidProfile =
+        g_storage.load(g_storage.startupSlot(), g_profile) &&
+        ProfileValidator::isActivatable(g_profile);
+    if (!haveValidProfile) g_profile = Profile();  // empty ⇒ no actuators configured
     {
         uint64_t mac = ESP.getEfuseMac();
         uint8_t id[5];
@@ -883,8 +911,13 @@ void setup() {
       g_authConfiguredCache = p.getString("admintoken", "").length() > 0; p.end(); }
     ctx.authConfigured = []() -> bool { return g_authConfiguredCache; };
     ctx.appState = []() -> std::string {
-        if (g_phase == AppPhase::Ready) return g_degraded ? "readyDegraded" : "ready";
-        if (g_phase == AppPhase::Reconfiguring) return "reconfiguring";
+        switch (g_phase) {
+            case AppPhase::Ready:         return g_degraded ? "readyDegraded" : "ready";
+            case AppPhase::Parking:       return "parking";
+            case AppPhase::Reconfiguring: return "reconfiguring";
+            case AppPhase::ConfigSafe:    return "configSafe";
+            case AppPhase::Boot:          break;
+        }
         return "boot";
     };
     ctx.readyStrings = []() -> int {
@@ -904,9 +937,19 @@ void setup() {
     ctx.onReset = []() -> uint32_t { return enqueueCommand(AppCommand{CmdType::Reset}); };
     g_web.begin(ctx, 80);
 
-    // No homing: park the fingers and arm straight away. armInstrument() refuses if
-    // the profile is invalid or a channel failed to attach, leaving us safely in Boot.
-    armInstrument(millis());
+    // No homing: begin the parking sequence and arm — but ONLY when a valid profile
+    // was loaded. With no valid profile we latch CONFIG_SAFE: outputs stay disabled,
+    // no actuator can be driven and no MIDI reaches the mechanics; the web UI is used
+    // to build/load a profile and arm it explicitly (P0 boot-safe).
+    if (haveValidProfile) {
+        armInstrument(millis());  // -> Parking; loop() finishes it (-> Ready)
+    } else {
+        g_safety.configSafe();
+        g_phase = AppPhase::ConfigSafe;
+        g_safety.recordFault("config",
+            "no valid profile at boot — CONFIG_SAFE; actuators disabled until a "
+            "profile is loaded and armed from the web UI", millis());
+    }
     g_web.refreshStatus();
 }
 
@@ -931,6 +974,7 @@ void loop() {
 
     if (!panicked) drainCommands(nowMs);
     servicePendingActivation(nowMs);
+    serviceParking(nowMs);  // Parking -> Ready once the mechanical settle has elapsed
 
     // Wi-Fi loss policy: cancel pending commands and release notes, stay armed.
     static bool wasConnected = false;

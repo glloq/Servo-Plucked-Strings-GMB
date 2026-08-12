@@ -10,22 +10,73 @@
 ## 1. Séquence de démarrage
 
 ```
-power-on safe  →  valider le profil  →  parquer tous les doigts au repos  →  armé
+power-on safe
+ └─ charger le profil de démarrage
+     ├─ absent / invalide → CONFIG_SAFE  (voir §1.1)
+     └─ valide → Parking → Armed → Ready (voir §1.2)
 ```
 
-Aucun homing. Au boot, tous les servos sont mis au repos (doigts levés) via le /OE et
-`neutraliseAll()`, puis l'instrument est armé si le profil est valide et que tous les
-canaux servo/PCA répondent. Un profil invalide ou un PCA absent laisse le système en
-état **Boot** (non armé), sans rien piloter.
+Aucun homing : les servos ont des positions connues.
+
+### 1.1 CONFIG_SAFE — aucun profil valide
+
+Si aucun profil valide ne se charge au démarrage, le firmware **n'invente jamais** un
+profil par défaut et **ne l'arme pas** : conduire une vraie machine avec une
+configuration qui ne correspond pas à son câblage est dangereux. Il reste en
+**CONFIG_SAFE** :
+
+- profil actif **vide** → aucun servo, aucune broche d'actionneur configurée ;
+- `/OE` des PCA désactivé, PWM GPIO coupé ;
+- **aucun MIDI** ne peut commander les actionneurs (`actuatorsAllowed()` = faux) ;
+- réseau + interface web **disponibles** pour construire ou charger un profil.
+
+Le modèle *Ukulele* reste proposé comme **template** dans l'interface, mais n'est
+jamais appliqué automatiquement à une machine. On sort de CONFIG_SAFE en chargeant un
+profil valide et en l'**activant explicitement**.
+
+### 1.2 Parking / Arming — profil valide
+
+L'armement n'est **pas** instantané : après validation, on passe par une vraie phase
+**Parking** avant `Ready` :
+
+```
+PowerOnSafe → Parking (sorties activées, tous les servos commandés au repos)
+            → attente mécanique = max(travelMs + settleMs) sur les servos concernés
+            → Armed → Ready
+```
+
+Pendant **Parking**, aucune note MIDI ne peut être jouée et aucun test mécanique ne
+peut démarrer (l'état est visible dans le statut web/API : `parking`). Un profil
+invalide ou un PCA absent laisse le système non armé, sans rien piloter.
 
 ## 2. Arrêt d'urgence & panique
 
-- **E-stop matériel** (broche `ESTOP`, actif bas) : neutralise tout immédiatement et
-  verrouille l'état `EmergencyStop`. Il est testé en tête de boucle, sur le niveau
-  brut, avant toute commande.
-- **Panique logicielle** : `POST /api/panic`, ou les messages MIDI CC120 / CC123
-  (all sound / all notes off), relâchent les notes, coupent les servos et repassent en
-  Boot. Il faut ensuite un **reset** explicite (`POST /api/reset`) pour ré-armer.
+On distingue **strictement** deux opérations (jamais l'une déguisée en l'autre) :
+
+- **`hardStop` — arrêt dur immédiat** (E-stop, panique, faute matérielle majeure) :
+  `/OE` PCA coupé et PWM GPIO coupé **tout de suite**, commandes annulées, état
+  verrouillé, **sans aucune attente mécanique**. Un vrai E-stop ne dépend jamais de
+  l'achèvement d'un mouvement.
+  - **E-stop matériel** (broche `ESTOP`, actif bas) : `hardStop` + état
+    `EmergencyStop`, testé en tête de boucle sur le niveau brut, avant toute commande.
+  - **Panique logicielle** : `POST /api/panic` → `hardStop` + état `Panic`. Il faut
+    ensuite un **reset** explicite (`POST /api/reset`) pour ré-armer.
+- **`controlledPark` — parking contrôlé** (changement de profil, arrêt normal,
+  reconfiguration) : on commande les servos au repos, on **attend** `travel + settle`,
+  puis on coupe les sorties. C'est un arrêt *propre*, pas un E-stop.
+
+### 2.1 CC120 / CC123 ne sont pas une panique
+
+`CC120` (All Sound Off) et `CC123` (All Notes Off) appliquent la sémantique **MIDI
+standard** et **ne verrouillent pas** l'instrument :
+
+- **CC120** coupe immédiatement toutes les notes en cours (ignore le sustain) ;
+- **CC123** relâche les notes comme si l'on levait les touches (le sustain est honoré).
+
+Dans les deux cas l'instrument **reste armé (`Ready`)** et rejoue la note suivante
+sans reset. Ce ne sont **pas** des équivalents d'un E-stop/panique verrouillé — une
+vraie panique reste une commande distincte (`POST /api/panic` ou la broche `ESTOP`).
+
 - **Perte du Wi-Fi** : les commandes en attente sont annulées et les notes relâchées
   (l'instrument reste armé).
 
@@ -36,8 +87,8 @@ canaux servo/PCA répondent. Un profil invalide ou un PCA absent laisse le syst�
 
 ## 3. Neutralisation des servos
 
-- Le `/OE` des PCA9685 (actif bas) coupe **toutes** les sorties PCA d'un coup.
-- Les servos sur GPIO direct sont détachés (PWM coupé) à l'arrêt.
+- `hardStop` : le `/OE` des PCA9685 (actif bas) coupe **toutes** les sorties PCA d'un
+  coup ; les servos sur GPIO direct sont détachés (PWM coupé) — sans attente.
 - Santé I2C : si un PCA cesse de répondre après l'armement (débranché, brown-out), le
   firmware déclenche une panique plutôt que de « jouer à l'aveugle ».
 - Une écriture servo qui échoue met la corde concernée en faute (retirée de
