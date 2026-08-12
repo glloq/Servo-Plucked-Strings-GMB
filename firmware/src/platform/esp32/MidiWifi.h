@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "../../core/midi/MidiParser.h"
+#include "../../core/midi/MidiTransport.h"
 
 #if defined(ARDUINO)
 #include <WiFiUdp.h>
@@ -27,21 +28,27 @@ struct SysExPacket {
     uint16_t port = 0;
 };
 
-class MidiWifi {
+// Wi-Fi UDP MIDI transport (the MidiUdpTransport of spec §8.3). Conforms to the
+// transport-neutral MidiTransport interface so it can feed the InstrumentController
+// alongside a future USB / DIN / BLE transport, while keeping its UDP-specific SysEx
+// reply / notify back-channel.
+class MidiWifi : public MidiTransport {
 public:
     void begin(uint16_t port = 5006);
 
     // Pull a bounded number of received packets and decode them.
-    void poll(uint32_t nowUs);
+    void poll(uint32_t nowUs) override;
 
     // Decoded channel-voice events for this poll (consume then clear()).
-    std::vector<MidiEvent>& events() { return events_; }
+    std::vector<MidiEvent>& events() override { return events_; }
     // Complete SysEx requests received this poll, each with its sender.
     std::vector<SysExPacket>& sysexPackets() { return sysex_; }
-    void clear() {
+    void clear() override {
         events_.clear();
         sysex_.clear();
     }
+    MidiSource source() const override { return MidiSource::WifiUdp; }
+    const char* name() const override { return "wifiUdp"; }
 
     // Reply to a specific SysEx sender.
     void reply(const SysExPacket& to, const uint8_t* data, size_t len);

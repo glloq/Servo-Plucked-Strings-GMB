@@ -37,6 +37,8 @@
 #include "core/midi/MidiEvent.h"
 #include "core/safety/SafetyManager.h"
 #include "core/util/Debounce.h"
+#include "core/midi/MidiTransport.h"
+#include "platform/esp32/MidiUsbTransport.h"
 #include "platform/esp32/MidiWifi.h"
 #include "platform/esp32/Net.h"
 #include "platform/esp32/ProfileStorage.h"
@@ -55,7 +57,10 @@ GmbSysExService g_sysex;
 ServoBank g_servos;
 ServoActivationGovernor g_governor;
 Net g_net;
-MidiWifi g_midi;
+MidiWifi g_midi;                 // Wi-Fi UDP transport (spec §8.3, priority 1)
+MidiUsbTransport g_usbMidi;      // native USB-MIDI (S3) — P1.7 skeleton, inert until wired
+// Every MIDI transport feeds the SAME InstrumentController (P1.7). Add DIN/BLE here.
+MidiTransport* const g_transports[] = {&g_midi, &g_usbMidi};
 WebApi g_web;
 Diagnostics g_diag;  // runtime telemetry (P2.19)
 bool g_pcaHealthy = true;          // last loop-side PCA probe result (for diagnostics)
@@ -946,6 +951,7 @@ void setup() {
     prefs.end();
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
+    g_usbMidi.begin();  // P1.7: inert until wired to native USB-MIDI (no-op elsewhere)
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
 
     WebContext ctx;
@@ -1089,20 +1095,25 @@ void loop() {
         }
     }
 
-    // Ingest Wi-Fi MIDI (bounded per tick).
-    g_midi.poll(nowUs);
-    g_diag.addMidiEvents(static_cast<uint32_t>(g_midi.events().size()));  // diagnostics
-    for (auto& e : g_midi.events()) {
-        g_web.broadcastMidi(e);
-        if (g_phase == AppPhase::Ready) g_instrument.handleEvent(e, nowUs);
+    // Ingest MIDI from every transport into the SAME InstrumentController (P1.7).
+    // Each event already carries its transport as MidiEvent.source (diagnostics/routing).
+    for (MidiTransport* t : g_transports) t->poll(nowUs);
+    for (MidiTransport* t : g_transports) {
+        g_diag.addMidiEvents(static_cast<uint32_t>(t->events().size()));
+        for (auto& e : t->events()) {
+            g_web.broadcastMidi(e);
+            if (g_phase == AppPhase::Ready) g_instrument.handleEvent(e, nowUs);
+        }
     }
+    // SysEx carries an IP-addressed reply, so it stays on the concrete UDP transport
+    // (USB/DIN replies will be added on their own transports as they land).
     for (auto& sx : g_midi.sysexPackets()) {
         std::vector<uint8_t> resp;
         { StateGuard lock;
           resp = g_sysex.handleMessage(sx.bytes.data(), sx.bytes.size(), nowMs); }
         if (!resp.empty()) g_midi.reply(sx, resp.data(), resp.size());
     }
-    g_midi.clear();
+    for (MidiTransport* t : g_transports) t->clear();
 
     g_instrument.tick(nowUs);   // flush chord groups
     g_servos.update(nowMs);     // scheduled servo returns / rest cut-off

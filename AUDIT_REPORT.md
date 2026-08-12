@@ -22,7 +22,7 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P1.4 | API homogène `ActuatorResult` (ServoBank) | **DONE** | `f15b6a8` |
 | P1.5 | Perte PCA locale (fault des cordes concernées, pas de panic global) | **DONE** | `f30a5cb` |
 | P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **PARTIAL** | — |
-| P1.7 | Abstraction des transports MIDI (UDP/USB/DIN/BLE) | **NOT STARTED** | — |
+| P1.7 | Abstraction des transports MIDI (UDP/USB/DIN/BLE) | **PARTIAL** | (voir historique) |
 | P1.8 | Cohérence doc CC120/CC123 (≠ panic verrouillé) | **DONE** | `584895f` |
 | P1.9 | `staticIp` : implémenter ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
@@ -36,10 +36,10 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
 | P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**14 DONE · 2 PARTIAL · 3 NOT STARTED.** Les 5 items restants (P1.6, P1.7, P1.11,
-P1.13, P2.17) sont les gros refactors architecturaux que la mission elle-même
-demande de faire *progressivement, par composants avec tests de non-régression* —
-voir §6 pour l'approche recommandée.
+**14 DONE · 3 PARTIAL · 2 NOT STARTED.** Les items restants (P1.6, P1.11, P1.13,
+P2.17, et la partie fonctionnelle USB/DIN de P1.7) sont les gros refactors
+architecturaux que la mission elle-même demande de faire *progressivement, par
+composants avec tests de non-régression* — voir §6 pour l'approche recommandée.
 
 ---
 
@@ -49,8 +49,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **211 tests, 3597 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **211 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **212 tests, 3605 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **212 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -119,11 +119,17 @@ carte perdue ne porte aucune corde (ressource commune → fail-safe).
 l'architecture `PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`
 avec distinction mouvements étalables / à échéance sonore. Approche recommandée en §6.
 
-### P1.7 — Transports MIDI (NOT STARTED)
-Le cœur MIDI est déjà indépendant du transport (le parseur/allocateur ne
-connaissent pas l'UDP). Il reste à extraire l'interface `MidiTransport` et à
-fournir `MidiUdpTransport` (existant) + `MidiUsbTransport` (S3), puis DIN/BLE, avec
-identification de la source dans les diagnostics. Approche en §6.
+### P1.7 — Transports MIDI (PARTIAL)
+*Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/
+name` ; `MidiWifi` s'y conforme (**MidiUdpTransport**, source `WifiUdp` déjà tagguée) ;
+squelette **`MidiUsbTransport`** (S3, poll no-op documenté) ; `main.cpp` alimente le
+**même** `InstrumentController` depuis une **liste de transports** (`g_transports`), et
+`MidiEvent.source` identifie l'entrée. *Test* : `test_transport.cpp` prouve que deux
+transports alimentent un seul contrôleur avec les bons tags. *Reste* : implémentation
+fonctionnelle USB natif (TinyUSB S3), puis DIN UART / BLE, et le SysEx multi-transport
+(la réponse UDP est adressée par IP, donc encore sur le transport concret).
+*Fichiers* : `core/midi/MidiTransport.h` (nouveau), `MidiUsbTransport.h` (nouveau),
+`MidiWifi.*`, `main.cpp`.
 
 ### P1.8 — Doc CC120/CC123 (DONE)
 Le code faisait déjà le standard MIDI (All Sound Off / All Notes Off, l'instrument
@@ -251,8 +257,8 @@ non-régression à chaque étape) :
 - **P1.6** : introduire `ActuatorManager` entre le scheduler et `ServoBank`, router
   *tout* mouvement, taguer « étalable » vs « à échéance sonore », passer les non-échéances
   par le governor.
-- **P1.7** : extraire `MidiTransport` (begin/poll/events/sendSysEx), adapter
-  `MidiWifi` en `MidiUdpTransport`, ajouter `MidiUsbTransport` (S3), source dans les diag.
+- **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
+  `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
 - **P1.11 / P1.13** : introduire `DeviceConfig{board,network,transports,safety}` séparé
   d'`InstrumentProfile`, migration v2→v3, puis modes Setup/Performance + whitelist UDP.
 - **P2.17** : sortir la FSM de `tickString()` dans un `PlaybackScheduler`, puis
