@@ -39,6 +39,7 @@
 #include "core/safety/SafetyManager.h"
 #include "core/util/CommandResultRing.h"
 #include "core/util/Debounce.h"
+#include "core/util/HoldButton.h"
 #include "core/midi/MidiTransport.h"
 #include "platform/esp32/MidiUsbTransport.h"
 #include "platform/esp32/MidiWifi.h"
@@ -97,9 +98,7 @@ Debouncer g_estopDeb;  // debounced E-stop input (avoids a spurious trip)
 // A ~2 s hold avoids accidental triggers; the switch is live (no reboot).
 constexpr uint8_t kBootButtonPin = 0;
 constexpr uint32_t kBootHoldMs = 2000;
-uint32_t g_bootDownAtMs = 0;
-bool g_bootWasDown = false;
-bool g_bootTriggered = false;
+HoldButton g_bootHold;  // long-press on BOOT -> force hotspot (host-tested, P2.17)
 
 // Pending test-note Note Offs (scheduled by /api/test/note).
 struct TestNoteOff { uint8_t channel; uint8_t note; uint32_t atMs; };
@@ -451,12 +450,7 @@ bool servicePanic(uint32_t nowMs) {
 // the radio is independent of the instrument state, so it works in any phase.
 void serviceHotspotRequests(uint32_t nowMs) {
     bool down = digitalRead(kBootButtonPin) == LOW;  // active-low BOOT button
-    if (down && !g_bootWasDown) { g_bootDownAtMs = nowMs; g_bootTriggered = false; }
-    if (down && !g_bootTriggered && nowMs - g_bootDownAtMs >= kBootHoldMs) {
-        g_bootTriggered = true;
-        g_hotspotRequested.store(true);
-    }
-    g_bootWasDown = down;
+    if (g_bootHold.update(down, nowMs)) g_hotspotRequested.store(true);  // long-press
     if (g_hotspotRequested.exchange(false)) {
         g_net.forceAccessPoint();
         Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
@@ -616,6 +610,7 @@ void setup() {
     g_midi.begin(5006);
     g_usbMidi.begin();  // P1.7: inert until wired to native USB-MIDI (no-op elsewhere)
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
+    g_bootHold.configure(kBootHoldMs);
 
     WebContext ctx;
     ctx.profile = &g_profile;
