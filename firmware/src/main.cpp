@@ -37,6 +37,7 @@
 #include "core/instrument/ActuatorManager.h"
 #include "core/midi/MidiEvent.h"
 #include "core/safety/SafetyManager.h"
+#include "core/util/CommandResultRing.h"
 #include "core/util/Debounce.h"
 #include "core/midi/MidiTransport.h"
 #include "platform/esp32/MidiUsbTransport.h"
@@ -122,27 +123,20 @@ struct AppCommand {
 
 std::atomic<uint32_t> g_nextCmdId{1};
 std::atomic<int> g_cmdQueueDepth{0};  // live web->loop queue depth (diagnostics)
-struct CmdResult { uint32_t id = 0; uint8_t state = 0; };  // 0=queued 1=done 2=refused
-constexpr int kCmdResultRing = 16;
-CmdResult g_cmdResults[kCmdResultRing];
+// Outcomes of the last N web->loop commands (the ring logic lives in the host-tested
+// CommandResultRing; main.cpp only adds the FreeRTOS mutex around it). P2.17.
+CommandResultRing g_cmdResults;
 SemaphoreHandle_t g_resultMutex = nullptr;
 
 void setCommandResult(uint32_t id, uint8_t state) {
-    if (id == 0) return;
     if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    for (auto& r : g_cmdResults)
-        if (r.id == id) { r.state = state; if (g_resultMutex) xSemaphoreGive(g_resultMutex); return; }
-    static int next = 0;
-    g_cmdResults[next] = {id, state};
-    next = (next + 1) % kCmdResultRing;
+    g_cmdResults.set(id, state);
     if (g_resultMutex) xSemaphoreGive(g_resultMutex);
 }
 
 std::string commandStateStr(uint32_t id) {
-    const char* s = "unknown";
     if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    for (const auto& r : g_cmdResults)
-        if (r.id == id) { s = r.state == 0 ? "queued" : r.state == 1 ? "succeeded" : "refused"; break; }
+    std::string s = g_cmdResults.stateStr(id);
     if (g_resultMutex) xSemaphoreGive(g_resultMutex);
     return s;
 }

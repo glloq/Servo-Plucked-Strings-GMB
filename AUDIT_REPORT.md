@@ -50,8 +50,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **218 tests, 3654 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **218 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **220 tests, 3664 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **220 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -216,7 +216,8 @@ contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` 
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
 faute via un callback vers le chemin central. D'autres responsabilités étaient déjà
 sorties en composants : `ActuatorManager` (P1.6), `MidiTransport`/liste (P1.7),
-`Diagnostics` (P2.19), fonctions de service nommées. *Reste* : `ApplicationRuntime` /
+`Diagnostics` (P2.19), le **`CommandResultRing`** (suivi des résultats de commandes,
+désormais **testé nativement**), fonctions de service nommées. *Reste* : `ApplicationRuntime` /
 `CommandDispatcher` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
 devienne `app.begin()/app.tick()`) — par composants, la FSM étant seulement
 compile-vérifiée (Arduino-gated), à valider au banc. *Fichiers* :

@@ -1,0 +1,50 @@
+// Fixed-size ring tracking the outcome of the last N web->loop commands (audit
+// P2.17 — extracted from main.cpp so the logic is host-testable and main.cpp shrinks).
+//
+// A web request enqueues a command and gets back an id; GET /api/commands?id=N then
+// reports queued / succeeded / refused. Only the most recent kSize ids are retained
+// (fixed memory on the ESP32); an id that has aged out reads back as "unknown".
+//
+// Pure C++17: the caller serialises access with its own lock (the ring itself does no
+// locking, so it can be unit-tested on the host without FreeRTOS).
+#pragma once
+
+#include <cstdint>
+
+namespace gmb {
+
+class CommandResultRing {
+public:
+    enum State : uint8_t { Queued = 0, Succeeded = 1, Refused = 2 };
+
+    // Record the outcome for `id` (ignored when id == 0). Updates in place if the id
+    // is already tracked, otherwise takes the next ring slot (evicting the oldest).
+    void set(uint32_t id, uint8_t state) {
+        if (id == 0) return;
+        for (auto& r : ring_)
+            if (r.id == id) { r.state = state; return; }
+        ring_[next_] = {id, state};
+        next_ = (next_ + 1) % kSize;
+    }
+
+    // The outcome string for `id`: "queued" / "succeeded" / "refused", or "unknown"
+    // if the id was never issued or has aged out of the ring. id 0 (the "no command"
+    // sentinel, also the empty-slot value) is always "unknown".
+    const char* stateStr(uint32_t id) const {
+        if (id == 0) return "unknown";
+        for (const auto& r : ring_)
+            if (r.id == id)
+                return r.state == Queued ? "queued"
+                     : r.state == Succeeded ? "succeeded"
+                     : "refused";
+        return "unknown";
+    }
+
+private:
+    struct Entry { uint32_t id = 0; uint8_t state = 0; };
+    static constexpr int kSize = 16;
+    Entry ring_[kSize];
+    int next_ = 0;
+};
+
+}  // namespace gmb

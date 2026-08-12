@@ -45,7 +45,8 @@ TEST_SRC := \
   test_diagnostics.cpp \
   test_transport.cpp \
   test_actuator_manager.cpp \
-  test_device_instrument.cpp
+  test_device_instrument.cpp \
+  test_command_ring.cpp
 
 BIN := run_tests
 
