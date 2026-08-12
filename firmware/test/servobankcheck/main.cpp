@@ -112,6 +112,19 @@ int main() {
     CHECK(b3.press(0) == ActuatorResult::Disabled, "press(disabled servo) -> Disabled");
   }
 
+  // --- P1.5: map a lost PCA board to the exact strings it takes down -----------
+  // servo 0 -> string 0 on bus 0 / board 0 (bucket 0); servo 1 -> string 1 on
+  // bus 1 / board 2 (bucket 10). A degraded mode must isolate only the right one.
+  CHECK(bank.stringUsesBoard(0, 0), "string 0 is on board bucket 0");
+  CHECK(!bank.stringUsesBoard(0, 10), "string 0 is NOT on board bucket 10");
+  CHECK(bank.stringUsesBoard(1, 10), "string 1 is on board bucket 10 (bus1/0x42)");
+  CHECK(!bank.stringUsesBoard(1, 0), "string 1 is NOT on board bucket 0");
+  CHECK(ServoBank::boardName(0) == "bus 0 / 0x40", "boardName(0) = bus 0 / 0x40");
+  CHECK(ServoBank::boardName(10) == "bus 1 / 0x42", "boardName(10) = bus 1 / 0x42");
+  CHECK(ServoBank::boardName(0xFF) == "direct-GPIO", "boardName(0xFF) = direct-GPIO");
+  uint8_t fb = 0xEE;
+  CHECK(bank.pcaHealthy(fb), "healthy stubs report all boards OK");
+
   std::printf(g_fail ? "\nSERVOBANKCHECK FAILED (%d)\n" : "\nservobankcheck OK\n", g_fail);
   return g_fail ? 1 : 0;
 }

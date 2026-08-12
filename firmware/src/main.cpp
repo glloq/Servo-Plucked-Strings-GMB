@@ -1026,14 +1026,34 @@ void loop() {
     g_instrument.tick(nowUs);   // flush chord groups
     g_servos.update(nowMs);     // scheduled servo returns / rest cut-off
 
-    // Runtime PCA9685 health: a board lost AFTER arming means no finger/pluck can
-    // act — panic rather than keep "playing" blind.
+    // Runtime PCA9685 health (audit P1.5): a board lost AFTER arming is isolated to
+    // the strings it drives instead of a blanket panic. We identify the exact board
+    // that went silent, fault only its strings (rebuild capabilities -> readyDegraded,
+    // MIDI re-allocates onto the survivors), and let faultRuntimeAxis escalate to a
+    // real panic only when no operational string remains. A lost board that owns NO
+    // string (a shared/aux-only board — a common critical resource) can't be isolated
+    // safely, so that stays a global panic (fail-safe).
     static uint32_t lastPcaCheckMs = 0;
     if (g_phase == AppPhase::Ready && nowMs - lastPcaCheckMs >= 500) {
         lastPcaCheckMs = nowMs;
-        if (!g_servos.pcaHealthy()) {
-            g_safety.recordFault("servo", "PCA9685 stopped responding on I2C", nowMs);
-            doPanic();
+        uint8_t failedBoard = 0xFF;
+        if (!g_servos.pcaHealthy(failedBoard)) {
+            std::string where = ServoBank::boardName(failedBoard);
+            bool isolated = false;
+            for (size_t i = 0; i < g_instrument.stringCount() &&
+                               g_phase == AppPhase::Ready; ++i) {
+                if (!(i < g_stringFaulted.size() && g_stringFaulted[i]) &&
+                    g_servos.stringUsesBoard(static_cast<int>(i), failedBoard)) {
+                    faultRuntimeAxis(i, ("PCA9685 lost (" + where + ")").c_str(), nowMs);
+                    isolated = true;
+                }
+            }
+            if (!isolated) {
+                // No string owns the lost board (shared/aux resource) — fail-safe.
+                g_safety.recordFault("servo",
+                    "PCA9685 lost on " + where + " (no owning string) — global panic", nowMs);
+                doPanic();
+            }
         }
     }
 

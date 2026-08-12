@@ -1,5 +1,7 @@
 #include "ServoBank.h"
 
+#include <cstdio>
+
 #include "../../core/configuration/FingerTarget.h"
 #include "../../core/configuration/ServoStroke.h"
 
@@ -275,6 +277,11 @@ void ServoBank::outputEnable(bool on) {
 }
 
 bool ServoBank::pcaHealthy() const {
+    uint8_t ignored;
+    return pcaHealthy(ignored);
+}
+
+bool ServoBank::pcaHealthy(uint8_t& failedBoard) const {
 #if defined(ARDUINO)
     if (!pcaUsed_) return true;
     for (int b = 0; b < 2; ++b) {
@@ -284,13 +291,36 @@ bool ServoBank::pcaHealthy() const {
             // The PCA9685 base address is 0x40 + board index (per bus). A board that
             // has been unplugged / lost power no longer ACKs its address.
             w.beginTransmission(static_cast<uint8_t>(0x40 + i));
-            if (w.endTransmission() != 0) return false;
+            if (w.endTransmission() != 0) {
+                failedBoard = static_cast<uint8_t>(b * 8 + i);  // matches board()
+                return false;
+            }
         }
     }
     return true;
 #else
+    (void)failedBoard;
     return true;
 #endif
+}
+
+bool ServoBank::stringUsesBoard(int stringIndex, uint8_t boardBucket) const {
+    for (size_t i = 0; i < servos_.size(); ++i) {
+        const ServoConfig& s = servos_[i];
+        if (s.enabled && s.stringIndex == stringIndex &&
+            board(static_cast<int>(i)) == boardBucket)
+            return true;
+    }
+    return false;
+}
+
+std::string ServoBank::boardName(uint8_t boardBucket) {
+    if (boardBucket == 0xFF) return "direct-GPIO";
+    int bus = boardBucket / 8;
+    int addr = 0x40 + (boardBucket % 8);
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "bus %d / 0x%02X", bus, addr);
+    return std::string(buf);
 }
 
 void ServoBank::hardStop() {

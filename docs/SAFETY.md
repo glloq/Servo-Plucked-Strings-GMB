@@ -89,10 +89,15 @@ vraie panique reste une commande distincte (`POST /api/panic` ou la broche `ESTO
 
 - `hardStop` : le `/OE` des PCA9685 (actif bas) coupe **toutes** les sorties PCA d'un
   coup ; les servos sur GPIO direct sont détachés (PWM coupé) — sans attente.
-- Santé I2C : si un PCA cesse de répondre après l'armement (débranché, brown-out), le
-  firmware déclenche une panique plutôt que de « jouer à l'aveugle ».
-- Une écriture servo qui échoue met la corde concernée en faute (retirée de
-  l'allocation) sans perturber les autres.
+- Santé I2C — **dégradation locale** (P1.5) : si un PCA cesse de répondre après
+  l'armement (débranché, brown-out), le firmware **identifie la carte** (bus + adresse)
+  et met en faute **uniquement les cordes qu'elle pilote**, puis reconstruit les
+  capacités (`readyDegraded`) — le MIDI ré-alloue sur les cordes restantes. Le panic
+  **global** n'intervient que si plus aucune corde opérationnelle ne reste, ou si la
+  carte perdue ne porte aucune corde (ressource commune : on ne peut pas isoler sans
+  risque → fail-safe).
+- Une écriture servo qui échoue (retour `ActuatorResult` ≠ `Ok`) met la corde concernée
+  en faute (retirée de l'allocation, raison journalisée) sans perturber les autres.
 
 ## 4. Maîtrise du courant (voir [`CALIBRATION.md`](CALIBRATION.md) §7)
 

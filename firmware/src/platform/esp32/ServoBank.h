@@ -111,6 +111,17 @@ public:
     // so a board unplugged AFTER arming is detected (returns true when no PCA is
     // used). Cheap enough to call a few times a second.
     bool pcaHealthy() const;
+    // Same probe, but on failure reports WHICH board went silent as a bucket
+    // (i2cBus*8 + board, matching board()) so the runtime can isolate just the
+    // strings on that board instead of a global panic (audit P1.5). `failedBoard`
+    // is only written when the result is false.
+    bool pcaHealthy(uint8_t& failedBoard) const;
+    // True if string `stringIndex` has at least one enabled servo on the PCA board
+    // bucket `boardBucket` (i2cBus*8 + board) — used to map a lost board to the
+    // exact strings it takes down.
+    bool stringUsesBoard(int stringIndex, uint8_t boardBucket) const;
+    // Human-readable "bus N / 0x4A" for a board bucket, for diagnostics/logs.
+    static std::string boardName(uint8_t boardBucket);
 
     size_t count() const { return servos_.size(); }
     // True if `index` refers to a real, enabled servo that can actually be driven
