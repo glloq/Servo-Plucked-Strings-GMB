@@ -49,8 +49,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **212 tests, 3605 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **212 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **215 tests, 3624 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **215 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -113,11 +113,17 @@ carte perdue ne porte aucune corde (ressource commune → fail-safe).
 *Fichiers* : `ServoBank.*`, `main.cpp`, `SAFETY.md`. *Tests* : `servobankcheck`.
 
 ### P1.6 — PowerGovernor étendu (PARTIAL)
-*Déjà en place* : le governor supporte limite globale + **limite par PCA** +
-`staggerMs` + désactivation à 0, et gate les **press de doigts** (chords étalés).
-*Manque* : passage des pluck/strum/strumLift/damper par le governor, et
-l'architecture `PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`
-avec distinction mouvements étalables / à échéance sonore. Approche recommandée en §6.
+*Fait* : nouvelle couche **`ActuatorManager`** (core, testable) réalisant l'archi
+`PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`, avec la distinction
+explicite **étalable** (finger press/release, lift engage → gouverné) vs **échéance
+sonore** (pluck/strum strike → **jamais** throttlé). Le governor garde limite globale +
+**par PCA** + `staggerMs` + désactivation à 0. `main.cpp` route la press de doigt via
+`g_actuators.requestMove(Staggerable, …)`. *Test* : `test_actuator_manager.cpp` (le
+deadline passe toujours, le staggerable suit le governor, désactivation OK). *Reste* :
+router aussi damper/aux par le manager, et décider au cas par cas pour le strum-lift
+(sur le chemin d'anticipation, sensible au timing — laissé non gouverné pour ne pas
+dégrader la synchro musicale, comme la mission le recommande). *Fichiers* :
+`core/instrument/ActuatorManager.h` (nouveau), `main.cpp`.
 
 ### P1.7 — Transports MIDI (PARTIAL)
 *Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/
@@ -254,9 +260,8 @@ nativement) ou des items PARTIAL/NOT STARTED.
 
 **Approche recommandée pour les items restants** (par petits commits, tests de
 non-régression à chaque étape) :
-- **P1.6** : introduire `ActuatorManager` entre le scheduler et `ServoBank`, router
-  *tout* mouvement, taguer « étalable » vs « à échéance sonore », passer les non-échéances
-  par le governor.
+- **P1.6** (reste) : `ActuatorManager` en place ; router aussi damper/aux, et évaluer
+  le strum-lift au banc (gain in-rush vs. risque de timing) avant de le gouverner.
 - **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
   `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
 - **P1.11 / P1.13** : introduire `DeviceConfig{board,network,transports,safety}` séparé

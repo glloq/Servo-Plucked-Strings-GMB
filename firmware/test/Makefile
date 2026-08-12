@@ -43,7 +43,8 @@ TEST_SRC := \
   test_debounce.cpp \
   test_safety.cpp \
   test_diagnostics.cpp \
-  test_transport.cpp
+  test_transport.cpp \
+  test_actuator_manager.cpp
 
 BIN := run_tests
 

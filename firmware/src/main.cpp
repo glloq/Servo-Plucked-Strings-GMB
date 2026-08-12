@@ -8,9 +8,10 @@
 // position on a string has its own dedicated finger servo; to play a fretted note
 // the firmware releases the finger currently pressed on that string, presses the
 // target fret's finger, lets it settle, then plucks. Fret 0 (open) presses no
-// finger. A ServoActivationGovernor staggers the finger presses of a chord so the
-// PCA9685 in-rush current stays bounded (together with per-servo disableAtRest and
-// the one-finger-per-string release-before-press sequence).
+// finger. An ActuatorManager (wrapping the ServoActivationGovernor) staggers the
+// current-hungry finger presses of a chord so the PCA9685 in-rush stays bounded,
+// while never throttling a sonic-deadline pluck (together with per-servo
+// disableAtRest and the one-finger-per-string release-before-press sequence).
 //
 // Boot sequence (spec §21.1 / §13, adapted): power-on safe → validate profile →
 // park every finger at rest → arm for play.
@@ -33,7 +34,7 @@
 #include "core/diagnostics/Diagnostics.h"
 #include "core/gmb/GmbSysExService.h"
 #include "core/instrument/InstrumentController.h"
-#include "core/instrument/ServoActivationGovernor.h"
+#include "core/instrument/ActuatorManager.h"
 #include "core/midi/MidiEvent.h"
 #include "core/safety/SafetyManager.h"
 #include "core/util/Debounce.h"
@@ -55,7 +56,7 @@ SafetyManager g_safety;
 InstrumentController g_instrument;
 GmbSysExService g_sysex;
 ServoBank g_servos;
-ServoActivationGovernor g_governor;
+ActuatorManager g_actuators;  // P1.6: governs staggerable moves, never deadline strikes
 Net g_net;
 MidiWifi g_midi;                 // Wi-Fi UDP transport (spec §8.3, priority 1)
 MidiUsbTransport g_usbMidi;      // native USB-MIDI (S3) — P1.7 skeleton, inert until wired
@@ -230,8 +231,8 @@ void applyProfile() {
     }
     g_servos.begin(servos, pinOf("SDA"), pinOf("SCL"), pinOf("SERVO_OE"),
                    pinOf("SDA2"), pinOf("SCL2"), pinOf("SERVO_OE2"));
-    g_governor.configure(g_profile.power.maxConcurrentMoves,
-                         g_profile.power.maxConcurrentPerBoard, g_profile.power.staggerMs);
+    g_actuators.configure(g_profile.power.maxConcurrentMoves,
+                          g_profile.power.maxConcurrentPerBoard, g_profile.power.staggerMs);
 
     // The E-stop pin belongs to the (possibly new) profile.
     g_estopPin = pinOf("ESTOP");
@@ -340,7 +341,7 @@ bool armInstrument(uint32_t nowMs) {
     }
     g_safety.reset();  // -> PowerOnSafe (clean slate before parking)
     g_degraded = false;
-    g_governor.reset();
+    g_actuators.reset();
     for (size_t i = 0; i < g_profile.strings.size(); ++i) {
         if (!g_profile.strings[i].enabled)
             g_instrument.string(i).disable();  // a disabled string never plays
@@ -385,7 +386,7 @@ bool doReset(uint32_t nowMs) {
 void hardStopAll() {
     g_instrument.panic();
     g_servos.hardStop();
-    g_governor.reset();
+    g_actuators.reset();
     for (auto& s : g_sched) s = StringSched{};
     for (auto& f : g_currentFinger) f = -1;
     g_testOffs.clear();
@@ -693,7 +694,12 @@ void tickString(size_t i, uint32_t nowMs) {
             // chord's presses are staggered and the PCA in-rush stays bounded.
             if (!sch.fingerPressStarted) {
                 // Permit gated by both the global and this finger's PCA-board cap.
-                if (!g_governor.requestStart(nowMs, g_servos.board(sch.fingerIndex))) break;
+                // A finger press is a staggerable, current-hungry positioning move —
+                // gate it through the ActuatorManager (a pluck strike, being a sonic
+                // deadline, is never gated). P1.6.
+                if (!g_actuators.requestMove(MoveClass::Staggerable, nowMs,
+                                             g_servos.board(sch.fingerIndex)))
+                    break;
                 // A direct sweep travels farther than a press from neutral (it crosses
                 // the whole A..B span), so budget the wait by the real pulse distance;
                 // a normal press from neutral uses the calibrated travelMs. Compute it
@@ -870,7 +876,7 @@ void feedDiagnostics() {
     g_diag.setUdpDropped(g_midi.droppedPackets());
     g_diag.setFaults(static_cast<uint32_t>(g_safety.faults().size()));
     g_diag.setServoMoves(g_servos.moveCount());
-    g_diag.setGovernorThrottles(g_governor.throttleCount());
+    g_diag.setGovernorThrottles(g_actuators.throttleCount());
     g_diag.setPca(g_servos.usesPca(), g_pcaHealthy, g_pcaFailedBoard);
 }
 
