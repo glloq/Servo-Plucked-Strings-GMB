@@ -48,7 +48,8 @@ TEST_SRC := \
   test_device_instrument.cpp \
   test_command_ring.cpp \
   test_holdbutton.cpp \
-  test_profile_activation.cpp
+  test_profile_activation.cpp \
+  test_app_phase.cpp
 
 BIN := run_tests
 

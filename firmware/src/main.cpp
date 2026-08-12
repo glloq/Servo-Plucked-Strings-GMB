@@ -28,6 +28,7 @@
 #include <atomic>
 #include <vector>
 
+#include "core/app/AppPhase.h"
 #include "core/configuration/Profile.h"
 #include "core/configuration/ProfileActivation.h"
 #include "core/configuration/PluckPlan.h"
@@ -74,12 +75,12 @@ Diagnostics g_diag;  // runtime telemetry (P2.19)
 bool g_pcaHealthy = true;          // last loop-side PCA probe result (for diagnostics)
 uint8_t g_pcaFailedBoard = 0xFF;   // board bucket that failed, 0xFF = none
 
+// AppPhase (core/app/AppPhase.h) is the application lifecycle view:
 // ConfigSafe : no valid profile — actuators locked, web/net up (P0 boot-safe).
 // Boot       : transient power-on safe, before the arming sequence starts.
 // Parking    : profile validated, servos travelling to rest — no MIDI/test yet (P0).
 // Reconfiguring : an old profile's fingers are lifting before a swap.
 // Ready      : armed and playable.
-enum class AppPhase { ConfigSafe, Boot, Parking, Reconfiguring, Ready };
 AppPhase g_phase = AppPhase::Boot;
 bool g_degraded = false;  // Ready but with one or more strings disabled by a fault
 
@@ -429,16 +430,7 @@ void drainCommands(uint32_t nowMs) {
 
 // App phase as the string reported to the web/API (shared by ctx.appState and the
 // diagnostics endpoint so the two never diverge).
-const char* appStateStr() {
-    switch (g_phase) {
-        case AppPhase::Ready:         return g_degraded ? "readyDegraded" : "ready";
-        case AppPhase::Parking:       return "parking";
-        case AppPhase::Reconfiguring: return "reconfiguring";
-        case AppPhase::ConfigSafe:    return "configSafe";
-        case AppPhase::Boot:          break;
-    }
-    return "boot";
-}
+const char* appStateStr() { return appPhaseName(g_phase, g_degraded); }
 
 // ---- Diagnostics (P2.19) -----------------------------------------------------
 const char* resetReasonStr() {
