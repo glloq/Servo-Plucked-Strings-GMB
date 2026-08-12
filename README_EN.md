@@ -103,8 +103,10 @@ mapping still stays free per servo.
   [`docs/MIDI_PROTOCOL.md`](docs/MIDI_PROTOCOL.md).
 - A fret **with no servo** is treated as "unavailable": an explicit selection
   then falls back to automatic allocation (configurable policy).
-- **CC7 / CC11** (volume / expression) scale the attack, **CC64** is sustain,
-  **CC120 / CC123** trigger a panic (software emergency stop).
+- **CC7 / CC11** (volume / expression) scale the attack, **CC64** is sustain.
+  **CC120** (All Sound Off) silences immediately and **CC123** (All Notes Off)
+  releases notes — **standard MIDI** semantics, the instrument **stays armed**. A
+  real panic is a distinct command (`POST /api/panic` or the E-stop pin).
 - **GMB SysEx** (`F0 7D 00 …`): a *General-MIDI-Boop* controller discovers the
   instrument's capabilities (note range, polyphony, CCs, tuning) and adapts. See
   [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).

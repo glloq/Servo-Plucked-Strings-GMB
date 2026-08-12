@@ -41,7 +41,10 @@ struct NetworkConfig {
     std::string ssid;            // station SSID (never exported with password)
     std::string hostname = "gmb-instrument";
     std::string apSsid = "Servo-Plucked-Strings-GMB";
-    bool staticIp = false;
+    // NOTE: a `staticIp` flag was removed here (audit P1.9). It was persisted and
+    // exposed in the UI but drove no WiFi.config() call — a phantom option. Real
+    // static-IP support (ip/gateway/subnet/dns) belongs in the future DeviceConfig
+    // (P13) and must arrive with the actual WiFi.config() wiring, not just a flag.
 };
 
 struct MidiConfig {

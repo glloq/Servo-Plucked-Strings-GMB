@@ -984,7 +984,9 @@ void loop() {
     servicePendingActivation(nowMs);
     serviceParking(nowMs);  // Parking -> Ready once the mechanical settle has elapsed
 
-    // Wi-Fi loss policy: cancel pending commands and release notes, stay armed.
+    // Wi-Fi loss policy (single deliberate behaviour, audit P1.10 — the removed
+    // WifiLossBehavior enum was never wired): cancel pending commands and release
+    // sounding notes, but STAY ARMED so play resumes the moment the link returns.
     static bool wasConnected = false;
     bool nowConnected = g_net.connected() && !g_net.accessPointActive();
     if (wasConnected && !nowConnected && g_phase == AppPhase::Ready) {

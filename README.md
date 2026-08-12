@@ -104,8 +104,10 @@ mapping reste néanmoins libre par servo.
   [`docs/MIDI_PROTOCOL.md`](docs/MIDI_PROTOCOL.md).
 - Une frette **sans servo** est traitée comme « non disponible » : la sélection
   explicite bascule alors en allocation automatique (politique configurable).
-- **CC7 / CC11** (volume / expression) modulent l'attaque, **CC64** le sustain,
-  **CC120 / CC123** déclenchent un panic (arrêt d'urgence logiciel).
+- **CC7 / CC11** (volume / expression) modulent l'attaque, **CC64** le sustain.
+  **CC120** (All Sound Off) coupe le son immédiatement et **CC123** (All Notes Off)
+  relâche les notes — sémantique **MIDI standard**, l'instrument **reste armé**. Un
+  vrai panic est une commande distincte (`POST /api/panic` ou la broche E-stop).
 - **SysEx GMB** (`F0 7D 00 …`) : un contrôleur *General-MIDI-Boop* découvre les
   capacités de l'instrument (tessiture, polyphonie, CC, accordage) et s'adapte.
   Voir [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).

@@ -24,14 +24,13 @@ enum class SafetyState : uint8_t {
     EmergencyStop,  // hardware E-stop asserted
 };
 
-// Configurable behaviour when Wi-Fi is lost (spec 21.4). See SafetyConfig for how a
-// profile selects one; the runtime applies the selected policy on link loss.
-enum class WifiLossBehavior : uint8_t {
-    FinishThenStop = 0,   // default: cancel pending, controlled release, stay armed
-    StopImmediately = 1,  // controlled park immediately (outputs cut, stay armed)
-    ContinueQueued = 2,   // keep playing the already-queued notes (do nothing special)
-    IdleKeepMotors = 3,   // cancel pending but keep servos energised at rest
-};
+// NOTE: a `WifiLossBehavior` enum (FinishThenStop / StopImmediately / ContinueQueued
+// / IdleKeepMotors) was removed here (audit P1.10). It was never wired to any config
+// or profile field, while the runtime applied a single fixed policy — advertising a
+// configurability that did not exist. The deliberate fixed policy today is: on link
+// loss, cancel pending commands and release sounding notes but STAY ARMED (see
+// main.cpp loop()). When the DeviceConfig/SafetyConfig split (P13) lands, a real
+// wifiLoss policy field can be reintroduced here AND wired to the runtime together.
 
 struct FaultRecord {
     std::string source;

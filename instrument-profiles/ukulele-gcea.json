@@ -38,8 +38,7 @@
     "mode": "accessPoint",
     "ssid": "",
     "hostname": "gmb-ukulele",
-    "apSsid": "Servo-Plucked-Strings-GMB",
-    "staticIp": false
+    "apSsid": "Servo-Plucked-Strings-GMB"
   },
   "midi": {
     "globalChannel": 0,

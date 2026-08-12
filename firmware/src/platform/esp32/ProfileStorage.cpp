@@ -237,7 +237,6 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     net["ssid"] = p.network.ssid;
     net["hostname"] = p.network.hostname;
     net["apSsid"] = p.network.apSsid;
-    net["staticIp"] = p.network.staticIp;
 
     JsonObject mi = doc["midi"].to<JsonObject>();
     mi["globalChannel"] = p.midi.globalChannel;
@@ -376,7 +375,8 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.network.ssid = net["ssid"] | "";
     out.network.hostname = net["hostname"] | "gmb-instrument";
     out.network.apSsid = net["apSsid"] | "Servo-Plucked-Strings-GMB";
-    out.network.staticIp = net["staticIp"] | false;
+    // `staticIp` (removed, audit P1.9): an old profile may still carry the key; it is
+    // simply ignored on load (no migration needed — the value never did anything).
 
     JsonObjectConst mi = doc["midi"];
     out.midi.globalChannel = mi["globalChannel"] | 0;

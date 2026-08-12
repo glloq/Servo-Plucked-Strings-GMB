@@ -110,7 +110,8 @@ BoardProfile makeEsp32S3DevKitC1() {
 
     // ADC1 covers GPIO1..10, ADC2 covers GPIO11..20 on the ESP32-S3.
     // Strapping / boot pins (spec 11.4).
-    add(reservedPin(0, "Strapping / BOOT button", /*strapping=*/true));
+    add(reservedPin(0, "Strapping / BOOT button — forces the Wi-Fi hotspot (P1.15)",
+                    /*strapping=*/true));
     add(normalPin(1, PinPreference::Recommended, true));
     add(normalPin(2, PinPreference::Recommended, true));
     add(reservedPin(3, "Strapping pin", /*strapping=*/true));
@@ -173,7 +174,13 @@ namespace {
 
 void addClassicEsp32Pins(BoardProfile& b, bool includeFlash) {
     auto add = [&](PinCapability c) { b.pins.push_back(c); };
-    add(normalPin(0, PinPreference::Caution, true, "BOOT strapping pin"));
+    // GPIO0 is the BOOT button, which the firmware also samples to force the Wi-Fi
+    // hotspot (a long press) — main.cpp drives it as an INPUT the whole time. It must
+    // therefore NEVER be auto- or hand-assigned to a servo / I2C / /OE line, or the
+    // hotspot escape hatch (and the bootloader entry) would fight that output. Reserved
+    // so pinSupports()/candidatesFor()/the validator all refuse it (audit P1.15).
+    add(reservedPin(0, "BOOT button — forces the Wi-Fi hotspot; never a servo/I2C//OE pin",
+                    /*strapping=*/true));
     add(reservedPin(1, "UART0 TX (programming / diagnostics)", false, false, true));
     add(normalPin(2, PinPreference::Caution, true, "Strapping / on-board LED on many boards"));
     add(reservedPin(3, "UART0 RX (programming / diagnostics)", false, false, true));
