@@ -42,6 +42,18 @@ public:
     // A profile already at (or above) the current version is left untouched.
     static void migrate(JsonDocument& doc);
 
+    // On-disk slot storage format (audit P1.13). The DEVICE half (board / pins /
+    // network) and the INSTRUMENT half (info / midi / selection / power / pluck /
+    // strings / servos) are persisted under separate `device` and `instrument`
+    // sections, so the physical-machine config and the portable-instrument config are
+    // structurally split on disk. These are thin RE-PARENTING wrappers around
+    // toJson/fromJson — the flat INTERCHANGE format the web API and import/export keep
+    // using unchanged — so the field logic has a single source and is never duplicated.
+    // A legacy flat slot (no `device` section) is read through the interchange path and
+    // rewritten split on the next save (a lazy migration; see docs/DEVICE_INSTRUMENT.md).
+    static void toSlotJson(const Profile& p, JsonDocument& doc);
+    static bool fromSlotJson(JsonVariantConst doc, Profile& out);
+
     std::string exportJson(const Profile& p, bool includeSecrets = false) const;
     bool importJson(const std::string& json, Profile& out) const;
 
