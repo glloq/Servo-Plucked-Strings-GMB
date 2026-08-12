@@ -50,6 +50,7 @@
 #include "platform/esp32/Net.h"
 #include "platform/esp32/PlaybackScheduler.h"
 #include "platform/esp32/ProfileStorage.h"
+#include "platform/esp32/SafetySupervisor.h"
 #include "platform/esp32/ServoBank.h"
 #include "platform/esp32/WebApi.h"
 
@@ -65,6 +66,7 @@ GmbSysExService g_sysex;
 ServoBank g_servos;
 ActuatorManager g_actuators;  // P1.6: governs staggerable moves, never deadline strikes
 PlaybackScheduler g_scheduler;  // P2.17: the per-string mechanical FSM (was tickString)
+SafetySupervisor g_supervisor;  // P2.17: arm/park/hardStop/panic/fault ops (bound in setup)
 Net g_net;
 MidiWifi g_midi;                 // Wi-Fi UDP transport (spec §8.3, priority 1)
 MidiUsbTransport g_usbMidi;      // native USB-MIDI (S3) — P1.7 skeleton, inert until wired
@@ -201,117 +203,30 @@ void notifyCapabilitiesChanged() {
     if (!msg.empty()) g_midi.notifyLastSender(msg.data(), msg.size());
 }
 
-void hardStopAll();  // fwd (immediate, no mechanical wait — panic/E-stop/fault)
-
 // Central runtime string-fault path (servo write error, PCA loss on one board…).
-// Also the fault callback the PlaybackScheduler uses (via actOk); it calls back into
-// the scheduler to abort the affected string's FSM.
+// Also the fault callback the PlaybackScheduler uses. Now lives in SafetySupervisor
+// (P2.17); this thin wrapper keeps the scheduler's callback + call sites unchanged.
 void faultRuntimeAxis(size_t i, const char* reason, uint32_t nowMs) {
-    if (i >= g_instrument.stringCount()) return;
-    g_instrument.faultString(i);
-    // Physically release anything this string had engaged and reset its FSM.
-    g_scheduler.abortString(i);
-    if (i < g_stringFaulted.size()) g_stringFaulted[i] = true;
-    g_safety.recordFault("string", std::string(reason) + " on string " + std::to_string(i),
-                         nowMs);
-    int working = rebuildRuntimeCapabilities();
-    notifyCapabilitiesChanged();
-    if (working <= 0) {
-        hardStopAll();
-        g_safety.panic("no operational strings remain", nowMs);
-    }
+    g_supervisor.faultAxis(i, reason, nowMs);
 }
 
-bool safetyLocked() {
-    SafetyState s = g_safety.state();
-    return s == SafetyState::Panic || s == SafetyState::EmergencyStop;
-}
+bool safetyLocked() { return g_supervisor.locked(); }
 
-// Begin the arming sequence (spec §13/§21, P0): validate, then PARK every servo at
-// rest with the outputs live and wait the mechanical settle before declaring Ready.
-// No homing: servos have known positions. Refuses (leaving the caller to fall back
-// to a safe state) if a panic/E-stop is latched, the profile is invalid, or a
-// servo/PCA channel could not attach or respond.
-//
-// This only STARTS parking (phase -> Parking); serviceParking() finishes it once the
-// mechanical time has elapsed (Parking -> Ready). No MIDI note or mechanical test can
-// run until then — the note engine and doTestServo both require actuatorsAllowed(),
-// which is false throughout Parking.
-bool armInstrument(uint32_t nowMs) {
-    if (safetyLocked()) return false;
-    if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) {
-        g_safety.emergencyStop(nowMs);
-        return false;
-    }
-    if (!ProfileValidator::isActivatable(g_profile)) return false;
-    if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) {
-        g_safety.recordFault("attach", "a servo/PCA9685 could not attach or respond", nowMs);
-        return false;
-    }
-    g_safety.reset();  // -> PowerOnSafe (clean slate before parking)
-    g_degraded = false;
-    g_actuators.reset();
-    for (size_t i = 0; i < g_profile.strings.size(); ++i) {
-        if (!g_profile.strings[i].enabled)
-            g_instrument.string(i).disable();  // a disabled string never plays
-    }
-    g_scheduler.clearCurrentFingers();
-    // Parking: outputs live, drive every servo to rest, then wait max(travel+settle)
-    // before arming so nothing is commanded to play while a finger is still moving.
-    g_servos.outputEnable(true);
-    g_servos.moveAllToRest();
-    uint32_t parkMs = g_servos.parkDurationMs();
-    if (!g_safety.beginParking(true, true, parkMs, nowMs)) return false;
-    g_phase = AppPhase::Parking;
-    return true;
-}
+// Arming / parking / reset now live in SafetySupervisor (P2.17). These thin wrappers
+// keep every call site (setup, command handlers, servicePendingActivation) unchanged.
+// arm() only STARTS parking (phase -> Parking); serviceParking() finishes it once the
+// mechanical settle has elapsed (Parking -> Ready). No MIDI note or mechanical test can
+// run until then — the note engine and doTestServo both require actuatorsAllowed().
+bool armInstrument(uint32_t nowMs) { return g_supervisor.arm(nowMs); }
+void serviceParking(uint32_t nowMs) { g_supervisor.serviceParking(nowMs); }
+bool doReset(uint32_t nowMs) { return g_supervisor.reset(nowMs); }
 
-// Finish the arming sequence: once the mechanical settle has elapsed, Parking -> Ready
-// and the note engine is allowed to run. Called every loop; a no-op outside Parking.
-void serviceParking(uint32_t nowMs) {
-    if (g_phase != AppPhase::Parking) return;
-    if (g_safety.tickParking(nowMs)) g_phase = AppPhase::Ready;  // Armed
-}
-
-// Explicit recovery after a panic / E-stop.
-bool doReset(uint32_t nowMs) {
-    if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) return false;
-    if (!ProfileValidator::isActivatable(g_profile)) return false;
-    if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) return false;
-    g_safety.reset();
-    g_safety.clearFaults();
-    for (size_t i = 0; i < g_stringFaulted.size(); ++i) {
-        if (g_stringFaulted[i]) {
-            g_stringFaulted[i] = false;
-            g_instrument.recoverString(i);
-        }
-    }
-    return armInstrument(nowMs);
-}
-
-// Immediate hard stop (E-stop / panic / major fault): cut PCA /OE and direct PWM at
-// once with no mechanical wait, cancel all commands, lock the state. Never gated on a
-// servo movement completing (spec P0 §21.2) — that is what controlledPark is for.
-void hardStopAll() {
-    g_instrument.panic();
-    g_servos.hardStop();
-    g_actuators.reset();
-    g_scheduler.reset();  // clear every string's FSM + pressed-finger state
-    g_testOffs.clear();
-    g_activation.cancel();  // drop any pending profile swap
-    g_phase = AppPhase::Boot;
-}
-
-void doPanic() {
-    hardStopAll();
-    if (g_safety.state() != SafetyState::EmergencyStop)
-        g_safety.panic("web/CC panic", millis());
-}
-
-void doEmergencyStop() {
-    hardStopAll();
-    g_safety.emergencyStop(millis());
-}
+// Immediate hard stop (E-stop / panic / major fault): cut PCA/OE and direct PWM at once
+// with no mechanical wait, cancel all commands, lock the state — never gated on a servo
+// movement completing (spec P0 §21.2). The op lives in SafetySupervisor (P2.17); the
+// test-note + pending-swap cleanup is the hardStopCleanup callback bound in setup().
+void doPanic() { g_supervisor.panic(); }
+void doEmergencyStop() { g_supervisor.emergencyStop(); }
 
 // ---- loop-side command handlers (only ever called from drainCommands) --------
 
@@ -498,6 +413,25 @@ void setup() {
     g_safety.boot();  // servos neutralised (spec §21.1)
     // Wire the playback scheduler to its collaborators + the central fault path (P2.17).
     g_scheduler.begin(&g_instrument, &g_servos, &g_actuators, &g_profile, faultRuntimeAxis);
+
+    // Bind the SafetySupervisor to the globals it operates on (P2.17). No state moves:
+    // it references the same objects every other reader uses; only the arm/park/stop/
+    // fault OPERATIONS live in it now. Must precede the arming below.
+    SafetySupervisor::Deps sd;
+    sd.safety = &g_safety;
+    sd.servos = &g_servos;
+    sd.instrument = &g_instrument;
+    sd.scheduler = &g_scheduler;
+    sd.actuators = &g_actuators;
+    sd.phase = &g_phase;
+    sd.degraded = &g_degraded;
+    sd.stringFaulted = &g_stringFaulted;
+    sd.estopPin = &g_estopPin;
+    sd.profile = &g_profile;
+    sd.rebuildCaps = []() -> int { return rebuildRuntimeCapabilities(); };
+    sd.notifyCaps = []() { notifyCapabilitiesChanged(); };
+    sd.hardStopCleanup = []() { g_testOffs.clear(); g_activation.cancel(); };
+    g_supervisor.bind(sd);
 
     g_commands.begin(16);  // web->loop command queue + result ring + mutex (P2.17)
     g_stateMutex = xSemaphoreCreateMutex();
