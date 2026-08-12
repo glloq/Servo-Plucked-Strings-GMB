@@ -29,7 +29,7 @@ Branche : `claude/elegant-cannon-zh23kn` · ~23 commits d'audit (petits, indépe
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.11 | Modes Setup / Performance + sécurité réseau | **PARTIAL** | — |
 | P1.12 | Vraie migration de profils (v1→v2) + fixtures | **DONE** | `9675cc8` |
-| P1.13 | Séparer `DeviceConfig` et `InstrumentProfile` | **PARTIAL** | (voir historique) |
+| P1.13 | Séparer `DeviceConfig`/`InstrumentProfile` (structs + split disque faits ; web/comportement différés) | **PARTIAL** | (voir historique) |
 | P1.14 | Builds PlatformIO multi-cartes (S3 / WROOM-32 / DevKit v1) | **DONE** | `a1ca8b7` |
 | P1.15 | Réserver GPIO0 (BOOT-hotspot) | **DONE** | `584895f` |
 | P1.16 | CI GitHub Actions complète | **DONE** | `a1ca8b7` |
@@ -55,7 +55,7 @@ Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P
 | Idem sous **AddressSanitizer + UBSan** | **233 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
-| `profilecheck` (8 profils + migration v1→v2) | OK |
+| `profilecheck` (8 profils + migration v1→v2 + split slot device/instrument P1.13) | OK |
 | Build **ESP32-S3-DevKitC-1** (PlatformIO, CI) | ✅ compile |
 | Build **ESP32-WROOM-32** (PlatformIO, CI) | ✅ compile |
 | Build **ESP32 DevKit v1** (PlatformIO, CI) | ✅ compile |
@@ -194,16 +194,30 @@ drop de `staticIp`), idempotent. Toutes les entrées load/import passent par
 `staticIp`) ; `profilecheck` couvre import → migrate → validate → export →
 round-trip + idempotence.
 
-### P1.13 — DeviceConfig / InstrumentProfile (PARTIAL)
-*Fait* (1er pas non-destructif) : les deux structs cibles **`DeviceConfig`** (carte,
-réseau, broches système) et **`InstrumentProfile`** (instrument, MIDI, sélecteur,
-power, pluck, cordes, servos) sont définis, avec un **split/merge sans perte** contre
-le `Profile` actuel — la frontière est posée et prouvée propre, sans toucher la
-persistance (les anciens profils se chargent inchangés). *Test* :
-`test_device_instrument.cpp` (round-trip lossless + portabilité de l'instrument entre
-appareils). *Reste* : migrer les consommateurs (WebApi/storage) sur ces vues, puis le
-split persistant (migration v2→v3 via P1.12), et y rattacher MidiTransportConfig /
-SafetyConfig. *Fichiers* : `core/configuration/DeviceInstrument.h` (nouveau).
+### P1.13 — DeviceConfig / InstrumentProfile (PARTIAL, gros avancement)
+*Fait (structs)* : les deux structs cibles **`DeviceConfig`** (carte, réseau, broches
+système) et **`InstrumentProfile`** (instrument, MIDI, sélecteur, power, pluck, cordes,
+servos) sont définis, avec un **split/merge sans perte** (`test_device_instrument.cpp`).
+*Fait (persistance)* : **les slots sur disque sont désormais persistés en deux sections
+`device`/`instrument`** (marqueur `storageFormat: gmb-split-v1`) — le split est réel là
+où c'est stocké. Choix de risque contenu : le **format d'échange** (web `GET/PUT
+/api/profile`, import/export) **reste plat et inchangé**, donc l'UI navigateur (qui
+consomme le plat sur ~100 sites et ne peut pas être validée fonctionnellement en phase
+logicielle) n'est pas touchée. `toSlotJson`/`fromSlotJson` sont de **fins wrappers de
+re-parenting** autour de `toJson`/`fromJson` → une seule source de logique de champs, zéro
+duplication. `fromSlotJson` lit aussi un **slot plat hérité** (y compris v1, qu'il migre)
+→ aucun profil orphelin ; un slot hérité est réécrit en split au prochain save (migration
+paresseuse, non-destructive ; le chemin atomique temp+`.bak` est inchangé). `storageFormat`
+est **orthogonal à `profileVersion`** (disposition vs schéma de champs). *Test* :
+`profilecheck` « device/instrument split slot storage » (forme split asservie, round-trip
+lossless, slot plat hérité **et** slot v1 hérité se chargent) — **vert sous ASan/UBSan**.
+*Reste (assumé, différé)* : la **portabilité comportementale** (charger *seulement* la
+moitié instrument sur un appareil en préservant sa config device — le vrai swap
+inter-appareils) n'est pas câblée ; et le split du **format d'échange/web** est différé à
+la phase banc/navigateur (il toucherait l'UI non-testable ici). Y rattacher ensuite
+MidiTransportConfig / SafetyConfig. *Fichiers* : `core/configuration/DeviceInstrument.h`,
+`platform/esp32/ProfileStorage.{h,cpp}`, `test/profilecheck/main.cpp`,
+`docs/DEVICE_INSTRUMENT.md` (nouveau).
 
 ### P1.14 — Multi-cartes PlatformIO (DONE)
 `platformio.ini` : un env par carte annoncée (S3 / WROOM-32 / DevKit v1), réglages
@@ -338,9 +352,12 @@ non-régression à chaque étape) :
   DIN (pin RX dans `DeviceConfig`) et valider la réception au banc (opto 6N138) ;
   implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette `MidiUsbTransport`,
   puis BLE ; généraliser le SysEx multi-transport.
-- **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
-  ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
-  transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
+- **P1.13** (reste) : structs + **split persistant sur disque faits** (avec migration
+  paresseuse + tests). Restent la **portabilité comportementale** (opération « importer
+  l'instrument seul » sans écraser la config device) et le split du **format d'échange/
+  web** — ce dernier différé car il touche l'UI navigateur non-testable ici. Puis y
+  rattacher les configs transports/sécurité. **P1.11** (reste) : whitelist/désactivation
+  UDP avec ce split.
 - **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, `AppPhase`, `Readiness`
   et les utilitaires sont sortis (main.cpp −36 %). Le reste (`SafetySupervisor` /
   `ApplicationRuntime` autour de la séquence armement/panic stateful) demande d'injecter
