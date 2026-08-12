@@ -35,6 +35,13 @@ public:
     static void toJson(const Profile& p, JsonDocument& doc);
     static bool fromJson(JsonVariantConst doc, Profile& out);
 
+    // Upgrade a raw profile JSON in place from its stored `profileVersion` up to
+    // kCurrentProfileVersion, applying one explicit migrateV{N-1}ToV{N} step at a
+    // time (audit P1.12). Every load/import path runs this before fromJson() so old
+    // configs keep working WITHOUT version special-cases piling up inside fromJson().
+    // A profile already at (or above) the current version is left untouched.
+    static void migrate(JsonDocument& doc);
+
     std::string exportJson(const Profile& p, bool includeSecrets = false) const;
     bool importJson(const std::string& json, Profile& out) const;
 
