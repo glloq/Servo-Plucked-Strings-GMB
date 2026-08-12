@@ -4,7 +4,8 @@ Reprise des points incomplets/fragiles listés dans la mission (P0 → P2), en
 privilégiant **sécurité, déterminisme, cohérence, robustesse, tests,
 maintenabilité**, sans casser les fonctionnalités opérationnelles.
 
-Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push**.
+Branche : `claude/elegant-cannon-zh23kn` · ~23 commits d'audit (petits, indépendants),
+**CI verte à chaque push** (une faille de flake CI corrigée, cf. P1.16 §4).
 
 > ⚠️ **Aucune validation mécanique/électrique réelle** n'a été faite : tout ce qui
 > suit est validé *en logiciel* (tests natifs + sanitizers + compilation ESP32 en
@@ -46,12 +47,12 @@ non-régression*. Voir §6 pour l'approche recommandée.
 
 ## 2. Résultats des tests & builds
 
-Tous verts, en local **et** en CI (5 runs, tous `success`) :
+Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P1.16 §4) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **225 tests, 3693 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **225 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **233 tests, 3726 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **233 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -64,7 +65,7 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 > Les 3 builds ESP32 sont donc exécutés et **validés sur GitHub Actions**, pas en
 > local — c'est exactement le rôle de la CI ajoutée (P1.16).
 
-Nombre de tests : ~198 → **206** (+8), plus les assertions ajoutées à
+Nombre de tests : ~198 → **233** (+35), plus les assertions ajoutées à
 `servobankcheck` / `profilecheck`. Le README n'affiche plus de nombre codé en dur
 (badge CI = source de vérité).
 
@@ -221,9 +222,20 @@ hostcheck + servobankcheck), `profiles` (lint JSON + profilecheck), `web-js`
 (`node --check`), `firmware` (matrice 3 cartes + taille flash/RAM). Badge CI réel
 dans les README, nombre de tests codé en dur supprimé.
 
+**Correctif flake (observé puis corrigé)** : un run a échoué `profilecheck` avec des
+types ArduinoJson « non déclarés » alors que le même arbre compile en local et que le
+commit suivant passait, intact. Cause : `hostcheck`/`profilecheck` téléchargeaient
+l'en-tête ArduinoJson avec `curl -sSL` (sans `--fail`) — un aléa réseau/redirection
+sauvegardait une page d'erreur **à la place** de l'en-tête et `curl` sortait quand même
+0, donc la compilation tournait contre un en-tête cassé. Les deux scripts utilisent
+maintenant `curl -fsSL --retry 3 --retry-delay 2` avec un fichier `.tmp` déplacé
+seulement en cas de succès : une erreur HTTP est un échec (jamais mise en cache), un
+aléa transitoire est réessayé, un téléchargement partiel n'empoisonne pas le run
+suivant. Vérifié en vidant le cache puis en relançant les deux harnais (verts).
+
 ### P2.17 — Réduire main.cpp (PARTIAL)
 *Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
-(le point explicite de P2.17) — `main.cpp` passe de **1177 à 769 lignes (−35 %)**. La
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 758 lignes (−36 %)**. La
 FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
 contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
@@ -232,13 +244,24 @@ sorties en composants : le **`CommandDispatcher`** (queue web→loop + dispatch,
 handlers restant injectés depuis `main.cpp`), l'**`ActuatorManager`** (P1.6), le
 **`MidiTransport`**/liste (P1.7), le **`Diagnostics`** (P2.19), les utilitaires
 host-testés **`CommandResultRing`**, **`HoldButton`** (bouton BOOT) et
-**`ProfileActivation`** (bascule de profil en deux phases, RAII + timing), plus des
-fonctions de service nommées. *Reste* : `ApplicationRuntime` / `ProfileManager` /
-`SafetySupervisor` (pour que `main.cpp` devienne `app.begin()/app.tick()`) — par
-composants, la FSM étant seulement compile-vérifiée (Arduino-gated), à valider au banc.
+**`ProfileActivation`** (bascule de profil en deux phases, RAII + timing). Deux
+kernels supplémentaires ont été sortis **dans `core/app/`, host-testés** : **`AppPhase`**
++ `appPhaseName()` (la table phase→label que l'UI et `/api/diagnostics` consomment,
+pinnée) et **`Readiness`** + `applyRuntimeFaults()` (la règle *ready/degraded* de P1.5 —
+une corde n'est prête que si activée **et** non-faultée ; l'instrument est *degraded* dès
+qu'une corde activée disparaît), plus des fonctions de service nommées. *Reste* :
+`ApplicationRuntime` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
+devienne `app.begin()/app.tick()`). **Choix assumé** : le reste des fonctions libres
+(`armInstrument`/`serviceParking`/`doPanic`/`doEmergencyStop`/`faultRuntimeAxis`) est
+le cœur **stateful** de la séquence d'armement/panic (P0) ; le mettre derrière une
+classe impose d'injecter ~8 globals dans exactement le code critique-sécurité qu'on ne
+doit pas déstabiliser — gain de maintenabilité (priorité 6) contre risque sur la
+sécurité (priorité 1). Extraction arrêtée là, volontairement. La FSM déplacée reste
+compile-vérifiée (Arduino-gated), à valider au banc.
 *Fichiers* : `platform/esp32/PlaybackScheduler.h`, `platform/esp32/CommandDispatcher.h`,
 `core/util/CommandResultRing.h`, `core/util/HoldButton.h`,
-`core/configuration/ProfileActivation.h` (nouveaux), `main.cpp`.
+`core/configuration/ProfileActivation.h`, `core/app/AppPhase.h`, `core/app/Readiness.h`
+(nouveaux), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
@@ -318,6 +341,9 @@ non-régression à chaque étape) :
 - **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
   ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
   transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
-- **P2.17** (reste) : `PlaybackScheduler` fait ; extraire `ApplicationRuntime` /
-  `ProfileManager` / `SafetySupervisor` / `ApplicationRuntime`, un composant à la fois,
-  pour réduire `main.cpp` à `app.begin()/app.tick()`.
+- **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, `AppPhase`, `Readiness`
+  et les utilitaires sont sortis (main.cpp −36 %). Le reste (`SafetySupervisor` /
+  `ApplicationRuntime` autour de la séquence armement/panic stateful) demande d'injecter
+  ~8 globals dans le code critique-sécurité P0 : à faire **un composant à la fois avec
+  banc d'essai**, en pesant le gain maintenabilité contre le risque sécurité (cf. §3
+  P2.17). Non entamé volontairement pour ne pas déstabiliser l'armement/panic éprouvé.
