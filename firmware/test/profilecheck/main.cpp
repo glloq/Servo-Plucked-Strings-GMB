@@ -35,6 +35,13 @@ static bool parse(const std::string& json, Profile& out) {
     return ProfileStorage::fromJson(doc.as<JsonVariantConst>(), out);
 }
 
+// The on-disk slot path (split device/instrument form, P1.13).
+static bool parseSlot(const std::string& json, Profile& out) {
+    JsonDocument doc;
+    if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+    return ProfileStorage::fromSlotJson(doc.as<JsonVariantConst>(), out);
+}
+
 int main(int argc, char** argv) {
     const char* files[] = {
         "instrument-profiles/ukulele-gcea.json",
@@ -234,6 +241,65 @@ int main(int argc, char** argv) {
         ProfileStorage::migrate(cur);
         CHECK((cur["profileVersion"] | 0) == kCurrentProfileVersion,
               "re-migrating a current profile leaves the version unchanged");
+    }
+
+    // P1.13: the on-disk SLOT format splits the profile into device/instrument
+    // sections. It must (a) actually be split on disk, (b) round-trip a profile
+    // losslessly through the split, and (c) still read a LEGACY flat slot (the
+    // pre-split on-disk form, incl. an old v1 one) so no stored profile is orphaned.
+    {
+        std::printf("device/instrument split slot storage\n");
+        std::string base = slurp(root + "/instrument-profiles/guitar-standard.json");
+        Profile p;
+        CHECK(parse(base, p), "base profile loads (interchange form)");
+
+        // (a) toSlotJson produces the SPLIT on-disk shape, not the flat one.
+        JsonDocument slot;
+        ProfileStorage::toSlotJson(p, slot);
+        CHECK(std::string(slot["storageFormat"] | "") == "gmb-split-v1",
+              "slot carries the split storage marker");
+        CHECK(slot["device"]["board"].is<JsonObjectConst>(), "device.board present");
+        CHECK(slot["device"]["network"].is<JsonObjectConst>(), "device.network present");
+        CHECK(slot["device"]["pins"].is<JsonArrayConst>(), "device.pins present");
+        CHECK(slot["instrument"]["info"]["name"].is<const char*>(),
+              "instrument.info.name present");
+        CHECK(slot["instrument"]["servos"].is<JsonArrayConst>(), "instrument.servos present");
+        // The flat top-level keys must be GONE — proof it is genuinely re-parented,
+        // not merely additive (which would double the file and desync).
+        CHECK(slot["board"].isNull() && slot["servos"].isNull() && slot["network"].isNull(),
+              "no flat top-level device/instrument keys remain");
+
+        // (b) Serialise as a file would, then read back through the slot path: lossless.
+        std::string ondisk;
+        serializeJson(slot, ondisk);
+        Profile p2;
+        CHECK(parseSlot(ondisk, p2), "split slot re-parses through fromSlotJson");
+        CHECK(p2.instrument.name == p.instrument.name, "instrument name survives the split");
+        CHECK(p2.strings.size() == p.strings.size(), "string count survives the split");
+        CHECK(p2.servos.size() == p.servos.size(), "servo count survives the split");
+        CHECK(p2.boardIdentifier == p.boardIdentifier, "device board survives the split");
+        CHECK(p2.network.ssid == p.network.ssid, "device network survives the split");
+        CHECK(p2.pins.size() == p.pins.size(), "device pins survive the split");
+        bool servoOk = p2.servos.size() == p.servos.size();
+        for (size_t k = 0; servoOk && k < p.servos.size(); ++k)
+            servoOk = p2.servos[k].channel == p.servos[k].channel &&
+                      p2.servos[k].function == p.servos[k].function;
+        CHECK(servoOk, "per-servo channel/function survive the split");
+
+        // (c1) A LEGACY flat slot (the interchange form written to disk before the
+        // split existed) must still load through the slot path unchanged.
+        Profile p3;
+        CHECK(parseSlot(base, p3), "legacy flat slot still loads via fromSlotJson");
+        CHECK(p3.servos.size() == p.servos.size(), "legacy flat slot yields the same profile");
+
+        // (c2) An even older v1 flat slot must load AND migrate through the slot path
+        // (the staticIp cleanup runs inside fromSlotJson's legacy branch).
+        std::string v1 = slurp(root + "/firmware/test/fixtures/profile-v1-ukulele.json");
+        if (!v1.empty()) {
+            Profile p4;
+            CHECK(parseSlot(v1, p4), "legacy v1 flat slot loads+migrates via fromSlotJson");
+            CHECK(ProfileValidator::isActivatable(p4), "migrated legacy slot is activatable");
+        }
     }
 
     std::printf(g_fail ? "\nPROFILECHECK FAILED (%d)\n" : "\nprofilecheck OK\n", g_fail);

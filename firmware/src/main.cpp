@@ -28,7 +28,10 @@
 #include <atomic>
 #include <vector>
 
+#include "core/app/AppPhase.h"
+#include "core/app/Readiness.h"
 #include "core/configuration/Profile.h"
+#include "core/configuration/ProfileActivation.h"
 #include "core/configuration/PluckPlan.h"
 #include "core/configuration/ProfileValidator.h"
 #include "core/diagnostics/Diagnostics.h"
@@ -38,12 +41,16 @@
 #include "core/midi/MidiEvent.h"
 #include "core/safety/SafetyManager.h"
 #include "core/util/Debounce.h"
+#include "core/util/HoldButton.h"
 #include "core/midi/MidiTransport.h"
+#include "platform/esp32/CommandDispatcher.h"
+#include "platform/esp32/MidiDinTransport.h"
 #include "platform/esp32/MidiUsbTransport.h"
 #include "platform/esp32/MidiWifi.h"
 #include "platform/esp32/Net.h"
 #include "platform/esp32/PlaybackScheduler.h"
 #include "platform/esp32/ProfileStorage.h"
+#include "platform/esp32/SafetySupervisor.h"
 #include "platform/esp32/ServoBank.h"
 #include "platform/esp32/WebApi.h"
 
@@ -59,31 +66,32 @@ GmbSysExService g_sysex;
 ServoBank g_servos;
 ActuatorManager g_actuators;  // P1.6: governs staggerable moves, never deadline strikes
 PlaybackScheduler g_scheduler;  // P2.17: the per-string mechanical FSM (was tickString)
+SafetySupervisor g_supervisor;  // P2.17: arm/park/hardStop/panic/fault ops (bound in setup)
 Net g_net;
 MidiWifi g_midi;                 // Wi-Fi UDP transport (spec §8.3, priority 1)
 MidiUsbTransport g_usbMidi;      // native USB-MIDI (S3) — P1.7 skeleton, inert until wired
-// Every MIDI transport feeds the SAME InstrumentController (P1.7). Add DIN/BLE here.
-MidiTransport* const g_transports[] = {&g_midi, &g_usbMidi};
+MidiDinTransport g_dinMidi;      // DIN-5/TRS UART — P1.7 functional, inert until a RX pin is bound
+// Every MIDI transport feeds the SAME InstrumentController (P1.7). Add BLE here.
+MidiTransport* const g_transports[] = {&g_midi, &g_usbMidi, &g_dinMidi};
 WebApi g_web;
 Diagnostics g_diag;  // runtime telemetry (P2.19)
 bool g_pcaHealthy = true;          // last loop-side PCA probe result (for diagnostics)
 uint8_t g_pcaFailedBoard = 0xFF;   // board bucket that failed, 0xFF = none
 
+// AppPhase (core/app/AppPhase.h) is the application lifecycle view:
 // ConfigSafe : no valid profile — actuators locked, web/net up (P0 boot-safe).
 // Boot       : transient power-on safe, before the arming sequence starts.
 // Parking    : profile validated, servos travelling to rest — no MIDI/test yet (P0).
 // Reconfiguring : an old profile's fingers are lifting before a swap.
 // Ready      : armed and playable.
-enum class AppPhase { ConfigSafe, Boot, Parking, Reconfiguring, Ready };
 AppPhase g_phase = AppPhase::Boot;
 bool g_degraded = false;  // Ready but with one or more strings disabled by a fault
 
-// Two-phase profile activation: the OLD profile's fingers are driven to rest and
-// allowed to lift BEFORE the old servo config is destroyed, so a profile that
-// removes/reassigns a finger servo can't leave a finger pressed while the new
-// profile arms. Non-null while an activation is waiting for the old fingers.
-Profile* g_pendingProfile = nullptr;
-uint32_t g_pendingActivateAtMs = 0;
+// Two-phase profile activation (owned by ProfileActivation, P2.17): the OLD profile's
+// fingers are driven to rest and allowed to lift BEFORE the old servo config is
+// destroyed, so a profile that removes/reassigns a finger servo can't leave a finger
+// pressed while the new profile arms.
+ProfileActivation g_activation;
 
 std::vector<bool> g_stringFaulted;   // runtime fault (servo write error, etc.)
 
@@ -96,9 +104,7 @@ Debouncer g_estopDeb;  // debounced E-stop input (avoids a spurious trip)
 // A ~2 s hold avoids accidental triggers; the switch is live (no reboot).
 constexpr uint8_t kBootButtonPin = 0;
 constexpr uint32_t kBootHoldMs = 2000;
-uint32_t g_bootDownAtMs = 0;
-bool g_bootWasDown = false;
-bool g_bootTriggered = false;
+HoldButton g_bootHold;  // long-press on BOOT -> force hotspot (host-tested, P2.17)
 
 // Pending test-note Note Offs (scheduled by /api/test/note).
 struct TestNoteOff { uint8_t channel; uint8_t note; uint32_t atMs; };
@@ -108,64 +114,20 @@ std::vector<TestNoteOff> g_testOffs;
 // PlaybackScheduler (g_scheduler), which owns the per-string state (P2.17).
 
 // ---- Web -> loop() command queue (P0: no mechanical state off the main loop) --
-enum class CmdType : uint8_t { Panic, Reset, ActivateProfile, TestNote, TestServo };
-struct AppCommand {
-    CmdType type;
-    uint32_t id = 0;
-    Profile* profile = nullptr;
-    uint8_t channel = 0, note = 0, velocity = 0;
-    uint16_t durationMs = 0;
-    int16_t servoIndex = -1;
-    bool servoActive = false;
-    uint16_t servoUs = 0;  // >0: drive the test servo to this exact pulse (live cal)
-};
-
-std::atomic<uint32_t> g_nextCmdId{1};
-std::atomic<int> g_cmdQueueDepth{0};  // live web->loop queue depth (diagnostics)
-struct CmdResult { uint32_t id = 0; uint8_t state = 0; };  // 0=queued 1=done 2=refused
-constexpr int kCmdResultRing = 16;
-CmdResult g_cmdResults[kCmdResultRing];
-SemaphoreHandle_t g_resultMutex = nullptr;
-
-void setCommandResult(uint32_t id, uint8_t state) {
-    if (id == 0) return;
-    if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    for (auto& r : g_cmdResults)
-        if (r.id == id) { r.state = state; if (g_resultMutex) xSemaphoreGive(g_resultMutex); return; }
-    static int next = 0;
-    g_cmdResults[next] = {id, state};
-    next = (next + 1) % kCmdResultRing;
-    if (g_resultMutex) xSemaphoreGive(g_resultMutex);
-}
-
-std::string commandStateStr(uint32_t id) {
-    const char* s = "unknown";
-    if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    for (const auto& r : g_cmdResults)
-        if (r.id == id) { s = r.state == 0 ? "queued" : r.state == 1 ? "succeeded" : "refused"; break; }
-    if (g_resultMutex) xSemaphoreGive(g_resultMutex);
-    return s;
-}
-QueueHandle_t g_cmdQueue = nullptr;
+// The queue/dispatch/result plumbing lives in CommandDispatcher (P2.17); the command
+// HANDLERS (do*) stay here and are injected into drain() below.
+CommandDispatcher g_commands;
 SemaphoreHandle_t g_stateMutex = nullptr;
 SemaphoreHandle_t g_storageMutex = nullptr;
 std::atomic<bool> g_panicRequested{false};
 std::atomic<bool> g_hotspotRequested{false};  // BOOT button / web -> force AP
 bool g_authConfiguredCache = false;
 
+// Thin wrapper: enqueue and feed the queue-depth high-water into diagnostics.
 uint32_t enqueueCommand(const AppCommand& in) {
-    if (!g_cmdQueue) return 0;
-    AppCommand c = in;
-    c.id = g_nextCmdId.fetch_add(1);
-    AppCommand* h = new AppCommand(c);
-    if (xQueueSend(g_cmdQueue, &h, 0) != pdTRUE) {
-        delete h->profile;
-        delete h;
-        return 0;
-    }
-    g_diag.observeCmdQueueDepth(static_cast<uint32_t>(g_cmdQueueDepth.fetch_add(1) + 1));
-    setCommandResult(c.id, 0);
-    return c.id;
+    uint32_t id = g_commands.enqueue(in);
+    if (id) g_diag.observeCmdQueueDepth(static_cast<uint32_t>(g_commands.depth()));
+    return id;
 }
 
 struct StateGuard {
@@ -223,20 +185,13 @@ void applyProfile() {
 // excludes every disabled or runtime-faulted string, and update g_degraded.
 int rebuildRuntimeCapabilities() {
     StateGuard lock;
-    Profile rp = g_profile;
-    int originallyEnabled = 0, ready = 0;
-    for (size_t i = 0; i < rp.strings.size(); ++i) {
-        if (g_profile.strings[i].enabled) ++originallyEnabled;
-        if (!rp.strings[i].enabled || (i < g_stringFaulted.size() && g_stringFaulted[i]))
-            rp.strings[i].enabled = false;
-        else
-            ++ready;
-    }
-    g_degraded = ready < originallyEnabled;
+    Profile rp = g_profile;  // a copy: the live profile is never mutated here
+    Readiness rd = applyRuntimeFaults(rp, g_stringFaulted);  // ready-only view + counts
+    g_degraded = rd.degraded;
     g_profile.capabilitiesRevision++;
     rp.capabilitiesRevision = g_profile.capabilitiesRevision;
     g_sysex.rebuild(rp);
-    return ready;
+    return rd.ready;
 }
 
 void notifyCapabilitiesChanged() {
@@ -248,118 +203,30 @@ void notifyCapabilitiesChanged() {
     if (!msg.empty()) g_midi.notifyLastSender(msg.data(), msg.size());
 }
 
-void hardStopAll();  // fwd (immediate, no mechanical wait — panic/E-stop/fault)
-
 // Central runtime string-fault path (servo write error, PCA loss on one board…).
-// Also the fault callback the PlaybackScheduler uses (via actOk); it calls back into
-// the scheduler to abort the affected string's FSM.
+// Also the fault callback the PlaybackScheduler uses. Now lives in SafetySupervisor
+// (P2.17); this thin wrapper keeps the scheduler's callback + call sites unchanged.
 void faultRuntimeAxis(size_t i, const char* reason, uint32_t nowMs) {
-    if (i >= g_instrument.stringCount()) return;
-    g_instrument.faultString(i);
-    // Physically release anything this string had engaged and reset its FSM.
-    g_scheduler.abortString(i);
-    if (i < g_stringFaulted.size()) g_stringFaulted[i] = true;
-    g_safety.recordFault("string", std::string(reason) + " on string " + std::to_string(i),
-                         nowMs);
-    int working = rebuildRuntimeCapabilities();
-    notifyCapabilitiesChanged();
-    if (working <= 0) {
-        hardStopAll();
-        g_safety.panic("no operational strings remain", nowMs);
-    }
+    g_supervisor.faultAxis(i, reason, nowMs);
 }
 
-bool safetyLocked() {
-    SafetyState s = g_safety.state();
-    return s == SafetyState::Panic || s == SafetyState::EmergencyStop;
-}
+bool safetyLocked() { return g_supervisor.locked(); }
 
-// Begin the arming sequence (spec §13/§21, P0): validate, then PARK every servo at
-// rest with the outputs live and wait the mechanical settle before declaring Ready.
-// No homing: servos have known positions. Refuses (leaving the caller to fall back
-// to a safe state) if a panic/E-stop is latched, the profile is invalid, or a
-// servo/PCA channel could not attach or respond.
-//
-// This only STARTS parking (phase -> Parking); serviceParking() finishes it once the
-// mechanical time has elapsed (Parking -> Ready). No MIDI note or mechanical test can
-// run until then — the note engine and doTestServo both require actuatorsAllowed(),
-// which is false throughout Parking.
-bool armInstrument(uint32_t nowMs) {
-    if (safetyLocked()) return false;
-    if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) {
-        g_safety.emergencyStop(nowMs);
-        return false;
-    }
-    if (!ProfileValidator::isActivatable(g_profile)) return false;
-    if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) {
-        g_safety.recordFault("attach", "a servo/PCA9685 could not attach or respond", nowMs);
-        return false;
-    }
-    g_safety.reset();  // -> PowerOnSafe (clean slate before parking)
-    g_degraded = false;
-    g_actuators.reset();
-    for (size_t i = 0; i < g_profile.strings.size(); ++i) {
-        if (!g_profile.strings[i].enabled)
-            g_instrument.string(i).disable();  // a disabled string never plays
-    }
-    g_scheduler.clearCurrentFingers();
-    // Parking: outputs live, drive every servo to rest, then wait max(travel+settle)
-    // before arming so nothing is commanded to play while a finger is still moving.
-    g_servos.outputEnable(true);
-    g_servos.moveAllToRest();
-    uint32_t parkMs = g_servos.parkDurationMs();
-    if (!g_safety.beginParking(true, true, parkMs, nowMs)) return false;
-    g_phase = AppPhase::Parking;
-    return true;
-}
+// Arming / parking / reset now live in SafetySupervisor (P2.17). These thin wrappers
+// keep every call site (setup, command handlers, servicePendingActivation) unchanged.
+// arm() only STARTS parking (phase -> Parking); serviceParking() finishes it once the
+// mechanical settle has elapsed (Parking -> Ready). No MIDI note or mechanical test can
+// run until then — the note engine and doTestServo both require actuatorsAllowed().
+bool armInstrument(uint32_t nowMs) { return g_supervisor.arm(nowMs); }
+void serviceParking(uint32_t nowMs) { g_supervisor.serviceParking(nowMs); }
+bool doReset(uint32_t nowMs) { return g_supervisor.reset(nowMs); }
 
-// Finish the arming sequence: once the mechanical settle has elapsed, Parking -> Ready
-// and the note engine is allowed to run. Called every loop; a no-op outside Parking.
-void serviceParking(uint32_t nowMs) {
-    if (g_phase != AppPhase::Parking) return;
-    if (g_safety.tickParking(nowMs)) g_phase = AppPhase::Ready;  // Armed
-}
-
-// Explicit recovery after a panic / E-stop.
-bool doReset(uint32_t nowMs) {
-    if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) return false;
-    if (!ProfileValidator::isActivatable(g_profile)) return false;
-    if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) return false;
-    g_safety.reset();
-    g_safety.clearFaults();
-    for (size_t i = 0; i < g_stringFaulted.size(); ++i) {
-        if (g_stringFaulted[i]) {
-            g_stringFaulted[i] = false;
-            g_instrument.recoverString(i);
-        }
-    }
-    return armInstrument(nowMs);
-}
-
-// Immediate hard stop (E-stop / panic / major fault): cut PCA /OE and direct PWM at
-// once with no mechanical wait, cancel all commands, lock the state. Never gated on a
-// servo movement completing (spec P0 §21.2) — that is what controlledPark is for.
-void hardStopAll() {
-    g_instrument.panic();
-    g_servos.hardStop();
-    g_actuators.reset();
-    g_scheduler.reset();  // clear every string's FSM + pressed-finger state
-    g_testOffs.clear();
-    delete g_pendingProfile;
-    g_pendingProfile = nullptr;
-    g_phase = AppPhase::Boot;
-}
-
-void doPanic() {
-    hardStopAll();
-    if (g_safety.state() != SafetyState::EmergencyStop)
-        g_safety.panic("web/CC panic", millis());
-}
-
-void doEmergencyStop() {
-    hardStopAll();
-    g_safety.emergencyStop(millis());
-}
+// Immediate hard stop (E-stop / panic / major fault): cut PCA/OE and direct PWM at once
+// with no mechanical wait, cancel all commands, lock the state — never gated on a servo
+// movement completing (spec P0 §21.2). The op lives in SafetySupervisor (P2.17); the
+// test-note + pending-swap cleanup is the hardStopCleanup callback bound in setup().
+void doPanic() { g_supervisor.panic(); }
+void doEmergencyStop() { g_supervisor.emergencyStop(); }
 
 // ---- loop-side command handlers (only ever called from drainCommands) --------
 
@@ -381,27 +248,23 @@ bool doActivateProfile(const Profile& p, uint32_t nowMs) {
     g_servos.outputEnable(true);
     g_servos.moveAllToRest();
     uint32_t wait = g_servos.parkDurationMs();
-    delete g_pendingProfile;
-    g_pendingProfile = new Profile(p);
-    g_pendingActivateAtMs = nowMs + wait;
+    g_activation.begin(p, nowMs + wait);  // apply once the controlled park has elapsed
     return true;
 }
 
 // Phase 2: once the old fingers have lifted (controlled park complete), cut power,
 // tear down, and swap in the new profile.
 void servicePendingActivation(uint32_t nowMs) {
-    if (!g_pendingProfile) return;
-    if (static_cast<int32_t>(nowMs - g_pendingActivateAtMs) < 0) return;
-    g_servos.hardStop();  // controlled park done: safe to cut before teardown
-    {
-        StateGuard lock;
-        g_profile = *g_pendingProfile;
-        g_profile.capabilitiesRevision++;
-        applyProfile();
-    }
-    delete g_pendingProfile;
-    g_pendingProfile = nullptr;
-    if (!armInstrument(nowMs)) g_phase = AppPhase::Boot;
+    g_activation.service(nowMs, [nowMs](const Profile& p) {
+        g_servos.hardStop();  // controlled park done: safe to cut before teardown
+        {
+            StateGuard lock;
+            g_profile = p;
+            g_profile.capabilitiesRevision++;
+            applyProfile();
+        }
+        if (!armInstrument(nowMs)) g_phase = AppPhase::Boot;
+    });
 }
 
 bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,
@@ -434,15 +297,7 @@ bool doTestServo(int index, bool active, uint16_t us) {
     return true;
 }
 
-void purgeCommands() {
-    if (!g_cmdQueue) return;
-    AppCommand* c = nullptr;
-    while (xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE) {
-        g_cmdQueueDepth.fetch_sub(1);
-        delete c->profile;
-        delete c;
-    }
-}
+void purgeCommands() { g_commands.purge(); }
 
 bool servicePanic(uint32_t nowMs) {
     (void)nowMs;
@@ -457,57 +312,34 @@ bool servicePanic(uint32_t nowMs) {
 // the radio is independent of the instrument state, so it works in any phase.
 void serviceHotspotRequests(uint32_t nowMs) {
     bool down = digitalRead(kBootButtonPin) == LOW;  // active-low BOOT button
-    if (down && !g_bootWasDown) { g_bootDownAtMs = nowMs; g_bootTriggered = false; }
-    if (down && !g_bootTriggered && nowMs - g_bootDownAtMs >= kBootHoldMs) {
-        g_bootTriggered = true;
-        g_hotspotRequested.store(true);
-    }
-    g_bootWasDown = down;
+    if (g_bootHold.update(down, nowMs)) g_hotspotRequested.store(true);  // long-press
     if (g_hotspotRequested.exchange(false)) {
         g_net.forceAccessPoint();
         Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
     }
 }
 
+// Run a bounded batch of queued commands on the main loop. The command HANDLERS live
+// here (they touch instrument/servos/safety); CommandDispatcher owns the plumbing and
+// records each outcome. Handlers return whether the command succeeded.
 void drainCommands(uint32_t nowMs) {
-    if (!g_cmdQueue) return;
-    static constexpr int kMaxCommandsPerTick = 2;
-    AppCommand* c = nullptr;
-    for (int n = 0; n < kMaxCommandsPerTick && xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE;
-         ++n) {
-        g_cmdQueueDepth.fetch_sub(1);
-        bool ok = true;
-        switch (c->type) {
-            case CmdType::Panic: doPanic(); purgeCommands(); break;
-            case CmdType::Reset: ok = doReset(nowMs); break;
-            case CmdType::ActivateProfile:
-                ok = c->profile && doActivateProfile(*c->profile, nowMs);
-                break;
+    g_commands.drain(2, [nowMs](const AppCommand& c) -> bool {
+        switch (c.type) {
+            case CmdType::Panic:          doPanic(); g_commands.purge(); return true;
+            case CmdType::Reset:          return doReset(nowMs);
+            case CmdType::ActivateProfile: return c.profile && doActivateProfile(*c.profile, nowMs);
             case CmdType::TestNote:
-                ok = doTestNote(c->channel, c->note, c->velocity, c->durationMs, nowMs);
-                break;
+                return doTestNote(c.channel, c.note, c.velocity, c.durationMs, nowMs);
             case CmdType::TestServo:
-                ok = doTestServo(c->servoIndex, c->servoActive, c->servoUs);
-                break;
+                return doTestServo(c.servoIndex, c.servoActive, c.servoUs);
         }
-        setCommandResult(c->id, ok ? 1 : 2);
-        delete c->profile;
-        delete c;
-    }
+        return true;
+    });
 }
 
 // App phase as the string reported to the web/API (shared by ctx.appState and the
 // diagnostics endpoint so the two never diverge).
-const char* appStateStr() {
-    switch (g_phase) {
-        case AppPhase::Ready:         return g_degraded ? "readyDegraded" : "ready";
-        case AppPhase::Parking:       return "parking";
-        case AppPhase::Reconfiguring: return "reconfiguring";
-        case AppPhase::ConfigSafe:    return "configSafe";
-        case AppPhase::Boot:          break;
-    }
-    return "boot";
-}
+const char* appStateStr() { return appPhaseName(g_phase, g_degraded); }
 
 // ---- Diagnostics (P2.19) -----------------------------------------------------
 const char* resetReasonStr() {
@@ -582,10 +414,28 @@ void setup() {
     // Wire the playback scheduler to its collaborators + the central fault path (P2.17).
     g_scheduler.begin(&g_instrument, &g_servos, &g_actuators, &g_profile, faultRuntimeAxis);
 
-    g_cmdQueue = xQueueCreate(16, sizeof(AppCommand*));
+    // Bind the SafetySupervisor to the globals it operates on (P2.17). No state moves:
+    // it references the same objects every other reader uses; only the arm/park/stop/
+    // fault OPERATIONS live in it now. Must precede the arming below.
+    SafetySupervisor::Deps sd;
+    sd.safety = &g_safety;
+    sd.servos = &g_servos;
+    sd.instrument = &g_instrument;
+    sd.scheduler = &g_scheduler;
+    sd.actuators = &g_actuators;
+    sd.phase = &g_phase;
+    sd.degraded = &g_degraded;
+    sd.stringFaulted = &g_stringFaulted;
+    sd.estopPin = &g_estopPin;
+    sd.profile = &g_profile;
+    sd.rebuildCaps = []() -> int { return rebuildRuntimeCapabilities(); };
+    sd.notifyCaps = []() { notifyCapabilitiesChanged(); };
+    sd.hardStopCleanup = []() { g_testOffs.clear(); g_activation.cancel(); };
+    g_supervisor.bind(sd);
+
+    g_commands.begin(16);  // web->loop command queue + result ring + mutex (P2.17)
     g_stateMutex = xSemaphoreCreateMutex();
     g_storageMutex = xSemaphoreCreateMutex();
-    g_resultMutex = xSemaphoreCreateMutex();
 
     g_storage.begin();
     if (g_storage.degraded()) {
@@ -621,7 +471,9 @@ void setup() {
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
     g_usbMidi.begin();  // P1.7: inert until wired to native USB-MIDI (no-op elsewhere)
+    g_dinMidi.begin(nullptr);  // P1.7: byte->event logic ready; inert until a DIN RX UART is bound here
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
+    g_bootHold.configure(kBootHoldMs);
 
     WebContext ctx;
     ctx.profile = &g_profile;
@@ -647,7 +499,7 @@ void setup() {
         c.servoUs = us > 0 ? static_cast<uint16_t>(us > 65535 ? 65535 : us) : 0;
         return enqueueCommand(c);
     };
-    ctx.commandState = [](uint32_t id) -> std::string { return commandStateStr(id); };
+    ctx.commandState = [](uint32_t id) -> std::string { return g_commands.commandState(id); };
     ctx.onFormatStorage = []() -> bool { return g_storage.format(); };
     ctx.lockState = []() { if (g_stateMutex) xSemaphoreTake(g_stateMutex, portMAX_DELAY); };
     ctx.unlockState = []() { if (g_stateMutex) xSemaphoreGive(g_stateMutex); };

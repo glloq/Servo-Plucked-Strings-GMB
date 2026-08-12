@@ -19,6 +19,15 @@ void MidiWifi::poll(uint32_t nowUs) {
     while (packet > 0 && handled < kMaxPacketsPerTick) {
         IPAddress remoteIp = udp_.remoteIP();
         uint16_t remotePort = udp_.remotePort();
+        // P1.11 source gate: with a non-Open posture, refuse a datagram from an
+        // unrecognised sender BEFORE parsing it, so stray/rogue UDP never reaches the
+        // note engine. Default Open accepts everything, so this is a no-op until wired.
+        if (!gate_.accept({static_cast<uint32_t>(remoteIp), remotePort})) {
+            udp_.clear();  // discard the refused datagram
+            ++handled;
+            packet = udp_.parsePacket();
+            continue;
+        }
         // Reject an oversized datagram ENTIRELY: reading only the first
         // sizeof(buf_) bytes would parse a truncated message (a Note Off past the
         // buffer would be lost, leaving a note stuck on). Discard and skip it.

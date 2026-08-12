@@ -45,7 +45,13 @@ TEST_SRC := \
   test_diagnostics.cpp \
   test_transport.cpp \
   test_actuator_manager.cpp \
-  test_device_instrument.cpp
+  test_device_instrument.cpp \
+  test_command_ring.cpp \
+  test_holdbutton.cpp \
+  test_profile_activation.cpp \
+  test_app_phase.cpp \
+  test_readiness.cpp \
+  test_udp_source_gate.cpp
 
 BIN := run_tests
 

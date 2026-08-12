@@ -351,6 +351,69 @@ void ProfileStorage::migrate(JsonDocument& doc) {
     doc["profileVersion"] = kCurrentProfileVersion;
 }
 
+namespace {
+// Envelope generation marker for the on-disk device/instrument split (P1.13). It is
+// ORTHOGONAL to profileVersion: profileVersion versions the field *schema* (shared with
+// the flat interchange format), while storageFormat marks how those fields are *laid
+// out on disk*. Keeping them separate lets the split evolve without disturbing the
+// web/interchange contract, which stays flat at its own profileVersion.
+constexpr char kSlotFormat[] = "gmb-split-v1";
+}  // namespace
+
+void ProfileStorage::toSlotJson(const Profile& p, JsonDocument& doc) {
+    // Build the flat interchange form once (the single source of field logic), then
+    // re-parent its sections into device/instrument. ArduinoJson deep-copies on
+    // cross-document assignment, so each section is a full independent copy.
+    JsonDocument flat;
+    toJson(p, flat);
+    doc["storageFormat"] = kSlotFormat;
+    doc["project"] = flat["project"];
+    doc["profileVersion"] = flat["profileVersion"];
+    doc["capabilitiesRevision"] = flat["capabilitiesRevision"];
+    JsonObject dev = doc["device"].to<JsonObject>();
+    dev["board"] = flat["board"];
+    dev["pins"] = flat["pins"];
+    dev["network"] = flat["network"];
+    JsonObject ins = doc["instrument"].to<JsonObject>();
+    ins["info"] = flat["instrument"];  // InstrumentInfo (name/type/…) — flat key is "instrument"
+    ins["midi"] = flat["midi"];
+    ins["stringFretSelection"] = flat["stringFretSelection"];
+    ins["power"] = flat["power"];
+    ins["pluck"] = flat["pluck"];
+    ins["strings"] = flat["strings"];
+    ins["servos"] = flat["servos"];
+}
+
+bool ProfileStorage::fromSlotJson(JsonVariantConst doc, Profile& out) {
+    // Legacy flat slot (pre-split): no `device` section. Read it through the interchange
+    // path (migrate handles v1->v2 etc.), so old on-disk profiles keep loading and are
+    // rewritten split on the next save.
+    if (!doc["device"].is<JsonObjectConst>()) {
+        JsonDocument tmp;
+        tmp.set(doc);
+        migrate(tmp);
+        return fromJson(tmp.as<JsonVariantConst>(), out);
+    }
+    // Split slot: re-flatten the two sections, then hand off to the ONE field parser.
+    JsonObjectConst dev = doc["device"];
+    JsonObjectConst ins = doc["instrument"];
+    JsonDocument flat;
+    flat["project"] = doc["project"];
+    flat["profileVersion"] = doc["profileVersion"];
+    flat["capabilitiesRevision"] = doc["capabilitiesRevision"];
+    flat["board"] = dev["board"];
+    flat["pins"] = dev["pins"];
+    flat["network"] = dev["network"];
+    flat["instrument"] = ins["info"];
+    flat["midi"] = ins["midi"];
+    flat["stringFretSelection"] = ins["stringFretSelection"];
+    flat["power"] = ins["power"];
+    flat["pluck"] = ins["pluck"];
+    flat["strings"] = ins["strings"];
+    flat["servos"] = ins["servos"];
+    return fromJson(flat.as<JsonVariantConst>(), out);
+}
+
 bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     if (doc["instrument"].isNull()) return false;
     bool enumsOk = true;  // set false by any unknown enum string -> reject profile
@@ -583,7 +646,7 @@ bool ProfileStorage::begin() {
         JsonDocument doc;
         bool ok = deserializeJson(doc, f) == DeserializationError::Ok;
         Profile check;
-        ok = ok && fromJson(doc.as<JsonVariantConst>(), check);
+        ok = ok && fromSlotJson(doc.as<JsonVariantConst>(), check);  // split or legacy slot
         f.close();
         return ok;
     };
@@ -622,10 +685,14 @@ std::vector<std::string> ProfileStorage::list() const {
         File f = LittleFS.open(slotPath(i).c_str(), "r");
         if (f) {
             JsonDocument doc;
-            if (deserializeJson(doc, f) == DeserializationError::Ok)
-                names.push_back(std::string(doc["instrument"]["name"] | "Profile"));
-            else
+            if (deserializeJson(doc, f) == DeserializationError::Ok) {
+                // Split slot: name is under instrument.info; legacy flat slot: instrument.name.
+                JsonVariantConst nm = doc["instrument"]["info"]["name"];
+                if (nm.isNull()) nm = doc["instrument"]["name"];
+                names.push_back(std::string(nm | "Profile"));
+            } else {
                 names.push_back("");
+            }
             f.close();
         } else {
             names.push_back("");
@@ -642,8 +709,9 @@ bool ProfileStorage::load(int slot, Profile& out) const {
     bool ok = deserializeJson(doc, f) == DeserializationError::Ok;
     f.close();
     if (!ok) return false;
-    migrate(doc);  // upgrade an old on-disk profile to the current schema (P1.12)
-    return fromJson(doc.as<JsonVariantConst>(), out);
+    // Slot files use the split on-disk form; fromSlotJson reads split OR a legacy flat
+    // slot (which it migrates), so old on-disk profiles keep loading (P1.13 / P1.12).
+    return fromSlotJson(doc.as<JsonVariantConst>(), out);
 }
 
 bool ProfileStorage::save(int slot, const Profile& p) {
@@ -658,7 +726,7 @@ bool ProfileStorage::save(int slot, const Profile& p) {
     File f = LittleFS.open(tmp.c_str(), "w");
     if (!f) return false;
     JsonDocument doc;
-    toJson(p, doc);
+    toSlotJson(p, doc);  // split device/instrument on-disk form (P1.13)
     size_t written = serializeJson(doc, f);
     f.close();
     if (written == 0) {  // write failed: keep the old slot intact
@@ -673,7 +741,7 @@ bool ProfileStorage::save(int slot, const Profile& p) {
         JsonDocument vd;
         Profile check;
         bool ok = deserializeJson(vd, rf) == DeserializationError::Ok &&
-                  fromJson(vd.as<JsonVariantConst>(), check);
+                  fromSlotJson(vd.as<JsonVariantConst>(), check);
         rf.close();
         if (!ok) { LittleFS.remove(tmp.c_str()); return false; }
     }

@@ -4,7 +4,8 @@ Reprise des points incomplets/fragiles listés dans la mission (P0 → P2), en
 privilégiant **sécurité, déterminisme, cohérence, robustesse, tests,
 maintenabilité**, sans casser les fonctionnalités opérationnelles.
 
-Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push**.
+Branche : `claude/elegant-cannon-zh23kn` · ~23 commits d'audit (petits, indépendants),
+**CI verte à chaque push** (une faille de flake CI corrigée, cf. P1.16 §4).
 
 > ⚠️ **Aucune validation mécanique/électrique réelle** n'a été faite : tout ce qui
 > suit est validé *en logiciel* (tests natifs + sanitizers + compilation ESP32 en
@@ -21,14 +22,14 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P0.3 | Séparer `hardStop()` et `controlledPark()` | **DONE** | `a2116df` |
 | P1.4 | API homogène `ActuatorResult` (ServoBank) | **DONE** | `f15b6a8` |
 | P1.5 | Perte PCA locale (fault des cordes concernées, pas de panic global) | **DONE** | `f30a5cb` |
-| P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **PARTIAL** | — |
-| P1.7 | Abstraction des transports MIDI (UDP/USB/DIN/BLE) | **PARTIAL** | (voir historique) |
+| P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **DONE** | (voir historique) |
+| P1.7 | Abstraction des transports MIDI (UDP+DIN fonctionnels ; USB/BLE restants) | **PARTIAL** | (voir historique) |
 | P1.8 | Cohérence doc CC120/CC123 (≠ panic verrouillé) | **DONE** | `584895f` |
 | P1.9 | `staticIp` : implémenter ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
-| P1.11 | Modes Setup / Performance + sécurité réseau | **PARTIAL** | — |
+| P1.11 | Modes Setup/Performance + sécurité réseau (postures + gate UDP host-testé ; câblage runtime différé) | **PARTIAL** | (voir historique) |
 | P1.12 | Vraie migration de profils (v1→v2) + fixtures | **DONE** | `9675cc8` |
-| P1.13 | Séparer `DeviceConfig` et `InstrumentProfile` | **PARTIAL** | (voir historique) |
+| P1.13 | Séparer `DeviceConfig`/`InstrumentProfile` (structs + split disque faits ; web/comportement différés) | **PARTIAL** | (voir historique) |
 | P1.14 | Builds PlatformIO multi-cartes (S3 / WROOM-32 / DevKit v1) | **DONE** | `a1ca8b7` |
 | P1.15 | Réserver GPIO0 (BOOT-hotspot) | **DONE** | `584895f` |
 | P1.16 | CI GitHub Actions complète | **DONE** | `a1ca8b7` |
@@ -36,25 +37,25 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
 | P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**14 DONE · 5 PARTIAL · 0 NOT STARTED** — les 19 points ont tous reçu un increment réel
-et testé. Les 5 PARTIAL (P1.6, P1.7, P1.11, P1.13, P2.17) ont leur abstraction/boundary
-en place et testée ; il ne reste que du câblage fonctionnel/persistant, des refactors
-que la mission demande de faire *progressivement, par composants avec tests de
+**15 DONE · 4 PARTIAL · 0 NOT STARTED** — les 19 points ont tous reçu un increment réel
+et testé. Les 4 PARTIAL (P1.7, P1.11, P1.13, P2.17) ont leur abstraction/boundary en
+place et testée ; il ne reste que du câblage fonctionnel/persistant, des refactors que
+la mission demande de faire *progressivement, par composants avec tests de
 non-régression*. Voir §6 pour l'approche recommandée.
 
 ---
 
 ## 2. Résultats des tests & builds
 
-Tous verts, en local **et** en CI (5 runs, tous `success`) :
+Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P1.16 §4) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **218 tests, 3654 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **218 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **239 tests, 3760 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **239 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
-| `profilecheck` (8 profils + migration v1→v2) | OK |
+| `profilecheck` (8 profils + migration v1→v2 + split slot device/instrument P1.13) | OK |
 | Build **ESP32-S3-DevKitC-1** (PlatformIO, CI) | ✅ compile |
 | Build **ESP32-WROOM-32** (PlatformIO, CI) | ✅ compile |
 | Build **ESP32 DevKit v1** (PlatformIO, CI) | ✅ compile |
@@ -64,7 +65,7 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 > Les 3 builds ESP32 sont donc exécutés et **validés sur GitHub Actions**, pas en
 > local — c'est exactement le rôle de la CI ajoutée (P1.16).
 
-Nombre de tests : ~198 → **206** (+8), plus les assertions ajoutées à
+Nombre de tests : ~198 → **239** (+41), plus les assertions ajoutées à
 `servobankcheck` / `profilecheck`. Le README n'affiche plus de nombre codé en dur
 (badge CI = source de vérité).
 
@@ -113,35 +114,48 @@ MIDI sur les survivantes. Panic global uniquement si plus aucune corde, ou si la
 carte perdue ne porte aucune corde (ressource commune → fail-safe).
 *Fichiers* : `ServoBank.*`, `main.cpp`, `SAFETY.md`. *Tests* : `servobankcheck`.
 
-### P1.6 — PowerGovernor étendu (PARTIAL)
-*Fait* : couche **`ActuatorManager`** (core, testable) réalisant l'archi
+### P1.6 — PowerGovernor étendu (DONE, hors validation banc)
+Couche **`ActuatorManager`** (core, testable) réalisant l'archi
 `PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`, avec la distinction
-**étalable** (finger press → gouverné) vs **échéance sonore** (pluck/strum/damper strike
-→ **jamais** throttlé). **Chaque mouvement passe désormais par le manager** : la press de
-doigt via `requestMove(Staggerable)` (throttlée), et **toutes les frappes** (pluck,
-strum, damper — y compris la relâche d'accord qui décharge plusieurs dampers d'un coup)
-via `requestMove(Deadline)` (jamais throttlées mais **comptées**). Le manager expose la
-**répartition des mouvements** (deadline / staggerable accordés / différés), visible dans
-`GET /api/diagnostics` (`moveMix`) — de quoi mesurer l'in-rush réel au banc. Le governor
-garde limite globale + **par PCA** + `staggerMs` + désactivation à 0. *Tests* :
-`test_actuator_manager.cpp` (deadline toujours passant, staggerable gouverné, comptage du
-mix). *Reste* : **hard-throttler** les dampers de relâche d'accord (demande une infra de
-retry dans la FSM + mesure d'in-rush au banc pour la calibrer) ; le strum-lift reste non
-gouverné (chemin d'anticipation, sensible au timing — la mission recommande de ne pas
-dégrader la synchro). *Fichiers* : `core/instrument/ActuatorManager.h`,
-`platform/esp32/PlaybackScheduler.h`, `core/diagnostics/Diagnostics.h`, `main.cpp`.
+**étalable** vs **échéance sonore**. **Les DEUX événements d'in-rush simultané sont
+désormais gouvernés** : l'attaque d'accord (**presses de doigts**) *et* la relâche
+d'accord (**strikes de dampers**), tous deux via `requestMove(Staggerable)` — la press
+de doigt dans la phase `PressingFinger`, et le damper de Note-Off via une **infra de
+retry** (`pendingDamper` : la frappe est différée jusqu'au permis du governor, et la
+déclaration `idle` attend que le damper différé ait physiquement voyagé — un mute
+retardé de quelques ms ne fait que laisser la corde sonner un cheveu plus longtemps).
+Les pluck/strum strikes (le son) restent **Deadline** (jamais throttlés). Le manager
+compte la **répartition** (`moveMix` dans `GET /api/diagnostics`). Le governor garde
+limite globale + **par PCA** + `staggerMs` + désactivation à 0. *Tests* :
+`test_actuator_manager.cpp` (deadline toujours passant, staggerable gouverné, comptage).
+*Exclusions volontaires* : le strum-lift reste non gouverné (chemin d'anticipation,
+sensible au timing — la mission recommande de ne pas dégrader la synchro musicale) ; les
+aux sont configurables plus tard. *Réserve* : la logique `pendingDamper` est **compile-
+vérifiée** (FSM Arduino-gated) — à reconfirmer au banc, comme le reste de la FSM.
+*Fichiers* : `core/instrument/ActuatorManager.h`, `platform/esp32/PlaybackScheduler.h`,
+`core/diagnostics/Diagnostics.h`, `main.cpp`.
 
 ### P1.7 — Transports MIDI (PARTIAL)
 *Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/
-name` ; `MidiWifi` s'y conforme (**MidiUdpTransport**, source `WifiUdp` déjà tagguée) ;
-squelette **`MidiUsbTransport`** (S3, poll no-op documenté) ; `main.cpp` alimente le
-**même** `InstrumentController` depuis une **liste de transports** (`g_transports`), et
-`MidiEvent.source` identifie l'entrée. *Test* : `test_transport.cpp` prouve que deux
-transports alimentent un seul contrôleur avec les bons tags. *Reste* : implémentation
-fonctionnelle USB natif (TinyUSB S3), puis DIN UART / BLE, et le SysEx multi-transport
-(la réponse UDP est adressée par IP, donc encore sur le transport concret).
-*Fichiers* : `core/midi/MidiTransport.h` (nouveau), `MidiUsbTransport.h` (nouveau),
-`MidiWifi.*`, `main.cpp`.
+name` ; `MidiWifi` s'y conforme (**MidiUdpTransport**, source `WifiUdp` déjà tagguée,
+**fonctionnel**) ; **`MidiDinTransport`** (DIN-5/TRS sur UART) est **fonctionnel** — la
+logique octet→événement est complète : il lit un `Stream*` à 31250 baud (lecture bornée
+par tick pour ne pas retarder la boucle de contrôle / l'E-stop) et alimente le
+`MidiParser` (source `Din`), exactement comme l'UDP ; il ne lui manque qu'un `Stream`
+(pin RX DIN) passé à `begin()` — câblé **inerte** (`begin(nullptr)`) en attendant qu'une
+config de pin l'expose ; squelette **`MidiUsbTransport`** (S3, poll no-op documenté,
+attend TinyUSB) ; `main.cpp` alimente le **même** `InstrumentController` depuis une
+**liste de transports** (`g_transports = {UDP, USB, DIN}`), et `MidiEvent.source`
+identifie l'entrée. *Test* : `test_transport.cpp` prouve que plusieurs transports
+alimentent un seul contrôleur avec les bons tags ; la branche `ARDUINO` de
+`MidiDinTransport` (lecture `Stream`) est compilée par hostcheck (`-DARDUINO=300`).
+*Reste* : implémentation fonctionnelle USB natif (TinyUSB S3), BLE, la liaison d'un
+UART réel au DIN (pin RX dans la future `DeviceConfig`), et le SysEx multi-transport
+(la réponse UDP est adressée par IP, donc encore sur le transport concret). *Non validé
+physiquement* : la réception DIN réelle (opto-coupleur 6N138 + UART) reste à valider au
+banc — seule la logique de décodage est testée en hôte.
+*Fichiers* : `core/midi/MidiTransport.h` (nouveau), `MidiDinTransport.h` (nouveau),
+`MidiUsbTransport.h` (nouveau), `MidiWifi.*`, `main.cpp`.
 
 ### P1.8 — Doc CC120/CC123 (DONE)
 Le code faisait déjà le standard MIDI (All Sound Off / All Notes Off, l'instrument
@@ -162,14 +176,23 @@ politique déterminée réelle (annuler les commandes en attente + relâcher les
 politique sélectionnable reviendra avec le split DeviceConfig/SafetyConfig, câblée.
 
 ### P1.11 — Setup / Performance + sécurité réseau (PARTIAL)
-*Fait* : les deux **postures** cohérentes sont désormais **documentées** et mappées
+*Fait (postures)* : les deux **postures** cohérentes sont **documentées** et mappées
 aux mécanismes existants (`NETWORK_HOTSPOT.md` §7) — Setup (AP + portail captif,
 config/calibration, auth simplifiée tant qu'aucun token n'est défini) et Performance
 (toutes les écritures exigent le token via `WebApi::authOk`, PANIC volontairement sans
-auth, USB/DIN prioritaire via l'abstraction transports P1.7). *Reste* (optionnel, la
-mission dit « éventuellement ») : durcissement UDP — whitelist d'IP / session reconnue /
-désactivation UDP en Performance, à livrer avec le futur `DeviceConfig` (P1.13) et son
-câblage runtime.
+auth, USB/DIN prioritaire via l'abstraction transports P1.7). *Fait (durcissement UDP)* :
+le **kernel de filtrage est implémenté et host-testé** — **`UdpSourceGate`**
+(`core/net`) avec 3 postures : `Open` (défaut, inchangé), `LockToFirst` (**session
+reconnue** : verrou sur le premier expéditeur → un pirate du réseau ne peut plus injecter
+une fois qu'un contrôleur parle) et `Disabled` (**UDP coupé** en Performance). Chaque refus
+est compté (`MidiWifi::rejectedPackets()`). `MidiWifi` le consulte dans `poll()` avant de
+parser, mais **inerte** (`Open`) jusqu'à ce qu'un runtime/`DeviceConfig` appelle
+`setSourcePolicy()` — même patron que le transport DIN (logique complète et testée,
+activation + validation socket réel différées au banc). *Test* : `test_udp_source_gate.cpp`
+(3 postures, cycle lock/unlock, port dans l'identité, compteur, session fraîche au
+changement de politique). *Reste* : câbler la posture au mode Performance via le
+`DeviceConfig` runtime (P1.13) ; whitelist multi-IP explicite en extension ; validation
+réseau réelle. *Fichiers* : `core/net/UdpSourceGate.h`, `platform/esp32/MidiWifi.{h,cpp}`.
 
 ### P1.12 — Migration de profils (DONE)
 `kCurrentProfileVersion = 2` ; `ProfileStorage::migrate(doc)` upgrade un JSON brut
@@ -180,16 +203,30 @@ drop de `staticIp`), idempotent. Toutes les entrées load/import passent par
 `staticIp`) ; `profilecheck` couvre import → migrate → validate → export →
 round-trip + idempotence.
 
-### P1.13 — DeviceConfig / InstrumentProfile (PARTIAL)
-*Fait* (1er pas non-destructif) : les deux structs cibles **`DeviceConfig`** (carte,
-réseau, broches système) et **`InstrumentProfile`** (instrument, MIDI, sélecteur,
-power, pluck, cordes, servos) sont définis, avec un **split/merge sans perte** contre
-le `Profile` actuel — la frontière est posée et prouvée propre, sans toucher la
-persistance (les anciens profils se chargent inchangés). *Test* :
-`test_device_instrument.cpp` (round-trip lossless + portabilité de l'instrument entre
-appareils). *Reste* : migrer les consommateurs (WebApi/storage) sur ces vues, puis le
-split persistant (migration v2→v3 via P1.12), et y rattacher MidiTransportConfig /
-SafetyConfig. *Fichiers* : `core/configuration/DeviceInstrument.h` (nouveau).
+### P1.13 — DeviceConfig / InstrumentProfile (PARTIAL, gros avancement)
+*Fait (structs)* : les deux structs cibles **`DeviceConfig`** (carte, réseau, broches
+système) et **`InstrumentProfile`** (instrument, MIDI, sélecteur, power, pluck, cordes,
+servos) sont définis, avec un **split/merge sans perte** (`test_device_instrument.cpp`).
+*Fait (persistance)* : **les slots sur disque sont désormais persistés en deux sections
+`device`/`instrument`** (marqueur `storageFormat: gmb-split-v1`) — le split est réel là
+où c'est stocké. Choix de risque contenu : le **format d'échange** (web `GET/PUT
+/api/profile`, import/export) **reste plat et inchangé**, donc l'UI navigateur (qui
+consomme le plat sur ~100 sites et ne peut pas être validée fonctionnellement en phase
+logicielle) n'est pas touchée. `toSlotJson`/`fromSlotJson` sont de **fins wrappers de
+re-parenting** autour de `toJson`/`fromJson` → une seule source de logique de champs, zéro
+duplication. `fromSlotJson` lit aussi un **slot plat hérité** (y compris v1, qu'il migre)
+→ aucun profil orphelin ; un slot hérité est réécrit en split au prochain save (migration
+paresseuse, non-destructive ; le chemin atomique temp+`.bak` est inchangé). `storageFormat`
+est **orthogonal à `profileVersion`** (disposition vs schéma de champs). *Test* :
+`profilecheck` « device/instrument split slot storage » (forme split asservie, round-trip
+lossless, slot plat hérité **et** slot v1 hérité se chargent) — **vert sous ASan/UBSan**.
+*Reste (assumé, différé)* : la **portabilité comportementale** (charger *seulement* la
+moitié instrument sur un appareil en préservant sa config device — le vrai swap
+inter-appareils) n'est pas câblée ; et le split du **format d'échange/web** est différé à
+la phase banc/navigateur (il toucherait l'UI non-testable ici). Y rattacher ensuite
+MidiTransportConfig / SafetyConfig. *Fichiers* : `core/configuration/DeviceInstrument.h`,
+`platform/esp32/ProfileStorage.{h,cpp}`, `test/profilecheck/main.cpp`,
+`docs/DEVICE_INSTRUMENT.md` (nouveau).
 
 ### P1.14 — Multi-cartes PlatformIO (DONE)
 `platformio.ini` : un env par carte annoncée (S3 / WROOM-32 / DevKit v1), réglages
@@ -208,19 +245,51 @@ hostcheck + servobankcheck), `profiles` (lint JSON + profilecheck), `web-js`
 (`node --check`), `firmware` (matrice 3 cartes + taille flash/RAM). Badge CI réel
 dans les README, nombre de tests codé en dur supprimé.
 
+**Correctif flake (observé puis corrigé)** : un run a échoué `profilecheck` avec des
+types ArduinoJson « non déclarés » alors que le même arbre compile en local et que le
+commit suivant passait, intact. Cause : `hostcheck`/`profilecheck` téléchargeaient
+l'en-tête ArduinoJson avec `curl -sSL` (sans `--fail`) — un aléa réseau/redirection
+sauvegardait une page d'erreur **à la place** de l'en-tête et `curl` sortait quand même
+0, donc la compilation tournait contre un en-tête cassé. Les deux scripts utilisent
+maintenant `curl -fsSL --retry 3 --retry-delay 2` avec un fichier `.tmp` déplacé
+seulement en cas de succès : une erreur HTTP est un échec (jamais mise en cache), un
+aléa transitoire est réessayé, un téléchargement partiel n'empoisonne pas le run
+suivant. Vérifié en vidant le cache puis en relançant les deux harnais (verts).
+
 ### P2.17 — Réduire main.cpp (PARTIAL)
 *Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
-(le point explicite de P2.17) — `main.cpp` passe de **1177 à 835 lignes (−29 %)**. La
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 692 lignes (−41 %)**. La
 FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
 contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
 faute via un callback vers le chemin central. D'autres responsabilités étaient déjà
-sorties en composants : `ActuatorManager` (P1.6), `MidiTransport`/liste (P1.7),
-`Diagnostics` (P2.19), fonctions de service nommées. *Reste* : `ApplicationRuntime` /
-`CommandDispatcher` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
-devienne `app.begin()/app.tick()`) — par composants, la FSM étant seulement
-compile-vérifiée (Arduino-gated), à valider au banc. *Fichiers* :
-`platform/esp32/PlaybackScheduler.h` (nouveau), `main.cpp`.
+sorties en composants : le **`CommandDispatcher`** (queue web→loop + dispatch, les
+handlers restant injectés depuis `main.cpp`), l'**`ActuatorManager`** (P1.6), le
+**`MidiTransport`**/liste (P1.7), le **`Diagnostics`** (P2.19), les utilitaires
+host-testés **`CommandResultRing`**, **`HoldButton`** (bouton BOOT) et
+**`ProfileActivation`** (bascule de profil en deux phases, RAII + timing). Deux
+kernels supplémentaires ont été sortis **dans `core/app/`, host-testés** : **`AppPhase`**
++ `appPhaseName()` (la table phase→label que l'UI et `/api/diagnostics` consomment,
+pinnée) et **`Readiness`** + `applyRuntimeFaults()` (la règle *ready/degraded* de P1.5 —
+une corde n'est prête que si activée **et** non-faultée ; l'instrument est *degraded* dès
+qu'une corde activée disparaît), plus des fonctions de service nommées. Enfin, la
+**`SafetySupervisor`** regroupe le cœur **stateful** de la séquence P0 (`arm`,
+`serviceParking`, `reset`, `hardStop`, `panic`, `emergencyStop`, `faultAxis`,
+`locked`) — corps **déplacés verbatim** (les grosses méthodes aliasent leurs
+collaborateurs aux anciens noms `g_*`), les fonctions libres de `main.cpp` devenant de
+simples délégués → **tous les sites d'appel inchangés**. Elle **ne possède aucun état** :
+elle référence via `bind()` les mêmes `SafetyManager` / pile d'actionneurs / phase /
+`degraded` / vecteur de faults / pin E-stop / profil que tous les autres lecteurs, et
+3 étapes transverses (rebuild+notify capabilities, cleanup hard-stop = test-notes +
+swap en attente) sont injectées en callbacks. **Non validé au banc** : comme la FSM,
+c'est du code Arduino-gated **compile-vérifié seulement** (hostcheck) ; l'équivalence
+est garantie *par construction* (verbatim + sites inchangés), pas prouvée sur matériel.
+*Reste* : `ApplicationRuntime` / `ProfileManager` (pour que `main.cpp` devienne
+`app.begin()/app.tick()`) — étape suivante, moins critique.
+*Fichiers* : `platform/esp32/PlaybackScheduler.h`, `platform/esp32/CommandDispatcher.h`,
+`platform/esp32/SafetySupervisor.h`, `core/util/CommandResultRing.h`,
+`core/util/HoldButton.h`, `core/configuration/ProfileActivation.h`,
+`core/app/AppPhase.h`, `core/app/Readiness.h` (nouveaux), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
@@ -282,19 +351,33 @@ nativement) ou des items PARTIAL/NOT STARTED.
 - l'in-rush réel d'un accord même avec governor (P1.6 non étendu aux plucks) ;
 - la détection I2C d'un PCA débranché *sous tension* (P1.5) sur le vrai bus ;
 - l'endurance MIDI / 6 cordes simultanées ;
-- que l'extraction `PlaybackScheduler` (P2.17) ne change rien au timing réel — la
-  logique est prouvée byte-for-byte identique et compile, mais elle n'a **pas** de test
-  natif runtime (Arduino-gated) : à reconfirmer au banc.
+- que les extractions `PlaybackScheduler` **et `SafetySupervisor`** (P2.17) ne changent
+  rien au comportement réel — corps déplacés verbatim, sites d'appel inchangés, aucun
+  état déplacé, et ça compile ; mais c'est du code Arduino-gated **sans test natif
+  runtime** : la séquence armement/parking/hardStop/panic/E-stop est à **reconfirmer au
+  banc** (c'est du P0, l'équivalence est garantie par construction, pas prouvée) ;
+- que l'étalement des dampers de relâche d'accord (P1.6, `pendingDamper`, compile-
+  vérifié) reste musicalement transparent sous charge réelle.
 
 **Approche recommandée pour les items restants** (par petits commits, tests de
 non-régression à chaque étape) :
-- **P1.6** (reste) : `ActuatorManager` en place ; router aussi damper/aux, et évaluer
-  le strum-lift au banc (gain in-rush vs. risque de timing) avant de le gouverner.
-- **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
-  `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
-- **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
-  ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
-  transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
-- **P2.17** (reste) : `PlaybackScheduler` fait ; extraire `ApplicationRuntime` /
-  `CommandDispatcher` / `ProfileManager` / `SafetySupervisor`, un composant à la fois,
-  pour réduire `main.cpp` à `app.begin()/app.tick()`.
+- **P1.6** : fait (attaque + relâche d'accord gouvernées). Au banc : confirmer que
+  l'étalement des dampers ne crée pas d'artefact audible et évaluer si le strum-lift
+  mérite d'être gouverné (gain in-rush vs. risque de timing).
+- **P1.7** (reste) : UDP + DIN fonctionnels (logique complète) ; lier un vrai UART au
+  DIN (pin RX dans `DeviceConfig`) et valider la réception au banc (opto 6N138) ;
+  implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette `MidiUsbTransport`,
+  puis BLE ; généraliser le SysEx multi-transport.
+- **P1.13** (reste) : structs + **split persistant sur disque faits** (avec migration
+  paresseuse + tests). Restent la **portabilité comportementale** (opération « importer
+  l'instrument seul » sans écraser la config device) et le split du **format d'échange/
+  web** — ce dernier différé car il touche l'UI navigateur non-testable ici. Puis y
+  rattacher les configs transports/sécurité. **P1.11** (reste) : le gate UDP
+  (`UdpSourceGate`) est fait et host-testé ; reste à câbler sa posture au mode
+  Performance via le `DeviceConfig` runtime, et à valider sur réseau réel.
+- **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, **`SafetySupervisor`**,
+  `AppPhase`, `Readiness` et les utilitaires sont sortis (**main.cpp −41 %**). La
+  `SafetySupervisor` (séquence armement/panic P0) a été extraite **verbatim, sites
+  d'appel inchangés, sans déplacer d'état** — donc compile-vérifiée (Arduino-gated),
+  **à revalider au banc**. Reste `ApplicationRuntime` / `ProfileManager` (pour aller
+  vers `app.begin()/app.tick()`), moins critique.
