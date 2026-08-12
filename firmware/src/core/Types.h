@@ -9,6 +9,11 @@
 namespace gmb {
 
 // Hard capacity limits derived from the spec (section 6).
+// The kMaxStrings / kMaxFret bounds and the frettedNote() gamme law below are the
+// three points that assume a 6-string, 24-fret, note=open+fret instrument. They are
+// intentionally centralised here; docs/GENERALIZATION.md (audit P2.18) maps every
+// dependent site and sketches the future Voice/Course abstraction that will make the
+// servo-per-fret model one implementation among several. Do not scatter new copies.
 constexpr uint8_t kMaxStrings = 6;      // 1..6 strings, each with its own fingers
 constexpr uint8_t kMaxServoOutputs = 16; // PCA9685 channels per board
 constexpr uint8_t kMaxAuxPower = 8;
