@@ -21,7 +21,7 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P0.3 | Séparer `hardStop()` et `controlledPark()` | **DONE** | `a2116df` |
 | P1.4 | API homogène `ActuatorResult` (ServoBank) | **DONE** | `f15b6a8` |
 | P1.5 | Perte PCA locale (fault des cordes concernées, pas de panic global) | **DONE** | `f30a5cb` |
-| P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **PARTIAL** | — |
+| P1.6 | Étendre le PowerGovernor à tous les mouvements / ActuatorManager | **DONE** | (voir historique) |
 | P1.7 | Abstraction des transports MIDI (UDP/USB/DIN/BLE) | **PARTIAL** | (voir historique) |
 | P1.8 | Cohérence doc CC120/CC123 (≠ panic verrouillé) | **DONE** | `584895f` |
 | P1.9 | `staticIp` : implémenter ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
@@ -36,10 +36,10 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
 | P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**14 DONE · 5 PARTIAL · 0 NOT STARTED** — les 19 points ont tous reçu un increment réel
-et testé. Les 5 PARTIAL (P1.6, P1.7, P1.11, P1.13, P2.17) ont leur abstraction/boundary
-en place et testée ; il ne reste que du câblage fonctionnel/persistant, des refactors
-que la mission demande de faire *progressivement, par composants avec tests de
+**15 DONE · 4 PARTIAL · 0 NOT STARTED** — les 19 points ont tous reçu un increment réel
+et testé. Les 4 PARTIAL (P1.7, P1.11, P1.13, P2.17) ont leur abstraction/boundary en
+place et testée ; il ne reste que du câblage fonctionnel/persistant, des refactors que
+la mission demande de faire *progressivement, par composants avec tests de
 non-régression*. Voir §6 pour l'approche recommandée.
 
 ---
@@ -113,23 +113,26 @@ MIDI sur les survivantes. Panic global uniquement si plus aucune corde, ou si la
 carte perdue ne porte aucune corde (ressource commune → fail-safe).
 *Fichiers* : `ServoBank.*`, `main.cpp`, `SAFETY.md`. *Tests* : `servobankcheck`.
 
-### P1.6 — PowerGovernor étendu (PARTIAL)
-*Fait* : couche **`ActuatorManager`** (core, testable) réalisant l'archi
+### P1.6 — PowerGovernor étendu (DONE, hors validation banc)
+Couche **`ActuatorManager`** (core, testable) réalisant l'archi
 `PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`, avec la distinction
-**étalable** (finger press → gouverné) vs **échéance sonore** (pluck/strum/damper strike
-→ **jamais** throttlé). **Chaque mouvement passe désormais par le manager** : la press de
-doigt via `requestMove(Staggerable)` (throttlée), et **toutes les frappes** (pluck,
-strum, damper — y compris la relâche d'accord qui décharge plusieurs dampers d'un coup)
-via `requestMove(Deadline)` (jamais throttlées mais **comptées**). Le manager expose la
-**répartition des mouvements** (deadline / staggerable accordés / différés), visible dans
-`GET /api/diagnostics` (`moveMix`) — de quoi mesurer l'in-rush réel au banc. Le governor
-garde limite globale + **par PCA** + `staggerMs` + désactivation à 0. *Tests* :
-`test_actuator_manager.cpp` (deadline toujours passant, staggerable gouverné, comptage du
-mix). *Reste* : **hard-throttler** les dampers de relâche d'accord (demande une infra de
-retry dans la FSM + mesure d'in-rush au banc pour la calibrer) ; le strum-lift reste non
-gouverné (chemin d'anticipation, sensible au timing — la mission recommande de ne pas
-dégrader la synchro). *Fichiers* : `core/instrument/ActuatorManager.h`,
-`platform/esp32/PlaybackScheduler.h`, `core/diagnostics/Diagnostics.h`, `main.cpp`.
+**étalable** vs **échéance sonore**. **Les DEUX événements d'in-rush simultané sont
+désormais gouvernés** : l'attaque d'accord (**presses de doigts**) *et* la relâche
+d'accord (**strikes de dampers**), tous deux via `requestMove(Staggerable)` — la press
+de doigt dans la phase `PressingFinger`, et le damper de Note-Off via une **infra de
+retry** (`pendingDamper` : la frappe est différée jusqu'au permis du governor, et la
+déclaration `idle` attend que le damper différé ait physiquement voyagé — un mute
+retardé de quelques ms ne fait que laisser la corde sonner un cheveu plus longtemps).
+Les pluck/strum strikes (le son) restent **Deadline** (jamais throttlés). Le manager
+compte la **répartition** (`moveMix` dans `GET /api/diagnostics`). Le governor garde
+limite globale + **par PCA** + `staggerMs` + désactivation à 0. *Tests* :
+`test_actuator_manager.cpp` (deadline toujours passant, staggerable gouverné, comptage).
+*Exclusions volontaires* : le strum-lift reste non gouverné (chemin d'anticipation,
+sensible au timing — la mission recommande de ne pas dégrader la synchro musicale) ; les
+aux sont configurables plus tard. *Réserve* : la logique `pendingDamper` est **compile-
+vérifiée** (FSM Arduino-gated) — à reconfirmer au banc, comme le reste de la FSM.
+*Fichiers* : `core/instrument/ActuatorManager.h`, `platform/esp32/PlaybackScheduler.h`,
+`core/diagnostics/Diagnostics.h`, `main.cpp`.
 
 ### P1.7 — Transports MIDI (PARTIAL)
 *Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/
@@ -285,12 +288,15 @@ nativement) ou des items PARTIAL/NOT STARTED.
 - l'endurance MIDI / 6 cordes simultanées ;
 - que l'extraction `PlaybackScheduler` (P2.17) ne change rien au timing réel — la
   logique est prouvée byte-for-byte identique et compile, mais elle n'a **pas** de test
-  natif runtime (Arduino-gated) : à reconfirmer au banc.
+  natif runtime (Arduino-gated) : à reconfirmer au banc ;
+- que l'étalement des dampers de relâche d'accord (P1.6, `pendingDamper`, compile-
+  vérifié) reste musicalement transparent sous charge réelle.
 
 **Approche recommandée pour les items restants** (par petits commits, tests de
 non-régression à chaque étape) :
-- **P1.6** (reste) : `ActuatorManager` en place ; router aussi damper/aux, et évaluer
-  le strum-lift au banc (gain in-rush vs. risque de timing) avant de le gouverner.
+- **P1.6** : fait (attaque + relâche d'accord gouvernées). Au banc : confirmer que
+  l'étalement des dampers ne crée pas d'artefact audible et évaluer si le strum-lift
+  mérite d'être gouverné (gain in-rush vs. risque de timing).
 - **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
   `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
 - **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur

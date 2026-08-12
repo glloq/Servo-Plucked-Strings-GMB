@@ -40,6 +40,7 @@ struct StringSched {
     int liftIndex = -1;          // engaged strum-lift servo during a stroke
     int strikeIndex = -1;        // striker to fire once the lift has lowered
     int muteIndex = -1;          // plectrum/lift held against the string to damp (Note Off)
+    int pendingDamper = -1;      // Note-Off damper awaiting a governor permit (P1.6), or -1
     uint32_t executeAtMs = 0;    // earliest time the note may sound (fixed delay)
     uint32_t readyAtMs = 0;      // when the string became Ready (anchors fretToPluckMs)
     bool executeAnchored = false;
@@ -167,11 +168,14 @@ private:
                     switch (action) {
                         case MuteSource::Damper:
                             if (di >= 0) {
-                                // Register the damper strike with the manager (P1.6): a
-                                // chord Note-Off releases many dampers at once, so it is
-                                // real in-rush — deadline (never throttled) but counted.
-                                g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(di));
-                                g_servos.strike(di); muteWaitMs = g_servos.travelMs(di);
+                                // Throttle the damper strike through the governor (P1.6):
+                                // a chord Note-Off releases many dampers at once (real
+                                // in-rush). Defer it to the pending-damper retry below so
+                                // the governor can stagger the burst; reserve its travel
+                                // in the wait budget now. A mute delayed a few ms only
+                                // lets the string ring a hair longer — no missed beat.
+                                sch.pendingDamper = di;
+                                muteWaitMs = g_servos.travelMs(di);
                             }
                             break;
                         case MuteSource::Plectrum:
@@ -204,8 +208,20 @@ private:
                 sch.phase = StringSched::WaitStopped;
                 sch.phaseStartMs = nowMs;
             }
-            // Declare idle once the finger has lifted and any held mute has released.
-            if (nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
+            // A deferred Note-Off damper: retry its start each tick until the governor
+            // permits it (P1.6). When it fires late, extend the wait so the string is
+            // not declared idle before the damper has physically travelled.
+            if (sch.pendingDamper >= 0 &&
+                g_actuators.requestMove(MoveClass::Staggerable, nowMs,
+                                        g_servos.board(sch.pendingDamper))) {
+                g_servos.strike(sch.pendingDamper);
+                uint32_t doneMs = (nowMs - sch.phaseStartMs) + g_servos.travelMs(sch.pendingDamper);
+                if (doneMs > sch.releaseWaitMs) sch.releaseWaitMs = doneMs;
+                sch.pendingDamper = -1;
+            }
+            // Declare idle once the finger has lifted, any held mute has released, AND
+            // no damper is still waiting for its permit.
+            if (sch.pendingDamper < 0 && nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
                 if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
                 sc.dampingDone();
                 sch.phase = StringSched::Idle;
@@ -230,6 +246,7 @@ private:
             // Drop any Note-Off mute still held from the previous note (plectrum against
             // the string, or a lift leaning on it) before starting the new one.
             if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
+            sch.pendingDamper = -1;  // a new note supersedes an interrupted Note-Off damper
             sch.executeAtMs = nowMs + g_profile.midi.noteExecutionDelayMs;
             sch.executeAnchored = sc.willArmOnSettle();
             sch.fingerPressStarted = false;
