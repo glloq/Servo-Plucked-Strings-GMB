@@ -113,10 +113,10 @@ bool ServoBank::attachDirect(int index) {
 #endif
 }
 
-bool ServoBank::writeMicros(int index, uint16_t us) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
-    if (!s.enabled) return false;  // never drive a disabled servo
+    if (!s.enabled) return ActuatorResult::Disabled;  // never drive a disabled servo
     us = clampPulse(s, us);
     rt_[index].lastUs = us;  // logical pulse (pre-inversion), for sweep-time scaling
     // Apply inversion by mirroring within the calibrated pulse window.
@@ -124,24 +124,28 @@ bool ServoBank::writeMicros(int index, uint16_t us) {
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
         int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
-        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard]) return false;
+        // Board never initialised (absent at boot) — distinct from a mid-run I2C loss,
+        // which pcaHealthy() surfaces separately.
+        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard])
+            return ActuatorResult::DriverUnavailable;
         pca_[bus][s.pcaBoard].writeMicroseconds(s.channel, us);
     } else if (s.gpio >= 0) {
-        if (!attached_[index] && !attachDirect(index)) return false;  // reattach failed
+        if (!attached_[index] && !attachDirect(index))
+            return ActuatorResult::OutputFault;  // LEDC (re)attach failed
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
         ledcWrite(s.gpio, usToDuty(us));
 #else
-        if (ledcCh_[index] < 0) return false;
+        if (ledcCh_[index] < 0) return ActuatorResult::OutputFault;
         ledcWrite(ledcCh_[index], usToDuty(us));
 #endif
     } else {
-        return false;  // no output configured
+        return ActuatorResult::OutputFault;  // no output pin configured
     }
     rt_[index].pwmOff = false;
 #else
     (void)us;
 #endif
-    return true;
+    return ActuatorResult::Ok;
 }
 
 void ServoBank::writeOff(int index) {
@@ -179,56 +183,58 @@ void ServoBank::toActive(int index) {
 
 void ServoBank::toMicros(int index, uint16_t us) { writeMicros(index, us); }
 
-bool ServoBank::press(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
-    bool ok = writeMicros(index, servos_[index].activeUs);
+ActuatorResult ServoBank::press(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, servos_[index].activeUs);
     rt_[index].mode = Mode::Active;
-    return ok;  // false => the servo could not be driven (attach/PCA failure)
+    return r;  // non-Ok => the servo could not be driven; caller faults the axis
 }
 
-bool ServoBank::pressFret(int index, int fret) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::pressFret(int index, int fret) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     // A geared finger presses side B (activeBUs) for its second fret, side A
     // (activeUs) otherwise — identical to press() for a plain single finger.
-    bool ok = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
+    ActuatorResult r = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
     rt_[index].mode = Mode::Active;
-    return ok;
+    return r;
 }
 
-bool ServoBank::holdMicros(int index, uint16_t us) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
-    bool ok = writeMicros(index, us);  // clamped to the servo's pulse window
-    rt_[index].mode = Mode::Active;    // hold: no rest-time PWM cut during a test
-    return ok;
+ActuatorResult ServoBank::moveTo(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, us);  // clamped to the servo's pulse window
+    rt_[index].mode = Mode::Active;             // hold: no rest-time PWM cut during a test
+    return r;
 }
 
-bool ServoBank::muteHold(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::mute(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     uint16_t m = servos_[index].muteUs;
-    if (m == 0) return false;  // no mute position calibrated for this plectrum
-    bool ok = writeMicros(index, m);  // clamped to the pulse window
+    if (m == 0) return ActuatorResult::Disabled;  // no mute position calibrated
+    ActuatorResult r = writeMicros(index, m);     // clamped to the pulse window
     rt_[index].mode = Mode::Active;   // hold against the string; caller releases later
-    return ok;
+    return r;
 }
 
-void ServoBank::release(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return;
-    toRest(index);
+ActuatorResult ServoBank::release(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, servos_[index].restUs);
     rt_[index].mode = Mode::Rest;
     rt_[index].restAtMs = 0;
+    return r;
 }
 
-void ServoBank::strike(int index, double intensity) {
-    if (index < 0 || index >= (int)servos_.size()) return;
+ActuatorResult ServoBank::strike(int index, double intensity) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
     // Velocity shapes the strike depth; on an alternate stroke the up-stroke
     // endpoint is used. The maths lives in servoStrikeTargetUs (unit-tested).
     bool upStroke = s.alternateDirection && rt_[index].strokeParity;
-    writeMicros(index, servoStrikeTargetUs(s, intensity, upStroke));
+    ActuatorResult r = writeMicros(index, servoStrikeTargetUs(s, intensity, upStroke));
     rt_[index].mode = Mode::Striking;
     rt_[index].returnAtMs = 0;
     // Flip the stroke direction for the next strike on this servo.
     if (s.alternateDirection) rt_[index].strokeParity = !rt_[index].strokeParity;
+    return r;
 }
 
 void ServoBank::update(uint32_t nowMs) {

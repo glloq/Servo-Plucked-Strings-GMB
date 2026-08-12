@@ -93,6 +93,25 @@ int main() {
     CHECK(b2.parkDurationMs() == 340, "parkDurationMs = max(travel+settle) of enabled servos");
   }
 
+  // --- P1.4: homogeneous ActuatorResult API ---------------------------------
+  // A valid, enabled servo drives Ok; an out-of-range index is InvalidIndex.
+  CHECK(bank.press(0) == ActuatorResult::Ok, "press(valid) -> Ok");
+  CHECK(bank.release(0) == ActuatorResult::Ok, "release(valid) -> Ok");
+  CHECK(bank.strike(0) == ActuatorResult::Ok, "strike(valid) -> Ok");
+  CHECK(bank.moveTo(0, 1500) == ActuatorResult::Ok, "moveTo(valid) -> Ok");
+  CHECK(bank.press(99) == ActuatorResult::InvalidIndex, "press(oob) -> InvalidIndex");
+  CHECK(bank.release(-1) == ActuatorResult::InvalidIndex, "release(oob) -> InvalidIndex");
+  // No mute position calibrated (muteUs == 0) -> Disabled, so the caller skips it.
+  CHECK(bank.mute(0) == ActuatorResult::Disabled, "mute(no muteUs) -> Disabled");
+  // A servo present but disabled in the profile never drives -> Disabled.
+  {
+    std::vector<ServoConfig> mixed = {pca("finger", 0, 0, 0, 0)};
+    mixed[0].enabled = false;
+    ServoBank b3;
+    b3.begin(mixed, 40, 41, 47);
+    CHECK(b3.press(0) == ActuatorResult::Disabled, "press(disabled servo) -> Disabled");
+  }
+
   std::printf(g_fail ? "\nSERVOBANKCHECK FAILED (%d)\n" : "\nservobankcheck OK\n", g_fail);
   return g_fail ? 1 : 0;
 }

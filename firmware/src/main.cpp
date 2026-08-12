@@ -290,6 +290,16 @@ void faultRuntimeAxis(size_t i, const char* reason, uint32_t nowMs) {
     }
 }
 
+// P1.4: a scheduler-issued actuator command that did not reach the hardware faults
+// the string, carrying the ActuatorResult reason into the fault log / web status.
+// Returns true when the command succeeded (caller proceeds), false when it faulted.
+bool actOk(ActuatorResult r, size_t i, const char* what, uint32_t nowMs) {
+    if (ok(r)) return true;
+    faultRuntimeAxis(i, (std::string(what) + " [" + actuatorResultName(r) + "]").c_str(),
+                     nowMs);
+    return false;
+}
+
 bool safetyLocked() {
     SafetyState s = g_safety.state();
     return s == SafetyState::Panic || s == SafetyState::EmergencyStop;
@@ -452,7 +462,7 @@ bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,
 bool doTestServo(int index, bool active, uint16_t us) {
     if (!g_safety.actuatorsAllowed()) return false;
     if (!g_servos.commandable(index)) return false;
-    if (us > 0) return g_servos.holdMicros(index, us);
+    if (us > 0) return ok(g_servos.moveTo(index, us));
     if (active) g_servos.press(index); else g_servos.release(index);
     return true;
 }
@@ -560,13 +570,13 @@ void tickString(size_t i, uint32_t nowMs) {
                     case MuteSource::Plectrum:
                         // Bring the plectrum to rest against the string to damp it,
                         // then release it to rest once the mute hold has elapsed.
-                        if (pi >= 0 && g_servos.muteHold(pi)) {
+                        if (pi >= 0 && ok(g_servos.mute(pi))) {
                             sch.muteIndex = pi;
                             muteWaitMs = g_profile.pluck.muteHoldMs;
                         }
                         break;
                     case MuteSource::Lift:
-                        if (li >= 0 && g_servos.press(li)) {
+                        if (li >= 0 && ok(g_servos.press(li))) {
                             sch.muteIndex = li;
                             muteWaitMs = g_profile.pluck.muteHoldMs;
                         }
@@ -578,7 +588,7 @@ void tickString(size_t i, uint32_t nowMs) {
                 // string at Note Off even when the primary mute came from elsewhere
                 // (unless something is already held, so only one is left to release).
                 if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
-                    action != MuteSource::Lift && li >= 0 && g_servos.press(li)) {
+                    action != MuteSource::Lift && li >= 0 && ok(g_servos.press(li))) {
                     sch.muteIndex = li;
                     if (g_profile.pluck.muteHoldMs > muteWaitMs) muteWaitMs = g_profile.pluck.muteHoldMs;
                 }
@@ -681,10 +691,9 @@ void tickString(size_t i, uint32_t nowMs) {
                 // pressFret drives a geared finger toward the correct antagonistic
                 // side for tgt.fret (activeUs for side A, activeBUs for side B); for
                 // a plain single finger it is identical to press().
-                if (!g_servos.pressFret(sch.fingerIndex, tgt.fret)) {
-                    faultRuntimeAxis(i, "finger servo write failed", nowMs);
+                if (!actOk(g_servos.pressFret(sch.fingerIndex, tgt.fret), i,
+                           "finger servo write failed", nowMs))
                     break;
-                }
                 g_currentFinger[i] = sch.fingerIndex;
                 sch.fingerPressStarted = true;
                 sch.phaseStartMs = nowMs;
@@ -704,10 +713,8 @@ void tickString(size_t i, uint32_t nowMs) {
                 uint32_t settle = g_servos.settleMs(sch.fingerIndex);
                 if (li >= 0 &&
                     (nowMs - sch.phaseStartMs) + g_profile.midi.strumLeadMs >= settle) {
-                    if (!g_servos.press(li)) {
-                        faultRuntimeAxis(i, "strum lift servo write failed", nowMs);
+                    if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                         break;
-                    }
                     sch.liftIndex = li;
                     sch.strikeIndex = pi;
                     sch.liftStartMs = nowMs;
@@ -746,10 +753,8 @@ void tickString(size_t i, uint32_t nowMs) {
                     uint32_t liftMs = g_servos.travelMs(li) + g_servos.engageDelayMs(li);
                     if (static_cast<int32_t>(nowMs - strikeAtMs) +
                             static_cast<int32_t>(liftMs) >= 0) {
-                        if (!g_servos.press(li)) {
-                            faultRuntimeAxis(i, "strum lift servo write failed", nowMs);
+                        if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                             break;
-                        }
                         sch.liftIndex = li;
                         sch.strikeIndex = pi;
                         sch.liftStartMs = nowMs;
@@ -764,10 +769,8 @@ void tickString(size_t i, uint32_t nowMs) {
                                          : g_servos.strumLiftIndex(static_cast<int>(i));
                 if (li >= 0) {
                     if (!sch.liftStarted) {
-                        if (!g_servos.press(li)) {
-                            faultRuntimeAxis(i, "strum lift servo write failed", nowMs);
+                        if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                             break;
-                        }
                         sch.liftIndex = li;
                         sch.strikeIndex = pi;
                         sch.liftStartMs = nowMs;
@@ -776,7 +779,10 @@ void tickString(size_t i, uint32_t nowMs) {
                     sch.phase = StringSched::StrumLiftDown;
                     break;
                 }
-                g_servos.strike(pi, tgt.intensity);
+                // The actual pluck: fault the string if the strike did not reach the
+                // hardware (P1.4). The switch breaks straight after, so the faulted
+                // scheduler reset stands.
+                actOk(g_servos.strike(pi, tgt.intensity), i, "pluck servo write failed", nowMs);
             }
             break;
         }
@@ -784,7 +790,9 @@ void tickString(size_t i, uint32_t nowMs) {
             if (static_cast<int32_t>(nowMs - (sch.liftStartMs +
                     g_servos.travelMs(sch.liftIndex) +
                     g_servos.engageDelayMs(sch.liftIndex))) >= 0) {
-                g_servos.strike(sch.strikeIndex, tgt.intensity);
+                if (!actOk(g_servos.strike(sch.strikeIndex, tgt.intensity), i,
+                           "pluck servo write failed", nowMs))
+                    break;  // faulted: do not advance the (now reset) scheduler
                 sch.phase = StringSched::StrumLiftHold;
                 sch.phaseStartMs = nowMs;
             }

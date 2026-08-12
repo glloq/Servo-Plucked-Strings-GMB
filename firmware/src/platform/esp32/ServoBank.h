@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "../../core/configuration/Profile.h"
+#include "../../core/instrument/ActuatorResult.h"
 
 #if defined(ARDUINO)
 #include <Adafruit_PWMServoDriver.h>
@@ -34,35 +35,31 @@ public:
     void begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t scl,
                int8_t oePin, int8_t sda2 = -1, int8_t scl2 = -1, int8_t oePin2 = -1);
 
+    // Low-level "just write" primitives (no result; used internally + by tests).
     void toRest(int index);
     void toActive(int index);
     void toMicros(int index, uint16_t us);
-    // Drive a servo to an exact pulse and HOLD it (marks it active so the rest-time
-    // PWM cut-off never releases it mid-test). Used by the calibration wizard to
-    // preview any angle live, including a geared finger's side-B press. Returns
-    // false if the servo could not be driven.
-    bool holdMicros(int index, uint16_t us);
 
-    // Non-blocking motion helpers (honour travelMs / settleMs / disableAtRest):
-    //   press  : hold active   (finger down)
-    //   release: return to rest (finger up), then optionally cut PWM at rest
-    //   strike : pulse active then auto-return to rest (pluck / strum / damper)
-    // Returns false if the servo could not actually be driven (LEDC re-attach or
-    // PCA write failure) so the caller can fault the axis (audit P1-5).
-    bool press(int index);
-    // Geared fingers: press the finger at `index` toward the SIDE that frets `fret`
-    // (activeUs for side A / a plain finger, activeBUs for a geared side-B fret).
-    // Same return contract as press().
-    bool pressFret(int index, int fret);
-    void release(int index);
-    // intensity 0..1 scales the strike depth between rest and active (velocity).
-    void strike(int index, double intensity = 1.0);
-    // Drive a plucker to its mute position (plectrum resting against the string to
-    // damp it) and HOLD there, marking it active so the rest-time PWM cut-off does
-    // not release it mid-mute. The caller releases it to rest when the mute hold
-    // elapses. Returns false if no mute position is set (muteUs == 0) or the servo
-    // could not be driven.
-    bool muteHold(int index);
+    // Scheduler-facing motion API (audit P1.4). Every one returns an ActuatorResult
+    // so the playback scheduler ALWAYS knows whether the command reached the hardware
+    // and, on failure, why — no more bool-here / void-there. They stay non-blocking
+    // and honour travelMs / settleMs / disableAtRest.
+    //   press   : hold active (finger down / strum lift engaged)
+    //   pressFret: press the finger toward the side that frets `fret` — activeUs for
+    //              side A / a plain finger, activeBUs for a geared side-B fret
+    //   release : return to rest (finger up); update() cuts idle PWM if disableAtRest
+    //   strike  : pulse active then auto-return to rest (pluck / strum / damper);
+    //             intensity 0..1 scales the strike depth (velocity)
+    //   mute    : drive a plucker to its muteUs (rest against the string) and HOLD;
+    //             returns Disabled when the servo has no mute position (muteUs == 0)
+    //   moveTo  : drive to an exact pulse and HOLD (calibration preview); the pulse
+    //             is clamped to the servo's calibrated window
+    ActuatorResult press(int index);
+    ActuatorResult pressFret(int index, int fret);
+    ActuatorResult release(int index);
+    ActuatorResult strike(int index, double intensity = 1.0);
+    ActuatorResult mute(int index);
+    ActuatorResult moveTo(int index, uint16_t us);
     // Advance scheduled returns and rest-time PWM cut-off. Call from loop().
     void update(uint32_t nowMs);
 
@@ -185,7 +182,7 @@ private:
          Adafruit_PWMServoDriver(0x44, Wire1), Adafruit_PWMServoDriver(0x45, Wire1),
          Adafruit_PWMServoDriver(0x46, Wire1), Adafruit_PWMServoDriver(0x47, Wire1)}};
 #endif
-    bool writeMicros(int index, uint16_t us);  // false if the write couldn't apply
+    ActuatorResult writeMicros(int index, uint16_t us);  // Ok, or why it couldn't apply
     void writeOff(int index);
     bool attachDirect(int index);  // (re)attach a direct servo's LEDC channel
 };
