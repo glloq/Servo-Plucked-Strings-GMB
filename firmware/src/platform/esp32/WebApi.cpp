@@ -82,7 +82,9 @@ bool fingerDown(StringState s, bool openString) {
 
 const char* safetyStateName(SafetyState s) {
     switch (s) {
+        case SafetyState::ConfigSafe:    return "configSafe";
         case SafetyState::PowerOnSafe:   return "powerOnSafe";
+        case SafetyState::Parking:       return "parking";
         case SafetyState::Armed:         return "armed";
         case SafetyState::Panic:         return "panic";
         case SafetyState::EmergencyStop: return "emergencyStop";
@@ -243,6 +245,14 @@ void WebApi::registerRoutes() {
         // from the async web task.
         std::string s;
         { WebStateLock lk(ctx_); s = cachedStatus_; }
+        req->send(200, "application/json", String(s.c_str()));
+    });
+
+    // ---- GET /api/diagnostics (runtime telemetry for the bench, P2.19) ----
+    // The body is built by loop() via the callback (reads accumulated counters +
+    // cached PCA health), so the async web task never touches live I2C or state.
+    server_->on("/api/diagnostics", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        std::string s = ctx_.diagnosticsJson ? ctx_.diagnosticsJson() : "{}";
         req->send(200, "application/json", String(s.c_str()));
     });
 

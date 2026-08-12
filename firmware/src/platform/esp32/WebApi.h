@@ -38,6 +38,7 @@ struct WebContext {
     std::function<uint32_t()> onReset;                     // recover from panic/E-stop
     std::function<std::string()> appState;                 // "boot"/"ready"/"readyDegraded"
     std::function<int()> readyStrings;                     // strings ready & not faulted
+    std::function<std::string()> diagnosticsJson;          // GET /api/diagnostics body (P2.19)
     std::function<uint32_t(const Profile&)> onActivateProfile;  // validate + enqueue
     std::function<uint32_t(uint8_t, uint8_t, uint8_t, uint16_t)> onTestNote;  // ch,note,vel,ms
     std::function<uint32_t(int, bool, int)> onTestServo;  // servo pulse (index, active, us>0=exact)

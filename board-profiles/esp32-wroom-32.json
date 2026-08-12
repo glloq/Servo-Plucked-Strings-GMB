@@ -25,14 +25,14 @@
       "input": true,
       "output": true,
       "interrupt": true,
-      "highSpeedOutput": true,
-      "adc": true,
-      "reserved": false,
-      "strapping": false,
+      "highSpeedOutput": false,
+      "adc": false,
+      "reserved": true,
+      "strapping": true,
       "usb": false,
       "onboardPeripheral": false,
-      "preference": "caution",
-      "note": "BOOT strapping pin"
+      "preference": "reserved",
+      "note": "BOOT button — forces the Wi-Fi hotspot; never a servo/I2C//OE pin"
     },
     {
       "gpio": 1,

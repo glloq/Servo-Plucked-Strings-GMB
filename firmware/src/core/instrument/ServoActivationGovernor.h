@@ -54,12 +54,16 @@ public:
     bool requestStart(uint32_t nowMs, uint8_t board = 0xFF) {
         if (staggerMs_ == 0) return true;  // throttling disabled
         Window* bw = (board < kBoards) ? &board_[board] : nullptr;
-        if (!global_.hasRoom(nowMs, staggerMs_)) return false;
-        if (bw && !bw->hasRoom(nowMs, staggerMs_)) return false;
+        if (!global_.hasRoom(nowMs, staggerMs_)) { ++throttles_; return false; }
+        if (bw && !bw->hasRoom(nowMs, staggerMs_)) { ++throttles_; return false; }
         global_.grant(nowMs);
         if (bw) bw->grant(nowMs);
         return true;
     }
+
+    // Cumulative number of start requests deferred (throttled) by the governor — a
+    // diagnostics counter, deliberately NOT cleared by reset() (audit P2.19).
+    uint32_t throttleCount() const { return throttles_; }
 
 private:
     // A rolling window: at most `cap` grants within any staggerMs window. cap == 0
@@ -87,6 +91,7 @@ private:
     uint16_t staggerMs_ = 8;
     Window global_;
     std::array<Window, kBoards> board_;
+    uint32_t throttles_ = 0;  // cumulative deferred starts (diagnostics; survives reset)
 };
 
 }  // namespace gmb

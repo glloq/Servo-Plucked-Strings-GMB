@@ -40,7 +40,12 @@ TEST_SRC := \
   test_fretservo.cpp \
   test_geared.cpp \
   test_audit.cpp \
-  test_debounce.cpp
+  test_debounce.cpp \
+  test_safety.cpp \
+  test_diagnostics.cpp \
+  test_transport.cpp \
+  test_actuator_manager.cpp \
+  test_device_instrument.cpp
 
 BIN := run_tests
 

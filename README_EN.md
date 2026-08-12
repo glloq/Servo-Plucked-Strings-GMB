@@ -5,8 +5,9 @@
 > configured from a **web page** in the browser — no stepper motor, no carriage,
 > no code to recompile.
 
+[![CI](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml/badge.svg)](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/ESP32--S3-DevKitC--1-informational.svg)](https://www.espressif.com/en/products/socs/esp32-s3)
+[![Platform](https://img.shields.io/badge/ESP32-S3%20%7C%20WROOM--32%20%7C%20DevKit%20v1-informational.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![Build](https://img.shields.io/badge/build-PlatformIO%20%7C%20Arduino-orange.svg)](https://platformio.org/)
 [![MIDI](https://img.shields.io/badge/MIDI-Wi--Fi%20(UDP)-green.svg)](https://www.midi.org/)
 
@@ -37,7 +38,7 @@ which finger servo to press.
 - ⚙️ Geared finger: **one servo for two frets** of the same string
 - ⚡ In-rush current management (staggered starts + PWM cut at rest)
 - 🌐 Full web interface: configuration wizard, guided calibration, test bench
-- 🧪 Pure C++17 core, host-tested on a PC (146 native tests)
+- 🧪 Pure C++17 core, host-tested on a PC (native test suite run in CI on every push)
 
 ## 🎼 How it works
 
@@ -102,8 +103,10 @@ mapping still stays free per servo.
   [`docs/MIDI_PROTOCOL.md`](docs/MIDI_PROTOCOL.md).
 - A fret **with no servo** is treated as "unavailable": an explicit selection
   then falls back to automatic allocation (configurable policy).
-- **CC7 / CC11** (volume / expression) scale the attack, **CC64** is sustain,
-  **CC120 / CC123** trigger a panic (software emergency stop).
+- **CC7 / CC11** (volume / expression) scale the attack, **CC64** is sustain.
+  **CC120** (All Sound Off) silences immediately and **CC123** (All Notes Off)
+  releases notes — **standard MIDI** semantics, the instrument **stays armed**. A
+  real panic is a distinct command (`POST /api/panic` or the E-stop pin).
 - **GMB SysEx** (`F0 7D 00 …`): a *General-MIDI-Boop* controller discovers the
   instrument's capabilities (note range, polyphony, CCs, tuning) and adapts. See
   [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).
@@ -164,7 +167,9 @@ cd firmware/test
 make            # builds the C++ core + the tests, then runs them
 ```
 
-Expected: `146 tests, … checks, 0 failures`.
+Expected: `… tests, … checks, 0 failures` (the exact number grows with the suite;
+the [CI](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml)
+is the source of truth).
 
 ### 2. Build / flash the firmware (PlatformIO)
 

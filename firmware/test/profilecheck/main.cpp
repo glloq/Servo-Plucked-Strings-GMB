@@ -193,6 +193,49 @@ int main(int argc, char** argv) {
               "second bus without SDA2/SCL2 is rejected");
     }
 
+    // P1.12: an old (v1) profile fixture must import → migrate → validate → export →
+    // round-trip cleanly. The v1 fixture carries the legacy network.staticIp key that
+    // v2 dropped; migrate() must remove it and stamp the current version, and the
+    // migrated profile must still be activatable and survive a full round trip.
+    {
+        std::printf("profile v1 -> v2 migration\n");
+        std::string raw = slurp(root + "/firmware/test/fixtures/profile-v1-ukulele.json");
+        CHECK(!raw.empty(), "v1 fixture is readable");
+        JsonDocument doc;
+        CHECK(deserializeJson(doc, raw) == DeserializationError::Ok, "v1 fixture parses");
+        // Pre-migration: it really is an old profile with the legacy key.
+        CHECK((doc["profileVersion"] | 1) == 1, "fixture is stored as v1");
+        CHECK(doc["network"]["staticIp"].is<bool>(), "fixture carries the legacy staticIp");
+
+        ProfileStorage::migrate(doc);  // the upgrade step every load/import runs
+        CHECK((doc["profileVersion"] | 0) == kCurrentProfileVersion,
+              "migrate stamps the current version");
+        CHECK(doc["network"]["staticIp"].isNull(), "migrate drops the legacy staticIp");
+
+        Profile mig;
+        CHECK(ProfileStorage::fromJson(doc.as<JsonVariantConst>(), mig),
+              "migrated profile parses");
+        CHECK(mig.profileVersion == kCurrentProfileVersion, "in-memory version is current");
+        CHECK(ProfileValidator::isActivatable(mig), "migrated profile is activatable");
+
+        // Export → re-parse: a migrated profile round-trips at the current version.
+        JsonDocument out;
+        ProfileStorage::toJson(mig, out);
+        std::string reser;
+        serializeJson(out, reser);
+        Profile rt;
+        CHECK(parse(reser, rt), "migrated profile re-parses");
+        CHECK(rt.profileVersion == kCurrentProfileVersion, "exported version is current");
+        CHECK(rt.strings.size() == mig.strings.size(), "strings survive the migration round-trip");
+
+        // migrate() is idempotent: a profile already at the current version is untouched.
+        JsonDocument cur;
+        deserializeJson(cur, reser);
+        ProfileStorage::migrate(cur);
+        CHECK((cur["profileVersion"] | 0) == kCurrentProfileVersion,
+              "re-migrating a current profile leaves the version unchanged");
+    }
+
     std::printf(g_fail ? "\nPROFILECHECK FAILED (%d)\n" : "\nprofilecheck OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

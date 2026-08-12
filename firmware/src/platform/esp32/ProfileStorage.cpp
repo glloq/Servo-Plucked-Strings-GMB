@@ -237,7 +237,6 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     net["ssid"] = p.network.ssid;
     net["hostname"] = p.network.hostname;
     net["apSsid"] = p.network.apSsid;
-    net["staticIp"] = p.network.staticIp;
 
     JsonObject mi = doc["midi"].to<JsonObject>();
     mi["globalChannel"] = p.midi.globalChannel;
@@ -335,6 +334,23 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     }
 }
 
+namespace {
+// v1 -> v2: v2 removed the no-op network.staticIp flag (audit P1.9). Dropping the
+// stale key here keeps a re-exported profile clean; fromJson would ignore it anyway.
+void migrateV1ToV2(JsonDocument& doc) {
+    if (doc["network"].is<JsonObject>())
+        doc["network"].as<JsonObject>().remove("staticIp");
+}
+}  // namespace
+
+void ProfileStorage::migrate(JsonDocument& doc) {
+    uint16_t v = doc["profileVersion"] | 1;  // absent == the original v1 schema
+    if (v >= kCurrentProfileVersion) return;  // already current (or newer): leave as-is
+    if (v < 2) { migrateV1ToV2(doc); v = 2; }
+    // Future: if (v < 3) { migrateV2ToV3(doc); v = 3; } ...
+    doc["profileVersion"] = kCurrentProfileVersion;
+}
+
 bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     if (doc["instrument"].isNull()) return false;
     bool enumsOk = true;  // set false by any unknown enum string -> reject profile
@@ -376,7 +392,8 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.network.ssid = net["ssid"] | "";
     out.network.hostname = net["hostname"] | "gmb-instrument";
     out.network.apSsid = net["apSsid"] | "Servo-Plucked-Strings-GMB";
-    out.network.staticIp = net["staticIp"] | false;
+    // `staticIp` (removed, audit P1.9): an old profile may still carry the key; it is
+    // simply ignored on load (no migration needed — the value never did anything).
 
     JsonObjectConst mi = doc["midi"];
     out.midi.globalChannel = mi["globalChannel"] | 0;
@@ -524,6 +541,7 @@ std::string ProfileStorage::exportJson(const Profile& p, bool /*includeSecrets*/
 bool ProfileStorage::importJson(const std::string& json, Profile& out) const {
     JsonDocument doc;
     if (deserializeJson(doc, json) != DeserializationError::Ok) return false;
+    migrate(doc);  // upgrade an imported (possibly older) profile (P1.12)
     return fromJson(doc.as<JsonVariantConst>(), out);
 }
 
@@ -621,9 +639,11 @@ bool ProfileStorage::load(int slot, Profile& out) const {
     File f = LittleFS.open(slotPath(slot).c_str(), "r");
     if (!f) return false;
     JsonDocument doc;
-    bool ok = deserializeJson(doc, f) == DeserializationError::Ok && fromJson(doc.as<JsonVariantConst>(), out);
+    bool ok = deserializeJson(doc, f) == DeserializationError::Ok;
     f.close();
-    return ok;
+    if (!ok) return false;
+    migrate(doc);  // upgrade an old on-disk profile to the current schema (P1.12)
+    return fromJson(doc.as<JsonVariantConst>(), out);
 }
 
 bool ProfileStorage::save(int slot, const Profile& p) {

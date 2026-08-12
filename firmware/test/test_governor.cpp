@@ -48,6 +48,28 @@ TEST(governor_reset_clears_history) {
     CHECK(g.requestStart(1));       // history cleared: granted again
 }
 
+// P2.19: the throttle counter counts every deferred start and, unlike the windows,
+// is NOT cleared by reset() (it is cumulative telemetry).
+TEST(governor_throttle_count_is_cumulative) {
+    ServoActivationGovernor g;
+    g.configure(1, 100);
+    CHECK_EQ((int)g.throttleCount(), 0);
+    CHECK(g.requestStart(0));        // granted -> no throttle
+    CHECK(!g.requestStart(1));       // denied -> throttle #1
+    CHECK(!g.requestStart(2));       // denied -> throttle #2
+    CHECK_EQ((int)g.throttleCount(), 2);
+    g.reset();
+    CHECK_EQ((int)g.throttleCount(), 2);  // reset clears windows, not the counter
+    CHECK(g.requestStart(3));        // granted after reset
+    CHECK(!g.requestStart(4));       // denied -> throttle #3
+    CHECK_EQ((int)g.throttleCount(), 3);
+    // Throttling disabled (staggerMs 0) never counts.
+    ServoActivationGovernor off;
+    off.configure(1, 0);
+    for (int i = 0; i < 5; ++i) off.requestStart(0);
+    CHECK_EQ((int)off.throttleCount(), 0);
+}
+
 // A very large burst is fanned out over time rather than all-at-once: across a
 // window only maxConcurrent permits are ever granted.
 TEST(governor_fans_out_large_chord) {

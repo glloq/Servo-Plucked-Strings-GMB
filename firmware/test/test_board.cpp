@@ -131,6 +131,32 @@ TEST(devkitv1_omits_flash_pins) {
     CHECK(b.find(34) != nullptr);
 }
 
+// P1.15: GPIO0 is the BOOT button (forces the Wi-Fi hotspot) on every ESP32 dev
+// board — the firmware samples it as an input the whole time — so it must never be
+// selectable for a servo / I2C / /OE line: reserved on all three profiles, absent
+// from every candidate list, and rejected by the validator when hand-assigned.
+TEST(gpio0_boot_button_reserved_on_all_boards) {
+    for (const BoardProfile& b :
+         {makeEsp32S3DevKitC1(), makeEsp32Wroom32(), makeEsp32DevKitV1()}) {
+        const PinCapability* p = b.find(0);
+        CHECK(p != nullptr);
+        CHECK(p->reserved);
+        CHECK(p->preference == PinPreference::Reserved);
+        // Carries none of our (output) signals.
+        CHECK(!b.supports(0, SignalKind::ServoOe));
+        CHECK(!b.supports(0, SignalKind::I2cSda));
+        CHECK(!b.supports(0, SignalKind::Generic));
+        // Never offered as an auto-assign candidate.
+        for (SignalKind k : {SignalKind::ServoOe, SignalKind::I2cSda, SignalKind::Generic})
+            for (const PinCapability* c : b.candidatesFor(k))
+                CHECK(c->gpio != 0);
+        // An explicit SERVO_OE (or direct servo) on GPIO0 is rejected.
+        PinManager pm(b);
+        pm.assign("SERVO_OE", SignalKind::ServoOe, 0);
+        CHECK(!pm.validate(true).empty());
+    }
+}
+
 // Auto-assign on a classic ESP32 places I2C + /OE on real output pins.
 TEST(wroom_auto_assign_places_valid_pins) {
     BoardProfile b = makeEsp32Wroom32();

@@ -1,5 +1,7 @@
 #include "ServoBank.h"
 
+#include <cstdio>
+
 #include "../../core/configuration/FingerTarget.h"
 #include "../../core/configuration/ServoStroke.h"
 
@@ -77,7 +79,7 @@ void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t
 #else
     (void)sda; (void)scl; (void)sda2; (void)scl2;
 #endif
-    neutraliseAll();
+    hardStop();
 }
 
 bool ServoBank::attachDirect(int index) {
@@ -113,10 +115,10 @@ bool ServoBank::attachDirect(int index) {
 #endif
 }
 
-bool ServoBank::writeMicros(int index, uint16_t us) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
-    if (!s.enabled) return false;  // never drive a disabled servo
+    if (!s.enabled) return ActuatorResult::Disabled;  // never drive a disabled servo
     us = clampPulse(s, us);
     rt_[index].lastUs = us;  // logical pulse (pre-inversion), for sweep-time scaling
     // Apply inversion by mirroring within the calibrated pulse window.
@@ -124,24 +126,29 @@ bool ServoBank::writeMicros(int index, uint16_t us) {
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
         int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
-        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard]) return false;
+        // Board never initialised (absent at boot) — distinct from a mid-run I2C loss,
+        // which pcaHealthy() surfaces separately.
+        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard])
+            return ActuatorResult::DriverUnavailable;
         pca_[bus][s.pcaBoard].writeMicroseconds(s.channel, us);
     } else if (s.gpio >= 0) {
-        if (!attached_[index] && !attachDirect(index)) return false;  // reattach failed
+        if (!attached_[index] && !attachDirect(index))
+            return ActuatorResult::OutputFault;  // LEDC (re)attach failed
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
         ledcWrite(s.gpio, usToDuty(us));
 #else
-        if (ledcCh_[index] < 0) return false;
+        if (ledcCh_[index] < 0) return ActuatorResult::OutputFault;
         ledcWrite(ledcCh_[index], usToDuty(us));
 #endif
     } else {
-        return false;  // no output configured
+        return ActuatorResult::OutputFault;  // no output pin configured
     }
     rt_[index].pwmOff = false;
 #else
     (void)us;
 #endif
-    return true;
+    ++moveCount_;  // a servo pulse actually reached an output (diagnostics, P2.19)
+    return ActuatorResult::Ok;
 }
 
 void ServoBank::writeOff(int index) {
@@ -179,56 +186,58 @@ void ServoBank::toActive(int index) {
 
 void ServoBank::toMicros(int index, uint16_t us) { writeMicros(index, us); }
 
-bool ServoBank::press(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
-    bool ok = writeMicros(index, servos_[index].activeUs);
+ActuatorResult ServoBank::press(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, servos_[index].activeUs);
     rt_[index].mode = Mode::Active;
-    return ok;  // false => the servo could not be driven (attach/PCA failure)
+    return r;  // non-Ok => the servo could not be driven; caller faults the axis
 }
 
-bool ServoBank::pressFret(int index, int fret) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::pressFret(int index, int fret) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     // A geared finger presses side B (activeBUs) for its second fret, side A
     // (activeUs) otherwise — identical to press() for a plain single finger.
-    bool ok = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
+    ActuatorResult r = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
     rt_[index].mode = Mode::Active;
-    return ok;
+    return r;
 }
 
-bool ServoBank::holdMicros(int index, uint16_t us) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
-    bool ok = writeMicros(index, us);  // clamped to the servo's pulse window
-    rt_[index].mode = Mode::Active;    // hold: no rest-time PWM cut during a test
-    return ok;
+ActuatorResult ServoBank::moveTo(int index, uint16_t us) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, us);  // clamped to the servo's pulse window
+    rt_[index].mode = Mode::Active;             // hold: no rest-time PWM cut during a test
+    return r;
 }
 
-bool ServoBank::muteHold(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return false;
+ActuatorResult ServoBank::mute(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     uint16_t m = servos_[index].muteUs;
-    if (m == 0) return false;  // no mute position calibrated for this plectrum
-    bool ok = writeMicros(index, m);  // clamped to the pulse window
+    if (m == 0) return ActuatorResult::Disabled;  // no mute position calibrated
+    ActuatorResult r = writeMicros(index, m);     // clamped to the pulse window
     rt_[index].mode = Mode::Active;   // hold against the string; caller releases later
-    return ok;
+    return r;
 }
 
-void ServoBank::release(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return;
-    toRest(index);
+ActuatorResult ServoBank::release(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    ActuatorResult r = writeMicros(index, servos_[index].restUs);
     rt_[index].mode = Mode::Rest;
     rt_[index].restAtMs = 0;
+    return r;
 }
 
-void ServoBank::strike(int index, double intensity) {
-    if (index < 0 || index >= (int)servos_.size()) return;
+ActuatorResult ServoBank::strike(int index, double intensity) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
     // Velocity shapes the strike depth; on an alternate stroke the up-stroke
     // endpoint is used. The maths lives in servoStrikeTargetUs (unit-tested).
     bool upStroke = s.alternateDirection && rt_[index].strokeParity;
-    writeMicros(index, servoStrikeTargetUs(s, intensity, upStroke));
+    ActuatorResult r = writeMicros(index, servoStrikeTargetUs(s, intensity, upStroke));
     rt_[index].mode = Mode::Striking;
     rt_[index].returnAtMs = 0;
     // Flip the stroke direction for the next strike on this servo.
     if (s.alternateDirection) rt_[index].strokeParity = !rt_[index].strokeParity;
+    return r;
 }
 
 void ServoBank::update(uint32_t nowMs) {
@@ -269,6 +278,11 @@ void ServoBank::outputEnable(bool on) {
 }
 
 bool ServoBank::pcaHealthy() const {
+    uint8_t ignored;
+    return pcaHealthy(ignored);
+}
+
+bool ServoBank::pcaHealthy(uint8_t& failedBoard) const {
 #if defined(ARDUINO)
     if (!pcaUsed_) return true;
     for (int b = 0; b < 2; ++b) {
@@ -278,18 +292,43 @@ bool ServoBank::pcaHealthy() const {
             // The PCA9685 base address is 0x40 + board index (per bus). A board that
             // has been unplugged / lost power no longer ACKs its address.
             w.beginTransmission(static_cast<uint8_t>(0x40 + i));
-            if (w.endTransmission() != 0) return false;
+            if (w.endTransmission() != 0) {
+                failedBoard = static_cast<uint8_t>(b * 8 + i);  // matches board()
+                return false;
+            }
         }
     }
     return true;
 #else
+    (void)failedBoard;
     return true;
 #endif
 }
 
-void ServoBank::neutraliseAll() {
+bool ServoBank::stringUsesBoard(int stringIndex, uint8_t boardBucket) const {
+    for (size_t i = 0; i < servos_.size(); ++i) {
+        const ServoConfig& s = servos_[i];
+        if (s.enabled && s.stringIndex == stringIndex &&
+            board(static_cast<int>(i)) == boardBucket)
+            return true;
+    }
+    return false;
+}
+
+std::string ServoBank::boardName(uint8_t boardBucket) {
+    if (boardBucket == 0xFF) return "direct-GPIO";
+    int bus = boardBucket / 8;
+    int addr = 0x40 + (boardBucket % 8);
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "bus %d / 0x%02X", bus, addr);
+    return std::string(buf);
+}
+
+void ServoBank::hardStop() {
     // Immediate hard cut: PCA via /OE, direct servos by cutting their PWM now
-    // (do not wait for settleMs), regardless of disableAtRest.
+    // (do not wait for settleMs), regardless of disableAtRest. Used for E-stop /
+    // panic / major fault and as the final cut of a controlled park. Never gated on
+    // a mechanical movement completing (spec P0 §21.2).
     outputEnable(false);
     for (int i = 0; i < (int)servos_.size(); ++i) {
         if (servos_[i].source == ServoSource::DirectGpio)
@@ -298,6 +337,23 @@ void ServoBank::neutraliseAll() {
             toRest(i);
         if (i < (int)rt_.size()) rt_[i] = Rt{};
     }
+}
+
+void ServoBank::moveAllToRest() {
+    // Controlled park phase 1: drive every servo to rest with outputs kept live. Each
+    // release() writes the rest pulse and lets update()/disableAtRest cut idle PWM in
+    // the normal way; the caller waits parkDurationMs() for the travel to finish.
+    for (int i = 0; i < (int)servos_.size(); ++i) release(i);
+}
+
+uint32_t ServoBank::parkDurationMs() const {
+    uint32_t w = 0;
+    for (const auto& s : servos_) {
+        if (!s.enabled) continue;
+        uint32_t t = static_cast<uint32_t>(s.travelMs) + s.settleMs;
+        if (t > w) w = t;
+    }
+    return w;
 }
 
 int ServoBank::servoIndex(const std::string& function, int stringIndex) const {

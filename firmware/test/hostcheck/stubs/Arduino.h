@@ -83,8 +83,10 @@ struct SerialStub {
 };
 static SerialStub Serial;
 
-// Minimal ESP object (chip identity).
+// Minimal ESP object (chip identity + heap telemetry for diagnostics).
 struct EspClass {
   uint64_t getEfuseMac() { return 0; }
+  uint32_t getFreeHeap() { return 0; }
+  uint32_t getMinFreeHeap() { return 0; }
 };
 static EspClass ESP;

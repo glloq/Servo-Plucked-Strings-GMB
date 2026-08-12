@@ -16,6 +16,12 @@
 
 namespace gmb {
 
+// Current on-disk profile schema version. Bump it whenever the persisted shape
+// changes and add a matching migrateV{N-1}ToV{N} step (see ProfileStorage::migrate)
+// so old configs upgrade explicitly instead of accumulating special-cases in
+// fromJson(). History: v1 → v2 dropped the no-op network.staticIp flag (audit P1.9).
+constexpr uint16_t kCurrentProfileVersion = 2;
+
 enum class NetworkMode : uint8_t { AccessPoint = 0, Station = 1 };
 
 enum class VelocityCurve : uint8_t { Linear, Soft, Hard, Exponential, Custom };
@@ -41,7 +47,10 @@ struct NetworkConfig {
     std::string ssid;            // station SSID (never exported with password)
     std::string hostname = "gmb-instrument";
     std::string apSsid = "Servo-Plucked-Strings-GMB";
-    bool staticIp = false;
+    // NOTE: a `staticIp` flag was removed here (audit P1.9). It was persisted and
+    // exposed in the UI but drove no WiFi.config() call — a phantom option. Real
+    // static-IP support (ip/gateway/subnet/dns) belongs in the future DeviceConfig
+    // (P13) and must arrive with the actual WiFi.config() wiring, not just a flag.
 };
 
 struct MidiConfig {
@@ -222,7 +231,7 @@ struct PluckConfig {
 
 struct Profile {
     std::string project = "Servo-Plucked-Strings-GMB";
-    uint16_t profileVersion = 1;
+    uint16_t profileVersion = kCurrentProfileVersion;
     uint32_t capabilitiesRevision = 1;
 
     InstrumentInfo instrument;

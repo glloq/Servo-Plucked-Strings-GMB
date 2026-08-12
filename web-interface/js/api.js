@@ -453,7 +453,7 @@
       ],
       network: {
         mode: 'accessPoint', ssid: '', hostname: 'gmb-ukulele',
-        apSsid: 'Servo-Plucked-Strings-GMB', staticIp: false
+        apSsid: 'Servo-Plucked-Strings-GMB'
       },
       power: { maxConcurrentMoves: 3, maxConcurrentPerBoard: 0, staggerMs: 8 },
       pluck: {

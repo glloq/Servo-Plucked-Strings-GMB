@@ -5,8 +5,9 @@
 > configuration se fait depuis une **page web** dans le navigateur — pas de
 > moteur pas-à-pas, pas de chariot, pas de code à recompiler.
 
+[![CI](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml/badge.svg)](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/ESP32--S3-DevKitC--1-informational.svg)](https://www.espressif.com/en/products/socs/esp32-s3)
+[![Platform](https://img.shields.io/badge/ESP32-S3%20%7C%20WROOM--32%20%7C%20DevKit%20v1-informational.svg)](https://www.espressif.com/en/products/socs/esp32)
 [![Build](https://img.shields.io/badge/build-PlatformIO%20%7C%20Arduino-orange.svg)](https://platformio.org/)
 [![MIDI](https://img.shields.io/badge/MIDI-Wi--Fi%20(UDP)-green.svg)](https://www.midi.org/)
 
@@ -38,7 +39,7 @@ choisir quel servo-doigt presser.
 - ⚙️ Doigt à engrenage : **un servo pour deux frettes** d'une même corde
 - ⚡ Gestion du courant d'appel (étalement des démarrages + coupure PWM au repos)
 - 🌐 Interface web complète : assistant de configuration, calibration guidée, banc de test
-- 🧪 Cœur C++17 pur, testé sur PC (146 tests natifs)
+- 🧪 Cœur C++17 pur, testé sur PC (suite de tests natifs exécutée en CI à chaque push)
 
 ## 🎼 Principe
 
@@ -103,8 +104,10 @@ mapping reste néanmoins libre par servo.
   [`docs/MIDI_PROTOCOL.md`](docs/MIDI_PROTOCOL.md).
 - Une frette **sans servo** est traitée comme « non disponible » : la sélection
   explicite bascule alors en allocation automatique (politique configurable).
-- **CC7 / CC11** (volume / expression) modulent l'attaque, **CC64** le sustain,
-  **CC120 / CC123** déclenchent un panic (arrêt d'urgence logiciel).
+- **CC7 / CC11** (volume / expression) modulent l'attaque, **CC64** le sustain.
+  **CC120** (All Sound Off) coupe le son immédiatement et **CC123** (All Notes Off)
+  relâche les notes — sémantique **MIDI standard**, l'instrument **reste armé**. Un
+  vrai panic est une commande distincte (`POST /api/panic` ou la broche E-stop).
 - **SysEx GMB** (`F0 7D 00 …`) : un contrôleur *General-MIDI-Boop* découvre les
   capacités de l'instrument (tessiture, polyphonie, CC, accordage) et s'adapte.
   Voir [`SYSEX_CAPABILITIES.md`](SYSEX_CAPABILITIES.md).
@@ -167,7 +170,9 @@ cd firmware/test
 make            # compile le cœur C++ + les tests, puis les exécute
 ```
 
-Attendu : `146 tests, … checks, 0 failures`.
+Attendu : `… tests, … checks, 0 failures` (le nombre exact évolue avec la suite ;
+la [CI](https://github.com/glloq/Servo-Plucked-Strings-GMB/actions/workflows/ci.yml)
+fait foi).
 
 ### 2. Compiler / flasher le firmware (PlatformIO)
 

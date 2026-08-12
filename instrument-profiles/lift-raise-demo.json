@@ -1,6 +1,6 @@
 {
   "project": "Servo-Plucked-Strings-GMB",
-  "profileVersion": 1,
+  "profileVersion": 2,
   "capabilitiesRevision": 1,
   "instrument": {
     "name": "Raise-to-play lift demo",
@@ -22,8 +22,7 @@
     "mode": "accessPoint",
     "ssid": "",
     "hostname": "gmb-lift-raise",
-    "apSsid": "Servo-Plucked-Strings-GMB",
-    "staticIp": false
+    "apSsid": "Servo-Plucked-Strings-GMB"
   },
   "midi": {
     "globalChannel": 0,

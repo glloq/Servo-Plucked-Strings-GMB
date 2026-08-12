@@ -283,7 +283,7 @@ If the connection fails several times, the system automatically falls back to ac
 
 ## 8.2 Initial MIDI transport
 
-The transport layer is separated from the internal MIDI engine. The first version receives MIDI as raw MIDI byte packets over **Wi-Fi UDP on port 5006**: notes, the CC string/fret selectors (`CC20` = string, `CC21` = fret), and GMB SysEx (header `F0 7D 00`). `CC120` (All Sound Off) and `CC123` (All Notes Off) trigger a panic (§21).
+The transport layer is separated from the internal MIDI engine. The first version receives MIDI as raw MIDI byte packets over **Wi-Fi UDP on port 5006**: notes, the CC string/fret selectors (`CC20` = string, `CC21` = fret), and GMB SysEx (header `F0 7D 00`). `CC120` (All Sound Off) and `CC123` (All Notes Off) apply **standard MIDI** semantics (silence / release the sounding notes); the instrument stays armed. A latched panic is a distinct command (§21).
 
 Every transport produces the same internal event:
 
@@ -829,7 +829,9 @@ A hardware stop (optional debounced E-stop input) must be able to:
 
 ## 21.3 Software panic
 
-A panic — raised by `CC120` / `CC123`, the E-stop, or an internal fault — must:
+A panic — raised by `POST /api/panic`, the E-stop, or an internal fault (a real
+latched stop, distinct from the standard-MIDI `CC120` / `CC123`, which only silence /
+release notes and leave the instrument armed) — must:
 
 * flush the MIDI queue;
 * cancel all pending moves and plucks;
@@ -839,16 +841,11 @@ A panic — raised by `CC120` / `CC123`, the E-stop, or an internal fault — mu
 
 ## 21.4 Loss of Wi-Fi
 
-Configurable behavior:
-
-```text
-finish active notes then stop
-stop immediately
-continue commands already queued
-return to standby without disarming
-```
-
-Default behavior:
+Implemented behavior (single, fixed — audit P1.10). A selectable policy
+(`finish active notes then stop` / `stop immediately` / `continue queued` / `return
+to standby without disarming`) is a planned capability: it belongs with the future
+DeviceConfig/SafetyConfig split and must be introduced together with the runtime that
+honours it, not as an unwired flag.
 
 ```text
 cancellation of pending commands
