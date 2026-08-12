@@ -39,19 +39,26 @@ public:
     }
     void reset() { governor_.reset(); }
 
-    // May a movement of class `cls` START now on PCA board bucket `board` (0xFF = a
-    // servo on no board, e.g. direct GPIO — only the global cap applies)? Deadline
-    // movements are always permitted; staggerable ones defer to the governor.
+    // Register a movement START of class `cls` on PCA board bucket `board` (0xFF = a
+    // servo on no board, e.g. direct GPIO — only the global cap applies) and return
+    // whether it may proceed NOW. EVERY scheduler movement is registered here, so the
+    // manager accounts for the whole in-rush picture: deadline movements (sound) are
+    // always permitted and counted; staggerable ones defer to the governor's caps.
     bool requestMove(MoveClass cls, uint32_t nowMs, uint8_t board = 0xFF) {
-        if (cls == MoveClass::Deadline) return true;  // sound: never throttled
-        return governor_.requestStart(nowMs, board);
+        if (cls == MoveClass::Deadline) { ++deadlineMoves_; return true; }  // never throttled
+        if (governor_.requestStart(nowMs, board)) { ++staggerableGrants_; return true; }
+        return false;  // deferred (the governor counts it as a throttle)
     }
 
-    // Cumulative staggerable starts the governor deferred (diagnostics, P2.19).
-    uint32_t throttleCount() const { return governor_.throttleCount(); }
+    // Diagnostics (P2.19): the movement mix the manager has seen.
+    uint32_t deadlineMoves() const { return deadlineMoves_; }       // sound strikes passed
+    uint32_t staggerableGrants() const { return staggerableGrants_; }  // positioning starts granted
+    uint32_t throttleCount() const { return governor_.throttleCount(); }  // positioning starts deferred
 
 private:
     ServoActivationGovernor governor_;
+    uint32_t deadlineMoves_ = 0;
+    uint32_t staggerableGrants_ = 0;
 };
 
 }  // namespace gmb

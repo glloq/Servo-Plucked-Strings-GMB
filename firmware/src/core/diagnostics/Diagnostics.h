@@ -18,7 +18,9 @@ struct DiagCounters {
     uint32_t udpDropped = 0;         // oversized / dropped datagrams (from the transport)
     uint32_t faults = 0;             // SafetyManager fault records
     uint32_t servoMoves = 0;         // servo pulses actually written
-    uint32_t governorThrottles = 0;  // start requests the power governor deferred
+    uint32_t governorThrottles = 0;  // staggerable start requests the governor deferred
+    uint32_t deadlineMoves = 0;      // sound strikes registered (never throttled) — P1.6
+    uint32_t staggerableGrants = 0;  // positioning starts the governor granted — P1.6
     uint32_t wifiReconnects = 0;     // station link re-established
     uint32_t cmdQueueHighWater = 0;  // deepest the web->loop command queue ever got
     uint32_t schedulerMaxLatencyUs = 0;  // worst loop() period observed
@@ -41,6 +43,10 @@ public:
     void setFaults(uint32_t n) { c_.faults = n; }
     void setServoMoves(uint32_t n) { c_.servoMoves = n; }
     void setGovernorThrottles(uint32_t n) { c_.governorThrottles = n; }
+    void setMoveMix(uint32_t deadline, uint32_t staggerableGrants) {
+        c_.deadlineMoves = deadline;
+        c_.staggerableGrants = staggerableGrants;
+    }
     void addWifiReconnect() { ++c_.wifiReconnects; }
     void setPca(bool used, bool healthy, uint8_t failedBoard) {
         c_.pcaUsed = used;
