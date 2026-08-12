@@ -32,15 +32,15 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P1.14 | Builds PlatformIO multi-cartes (S3 / WROOM-32 / DevKit v1) | **DONE** | `a1ca8b7` |
 | P1.15 | Réserver GPIO0 (BOOT-hotspot) | **DONE** | `584895f` |
 | P1.16 | CI GitHub Actions complète | **DONE** | `a1ca8b7` |
-| P2.17 | Réduire `main.cpp` (ApplicationRuntime, PlaybackScheduler…) | **NOT STARTED** | — |
+| P2.17 | Réduire `main.cpp` (ApplicationRuntime, PlaybackScheduler…) | **PARTIAL** | (voir historique) |
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
 | P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**14 DONE · 4 PARTIAL · 1 NOT STARTED.** Le seul item non commencé est P2.17 (découpe
-de `main.cpp`) ; les PARTIAL (P1.6, P1.7, P1.11, P1.13) ont leur abstraction/boundary
-en place et testée, il reste le câblage fonctionnel/persistant — des refactors que la
-mission demande de faire *progressivement, par composants avec tests de non-régression*.
-Voir §6 pour l'approche recommandée.
+**14 DONE · 5 PARTIAL · 0 NOT STARTED** — les 19 points ont tous reçu un increment réel
+et testé. Les 5 PARTIAL (P1.6, P1.7, P1.11, P1.13, P2.17) ont leur abstraction/boundary
+en place et testée ; il ne reste que du câblage fonctionnel/persistant, des refactors
+que la mission demande de faire *progressivement, par composants avec tests de
+non-régression*. Voir §6 pour l'approche recommandée.
 
 ---
 
@@ -203,18 +203,19 @@ hostcheck + servobankcheck), `profiles` (lint JSON + profilecheck), `web-js`
 (`node --check`), `firmware` (matrice 3 cartes + taille flash/RAM). Badge CI réel
 dans les README, nombre de tests codé en dur supprimé.
 
-### P2.17 — Réduire main.cpp (NOT STARTED — mais amorcé par composants)
-*Déjà extrait en composants* (l'approche « par composants » demandée) : **`ActuatorManager`**
-(P1.6), **`MidiTransport`** + liste de transports façon MidiManager (P1.7),
-**`Diagnostics`** (P2.19), et des fonctions de service nommées (`serviceParking`,
-`hardStopAll`, `actOk`, `appStateStr`, `feedDiagnostics`, `serviceHotspotRequests`).
-*Reste — le gros morceau* : sortir la FSM mécanique de `tickString()` dans un
-`PlaybackScheduler`, puis `ApplicationRuntime`/`CommandDispatcher`/`ProfileManager`/
-`SafetySupervisor`. **Délibérément non fait dans cette passe** : `tickString()` est le
-code le plus critique en timing, profondément couplé aux globals, et seulement
-compilable (pas de test natif runtime). La mission demande explicitement d'« éviter une
-grosse réécriture unique » — cette extraction mérite sa propre passe dédiée avec
-validation au banc, pas un big-bang non testé au milieu du reste.
+### P2.17 — Réduire main.cpp (PARTIAL)
+*Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 835 lignes (−29 %)**. La
+FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
+contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
+corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
+faute via un callback vers le chemin central. D'autres responsabilités étaient déjà
+sorties en composants : `ActuatorManager` (P1.6), `MidiTransport`/liste (P1.7),
+`Diagnostics` (P2.19), fonctions de service nommées. *Reste* : `ApplicationRuntime` /
+`CommandDispatcher` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
+devienne `app.begin()/app.tick()`) — par composants, la FSM étant seulement
+compile-vérifiée (Arduino-gated), à valider au banc. *Fichiers* :
+`platform/esp32/PlaybackScheduler.h` (nouveau), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
@@ -275,7 +276,10 @@ nativement) ou des items PARTIAL/NOT STARTED.
 - que `hardStop` coupe assez vite le courant sous charge (E-stop réel) ;
 - l'in-rush réel d'un accord même avec governor (P1.6 non étendu aux plucks) ;
 - la détection I2C d'un PCA débranché *sous tension* (P1.5) sur le vrai bus ;
-- l'endurance MIDI / 6 cordes simultanées.
+- l'endurance MIDI / 6 cordes simultanées ;
+- que l'extraction `PlaybackScheduler` (P2.17) ne change rien au timing réel — la
+  logique est prouvée byte-for-byte identique et compile, mais elle n'a **pas** de test
+  natif runtime (Arduino-gated) : à reconfirmer au banc.
 
 **Approche recommandée pour les items restants** (par petits commits, tests de
 non-régression à chaque étape) :
@@ -286,5 +290,6 @@ non-régression à chaque étape) :
 - **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
   ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
   transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
-- **P2.17** : sortir la FSM de `tickString()` dans un `PlaybackScheduler`, puis
-  `ApplicationRuntime`/`CommandDispatcher`/… un composant à la fois.
+- **P2.17** (reste) : `PlaybackScheduler` fait ; extraire `ApplicationRuntime` /
+  `CommandDispatcher` / `ProfileManager` / `SafetySupervisor`, un composant à la fois,
+  pour réduire `main.cpp` à `app.begin()/app.tick()`.
