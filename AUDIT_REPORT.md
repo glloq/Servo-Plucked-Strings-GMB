@@ -27,7 +27,7 @@ Branche : `claude/elegant-cannon-zh23kn` · ~23 commits d'audit (petits, indépe
 | P1.8 | Cohérence doc CC120/CC123 (≠ panic verrouillé) | **DONE** | `584895f` |
 | P1.9 | `staticIp` : implémenter ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
-| P1.11 | Modes Setup / Performance + sécurité réseau | **PARTIAL** | — |
+| P1.11 | Modes Setup/Performance + sécurité réseau (postures + gate UDP host-testé ; câblage runtime différé) | **PARTIAL** | (voir historique) |
 | P1.12 | Vraie migration de profils (v1→v2) + fixtures | **DONE** | `9675cc8` |
 | P1.13 | Séparer `DeviceConfig`/`InstrumentProfile` (structs + split disque faits ; web/comportement différés) | **PARTIAL** | (voir historique) |
 | P1.14 | Builds PlatformIO multi-cartes (S3 / WROOM-32 / DevKit v1) | **DONE** | `a1ca8b7` |
@@ -51,8 +51,8 @@ Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **233 tests, 3726 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **233 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **239 tests, 3760 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **239 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2 + split slot device/instrument P1.13) | OK |
@@ -65,7 +65,7 @@ Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P
 > Les 3 builds ESP32 sont donc exécutés et **validés sur GitHub Actions**, pas en
 > local — c'est exactement le rôle de la CI ajoutée (P1.16).
 
-Nombre de tests : ~198 → **233** (+35), plus les assertions ajoutées à
+Nombre de tests : ~198 → **239** (+41), plus les assertions ajoutées à
 `servobankcheck` / `profilecheck`. Le README n'affiche plus de nombre codé en dur
 (badge CI = source de vérité).
 
@@ -176,14 +176,23 @@ politique déterminée réelle (annuler les commandes en attente + relâcher les
 politique sélectionnable reviendra avec le split DeviceConfig/SafetyConfig, câblée.
 
 ### P1.11 — Setup / Performance + sécurité réseau (PARTIAL)
-*Fait* : les deux **postures** cohérentes sont désormais **documentées** et mappées
+*Fait (postures)* : les deux **postures** cohérentes sont **documentées** et mappées
 aux mécanismes existants (`NETWORK_HOTSPOT.md` §7) — Setup (AP + portail captif,
 config/calibration, auth simplifiée tant qu'aucun token n'est défini) et Performance
 (toutes les écritures exigent le token via `WebApi::authOk`, PANIC volontairement sans
-auth, USB/DIN prioritaire via l'abstraction transports P1.7). *Reste* (optionnel, la
-mission dit « éventuellement ») : durcissement UDP — whitelist d'IP / session reconnue /
-désactivation UDP en Performance, à livrer avec le futur `DeviceConfig` (P1.13) et son
-câblage runtime.
+auth, USB/DIN prioritaire via l'abstraction transports P1.7). *Fait (durcissement UDP)* :
+le **kernel de filtrage est implémenté et host-testé** — **`UdpSourceGate`**
+(`core/net`) avec 3 postures : `Open` (défaut, inchangé), `LockToFirst` (**session
+reconnue** : verrou sur le premier expéditeur → un pirate du réseau ne peut plus injecter
+une fois qu'un contrôleur parle) et `Disabled` (**UDP coupé** en Performance). Chaque refus
+est compté (`MidiWifi::rejectedPackets()`). `MidiWifi` le consulte dans `poll()` avant de
+parser, mais **inerte** (`Open`) jusqu'à ce qu'un runtime/`DeviceConfig` appelle
+`setSourcePolicy()` — même patron que le transport DIN (logique complète et testée,
+activation + validation socket réel différées au banc). *Test* : `test_udp_source_gate.cpp`
+(3 postures, cycle lock/unlock, port dans l'identité, compteur, session fraîche au
+changement de politique). *Reste* : câbler la posture au mode Performance via le
+`DeviceConfig` runtime (P1.13) ; whitelist multi-IP explicite en extension ; validation
+réseau réelle. *Fichiers* : `core/net/UdpSourceGate.h`, `platform/esp32/MidiWifi.{h,cpp}`.
 
 ### P1.12 — Migration de profils (DONE)
 `kCurrentProfileVersion = 2` ; `ProfileStorage::migrate(doc)` upgrade un JSON brut
@@ -356,8 +365,9 @@ non-régression à chaque étape) :
   paresseuse + tests). Restent la **portabilité comportementale** (opération « importer
   l'instrument seul » sans écraser la config device) et le split du **format d'échange/
   web** — ce dernier différé car il touche l'UI navigateur non-testable ici. Puis y
-  rattacher les configs transports/sécurité. **P1.11** (reste) : whitelist/désactivation
-  UDP avec ce split.
+  rattacher les configs transports/sécurité. **P1.11** (reste) : le gate UDP
+  (`UdpSourceGate`) est fait et host-testé ; reste à câbler sa posture au mode
+  Performance via le `DeviceConfig` runtime, et à valider sur réseau réel.
 - **P2.17** (reste) : `PlaybackScheduler`, `CommandDispatcher`, `AppPhase`, `Readiness`
   et les utilitaires sont sortis (main.cpp −36 %). Le reste (`SafetySupervisor` /
   `ApplicationRuntime` autour de la séquence armement/panic stateful) demande d'injecter
