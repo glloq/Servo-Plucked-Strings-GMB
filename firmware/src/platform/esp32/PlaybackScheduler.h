@@ -166,7 +166,13 @@ private:
                         resolvePluckMute(g_profile.pluck, di >= 0, strikerHasMute, li >= 0);
                     switch (action) {
                         case MuteSource::Damper:
-                            if (di >= 0) { g_servos.strike(di); muteWaitMs = g_servos.travelMs(di); }
+                            if (di >= 0) {
+                                // Register the damper strike with the manager (P1.6): a
+                                // chord Note-Off releases many dampers at once, so it is
+                                // real in-rush — deadline (never throttled) but counted.
+                                g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(di));
+                                g_servos.strike(di); muteWaitMs = g_servos.travelMs(di);
+                            }
                             break;
                         case MuteSource::Plectrum:
                             // Bring the plectrum to rest against the string to damp it,
@@ -215,6 +221,7 @@ private:
             if (sch.phase != StringSched::Idle && sch.phase != StringSched::WaitStopped) {
                 int di = g_servos.damperIndex(static_cast<int>(i));
                 if (di >= 0) {
+                    g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(di));  // P1.6
                     g_servos.strike(di);
                     sch.dampUntilMs = nowMs + g_servos.travelMs(di) + g_servos.settleMs(di);
                 }
@@ -385,9 +392,11 @@ private:
                         sch.phase = StringSched::StrumLiftDown;
                         break;
                     }
-                    // The actual pluck: fault the string if the strike did not reach the
-                    // hardware (P1.4). The switch breaks straight after, so the faulted
-                    // scheduler reset stands.
+                    // The actual pluck: register it as a deadline move (P1.6 — the sonic
+                    // beat, never throttled but counted), then fault the string if the
+                    // strike did not reach the hardware (P1.4). The switch breaks straight
+                    // after, so the faulted scheduler reset stands.
+                    g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(pi));
                     actOk(g_servos.strike(pi, tgt.intensity), i, "pluck servo write failed", nowMs);
                 }
                 break;
@@ -396,6 +405,8 @@ private:
                 if (static_cast<int32_t>(nowMs - (sch.liftStartMs +
                         g_servos.travelMs(sch.liftIndex) +
                         g_servos.engageDelayMs(sch.liftIndex))) >= 0) {
+                    g_actuators.requestMove(MoveClass::Deadline, nowMs,
+                                            g_servos.board(sch.strikeIndex));  // P1.6
                     if (!actOk(g_servos.strike(sch.strikeIndex, tgt.intensity), i,
                                "pluck servo write failed", nowMs))
                         break;  // faulted: do not advance the (now reset) scheduler

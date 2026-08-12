@@ -50,8 +50,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **217 tests, 3649 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **217 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **218 tests, 3654 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **218 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -114,17 +114,22 @@ carte perdue ne porte aucune corde (ressource commune → fail-safe).
 *Fichiers* : `ServoBank.*`, `main.cpp`, `SAFETY.md`. *Tests* : `servobankcheck`.
 
 ### P1.6 — PowerGovernor étendu (PARTIAL)
-*Fait* : nouvelle couche **`ActuatorManager`** (core, testable) réalisant l'archi
+*Fait* : couche **`ActuatorManager`** (core, testable) réalisant l'archi
 `PlaybackScheduler → ActuatorManager → PowerGovernor → ServoBank`, avec la distinction
-explicite **étalable** (finger press/release, lift engage → gouverné) vs **échéance
-sonore** (pluck/strum strike → **jamais** throttlé). Le governor garde limite globale +
-**par PCA** + `staggerMs` + désactivation à 0. `main.cpp` route la press de doigt via
-`g_actuators.requestMove(Staggerable, …)`. *Test* : `test_actuator_manager.cpp` (le
-deadline passe toujours, le staggerable suit le governor, désactivation OK). *Reste* :
-router aussi damper/aux par le manager, et décider au cas par cas pour le strum-lift
-(sur le chemin d'anticipation, sensible au timing — laissé non gouverné pour ne pas
-dégrader la synchro musicale, comme la mission le recommande). *Fichiers* :
-`core/instrument/ActuatorManager.h` (nouveau), `main.cpp`.
+**étalable** (finger press → gouverné) vs **échéance sonore** (pluck/strum/damper strike
+→ **jamais** throttlé). **Chaque mouvement passe désormais par le manager** : la press de
+doigt via `requestMove(Staggerable)` (throttlée), et **toutes les frappes** (pluck,
+strum, damper — y compris la relâche d'accord qui décharge plusieurs dampers d'un coup)
+via `requestMove(Deadline)` (jamais throttlées mais **comptées**). Le manager expose la
+**répartition des mouvements** (deadline / staggerable accordés / différés), visible dans
+`GET /api/diagnostics` (`moveMix`) — de quoi mesurer l'in-rush réel au banc. Le governor
+garde limite globale + **par PCA** + `staggerMs` + désactivation à 0. *Tests* :
+`test_actuator_manager.cpp` (deadline toujours passant, staggerable gouverné, comptage du
+mix). *Reste* : **hard-throttler** les dampers de relâche d'accord (demande une infra de
+retry dans la FSM + mesure d'in-rush au banc pour la calibrer) ; le strum-lift reste non
+gouverné (chemin d'anticipation, sensible au timing — la mission recommande de ne pas
+dégrader la synchro). *Fichiers* : `core/instrument/ActuatorManager.h`,
+`platform/esp32/PlaybackScheduler.h`, `core/diagnostics/Diagnostics.h`, `main.cpp`.
 
 ### P1.7 — Transports MIDI (PARTIAL)
 *Fait* : interface **`MidiTransport`** (core, testable) — `poll/events/clear/source/

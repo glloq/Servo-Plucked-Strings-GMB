@@ -359,6 +359,7 @@ live I2C or state). Fields:
 | `scheduler.maxLatencyUs` / `jitterUs` / `meanUs` | pire période `loop()`, pire écart, moyenne lissée |
 | `cmdQueueHighWater` | profondeur max de la file web→loop |
 | `faults` / `servoMoves` / `governorThrottles` / `wifiReconnects` | compteurs cumulés |
+| `moveMix.deadline` / `staggerableGranted` / `staggerableDeferred` | répartition des mouvements vue par l'ActuatorManager (frappes sonores jamais throttlées ; positionnements accordés / différés) — P1.6 |
 | `pca.used` / `healthy` / `failedBoard` | santé PCA9685 (carte défaillante nommée `bus N / 0x4A`) |
 
 Métriques non encore instrumentées (à ajouter progressivement) : latence par corde,

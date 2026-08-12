@@ -35,3 +35,17 @@ TEST(governor_disabled_passes_everything) {
     for (int i = 0; i < 8; ++i) CHECK(m.requestMove(MoveClass::Staggerable, 0));
     CHECK_EQ((int)m.throttleCount(), 0);
 }
+
+// P1.6 telemetry: the manager accounts for the whole movement mix — deadline strikes
+// (always passed, counted) vs staggerable positioning starts (granted / deferred).
+TEST(actuator_manager_counts_the_move_mix) {
+    ActuatorManager m;
+    m.configure(1, 0, 100);  // one staggerable slot, tight window
+    m.requestMove(MoveClass::Deadline, 0);        // strike
+    m.requestMove(MoveClass::Deadline, 0);        // strike
+    CHECK(m.requestMove(MoveClass::Staggerable, 0));   // granted
+    CHECK(!m.requestMove(MoveClass::Staggerable, 1));  // deferred
+    CHECK_EQ((int)m.deadlineMoves(), 2);          // both strikes counted, none throttled
+    CHECK_EQ((int)m.staggerableGrants(), 1);
+    CHECK_EQ((int)m.throttleCount(), 1);
+}

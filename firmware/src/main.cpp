@@ -533,6 +533,7 @@ void feedDiagnostics() {
     g_diag.setFaults(static_cast<uint32_t>(g_safety.faults().size()));
     g_diag.setServoMoves(g_servos.moveCount());
     g_diag.setGovernorThrottles(g_actuators.throttleCount());
+    g_diag.setMoveMix(g_actuators.deadlineMoves(), g_actuators.staggerableGrants());
     g_diag.setPca(g_servos.usesPca(), g_pcaHealthy, g_pcaFailedBoard);
 }
 
@@ -558,6 +559,10 @@ std::string buildDiagnosticsJson() {
     doc["faults"] = c.faults;
     doc["servoMoves"] = c.servoMoves;
     doc["governorThrottles"] = c.governorThrottles;
+    JsonObject mv = doc["moveMix"].to<JsonObject>();  // P1.6 in-rush picture
+    mv["deadline"] = c.deadlineMoves;                 // sound strikes (never throttled)
+    mv["staggerableGranted"] = c.staggerableGrants;   // positioning starts granted
+    mv["staggerableDeferred"] = c.governorThrottles;  // positioning starts deferred
     doc["wifiReconnects"] = c.wifiReconnects;
     JsonObject pca = doc["pca"].to<JsonObject>();
     pca["used"] = c.pcaUsed;
