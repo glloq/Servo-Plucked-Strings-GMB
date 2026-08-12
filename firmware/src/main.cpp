@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "core/configuration/Profile.h"
+#include "core/configuration/ProfileActivation.h"
 #include "core/configuration/PluckPlan.h"
 #include "core/configuration/ProfileValidator.h"
 #include "core/diagnostics/Diagnostics.h"
@@ -80,12 +81,11 @@ enum class AppPhase { ConfigSafe, Boot, Parking, Reconfiguring, Ready };
 AppPhase g_phase = AppPhase::Boot;
 bool g_degraded = false;  // Ready but with one or more strings disabled by a fault
 
-// Two-phase profile activation: the OLD profile's fingers are driven to rest and
-// allowed to lift BEFORE the old servo config is destroyed, so a profile that
-// removes/reassigns a finger servo can't leave a finger pressed while the new
-// profile arms. Non-null while an activation is waiting for the old fingers.
-Profile* g_pendingProfile = nullptr;
-uint32_t g_pendingActivateAtMs = 0;
+// Two-phase profile activation (owned by ProfileActivation, P2.17): the OLD profile's
+// fingers are driven to rest and allowed to lift BEFORE the old servo config is
+// destroyed, so a profile that removes/reassigns a finger servo can't leave a finger
+// pressed while the new profile arms.
+ProfileActivation g_activation;
 
 std::vector<bool> g_stringFaulted;   // runtime fault (servo write error, etc.)
 
@@ -301,8 +301,7 @@ void hardStopAll() {
     g_actuators.reset();
     g_scheduler.reset();  // clear every string's FSM + pressed-finger state
     g_testOffs.clear();
-    delete g_pendingProfile;
-    g_pendingProfile = nullptr;
+    g_activation.cancel();  // drop any pending profile swap
     g_phase = AppPhase::Boot;
 }
 
@@ -337,27 +336,23 @@ bool doActivateProfile(const Profile& p, uint32_t nowMs) {
     g_servos.outputEnable(true);
     g_servos.moveAllToRest();
     uint32_t wait = g_servos.parkDurationMs();
-    delete g_pendingProfile;
-    g_pendingProfile = new Profile(p);
-    g_pendingActivateAtMs = nowMs + wait;
+    g_activation.begin(p, nowMs + wait);  // apply once the controlled park has elapsed
     return true;
 }
 
 // Phase 2: once the old fingers have lifted (controlled park complete), cut power,
 // tear down, and swap in the new profile.
 void servicePendingActivation(uint32_t nowMs) {
-    if (!g_pendingProfile) return;
-    if (static_cast<int32_t>(nowMs - g_pendingActivateAtMs) < 0) return;
-    g_servos.hardStop();  // controlled park done: safe to cut before teardown
-    {
-        StateGuard lock;
-        g_profile = *g_pendingProfile;
-        g_profile.capabilitiesRevision++;
-        applyProfile();
-    }
-    delete g_pendingProfile;
-    g_pendingProfile = nullptr;
-    if (!armInstrument(nowMs)) g_phase = AppPhase::Boot;
+    g_activation.service(nowMs, [nowMs](const Profile& p) {
+        g_servos.hardStop();  // controlled park done: safe to cut before teardown
+        {
+            StateGuard lock;
+            g_profile = p;
+            g_profile.capabilitiesRevision++;
+            applyProfile();
+        }
+        if (!armInstrument(nowMs)) g_phase = AppPhase::Boot;
+    });
 }
 
 bool doTestNote(uint8_t channel, uint8_t note, uint8_t vel, uint16_t durationMs,

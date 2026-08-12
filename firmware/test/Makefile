@@ -47,7 +47,8 @@ TEST_SRC := \
   test_actuator_manager.cpp \
   test_device_instrument.cpp \
   test_command_ring.cpp \
-  test_holdbutton.cpp
+  test_holdbutton.cpp \
+  test_profile_activation.cpp
 
 BIN := run_tests
 

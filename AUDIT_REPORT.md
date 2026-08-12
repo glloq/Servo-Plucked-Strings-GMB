@@ -50,8 +50,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **220 tests, 3664 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **220 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **225 tests, 3693 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **225 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -213,7 +213,7 @@ dans les README, nombre de tests codé en dur supprimé.
 
 ### P2.17 — Réduire main.cpp (PARTIAL)
 *Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
-(le point explicite de P2.17) — `main.cpp` passe de **1177 à 774 lignes (−34 %)**. La
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 769 lignes (−35 %)**. La
 FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
 contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
@@ -221,12 +221,14 @@ faute via un callback vers le chemin central. D'autres responsabilités étaient
 sorties en composants : le **`CommandDispatcher`** (queue web→loop + dispatch, les
 handlers restant injectés depuis `main.cpp`), l'**`ActuatorManager`** (P1.6), le
 **`MidiTransport`**/liste (P1.7), le **`Diagnostics`** (P2.19), les utilitaires
-host-testés **`CommandResultRing`** et **`HoldButton`** (bouton BOOT), plus des
+host-testés **`CommandResultRing`**, **`HoldButton`** (bouton BOOT) et
+**`ProfileActivation`** (bascule de profil en deux phases, RAII + timing), plus des
 fonctions de service nommées. *Reste* : `ApplicationRuntime` / `ProfileManager` /
 `SafetySupervisor` (pour que `main.cpp` devienne `app.begin()/app.tick()`) — par
 composants, la FSM étant seulement compile-vérifiée (Arduino-gated), à valider au banc.
 *Fichiers* : `platform/esp32/PlaybackScheduler.h`, `platform/esp32/CommandDispatcher.h`,
-`core/util/CommandResultRing.h`, `core/util/HoldButton.h` (nouveaux), `main.cpp`.
+`core/util/CommandResultRing.h`, `core/util/HoldButton.h`,
+`core/configuration/ProfileActivation.h` (nouveaux), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
