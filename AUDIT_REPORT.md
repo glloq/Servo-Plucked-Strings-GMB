@@ -28,7 +28,7 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P1.10 | `WifiLossBehavior` : câbler ou retirer → **retiré** (Option B) | **DONE** | `584895f` |
 | P1.11 | Modes Setup / Performance + sécurité réseau | **PARTIAL** | — |
 | P1.12 | Vraie migration de profils (v1→v2) + fixtures | **DONE** | `9675cc8` |
-| P1.13 | Séparer `DeviceConfig` et `InstrumentProfile` | **NOT STARTED** | — |
+| P1.13 | Séparer `DeviceConfig` et `InstrumentProfile` | **PARTIAL** | (voir historique) |
 | P1.14 | Builds PlatformIO multi-cartes (S3 / WROOM-32 / DevKit v1) | **DONE** | `a1ca8b7` |
 | P1.15 | Réserver GPIO0 (BOOT-hotspot) | **DONE** | `584895f` |
 | P1.16 | CI GitHub Actions complète | **DONE** | `a1ca8b7` |
@@ -36,10 +36,11 @@ Branche : `claude/elegant-cannon-zh23kn` · 7 commits, **CI verte à chaque push
 | P2.18 | Documenter les dépendances au modèle 6-cordes/24-frettes | **DONE** | `6656ef6` |
 | P2.19 | Télémétrie / `GET /api/diagnostics` | **DONE** | (voir historique) |
 
-**14 DONE · 3 PARTIAL · 2 NOT STARTED.** Les items restants (P1.6, P1.11, P1.13,
-P2.17, et la partie fonctionnelle USB/DIN de P1.7) sont les gros refactors
-architecturaux que la mission elle-même demande de faire *progressivement, par
-composants avec tests de non-régression* — voir §6 pour l'approche recommandée.
+**14 DONE · 4 PARTIAL · 1 NOT STARTED.** Le seul item non commencé est P2.17 (découpe
+de `main.cpp`) ; les PARTIAL (P1.6, P1.7, P1.11, P1.13) ont leur abstraction/boundary
+en place et testée, il reste le câblage fonctionnel/persistant — des refactors que la
+mission demande de faire *progressivement, par composants avec tests de non-régression*.
+Voir §6 pour l'approche recommandée.
 
 ---
 
@@ -49,8 +50,8 @@ Tous verts, en local **et** en CI (5 runs, tous `success`) :
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **215 tests, 3624 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **215 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **217 tests, 3649 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **217 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2) | OK |
@@ -174,10 +175,16 @@ drop de `staticIp`), idempotent. Toutes les entrées load/import passent par
 `staticIp`) ; `profilecheck` couvre import → migrate → validate → export →
 round-trip + idempotence.
 
-### P1.13 — DeviceConfig / InstrumentProfile (NOT STARTED)
-Le mélange carte/instrument dans `Profile` subsiste. P1.9/P1.10 ont préparé le
-terrain (les champs « fantômes » réseau/sécurité destinés au DeviceConfig sont
-retirés proprement). Split à faire progressivement avec la migration de profils.
+### P1.13 — DeviceConfig / InstrumentProfile (PARTIAL)
+*Fait* (1er pas non-destructif) : les deux structs cibles **`DeviceConfig`** (carte,
+réseau, broches système) et **`InstrumentProfile`** (instrument, MIDI, sélecteur,
+power, pluck, cordes, servos) sont définis, avec un **split/merge sans perte** contre
+le `Profile` actuel — la frontière est posée et prouvée propre, sans toucher la
+persistance (les anciens profils se chargent inchangés). *Test* :
+`test_device_instrument.cpp` (round-trip lossless + portabilité de l'instrument entre
+appareils). *Reste* : migrer les consommateurs (WebApi/storage) sur ces vues, puis le
+split persistant (migration v2→v3 via P1.12), et y rattacher MidiTransportConfig /
+SafetyConfig. *Fichiers* : `core/configuration/DeviceInstrument.h` (nouveau).
 
 ### P1.14 — Multi-cartes PlatformIO (DONE)
 `platformio.ini` : un env par carte annoncée (S3 / WROOM-32 / DevKit v1), réglages
@@ -268,7 +275,8 @@ non-régression à chaque étape) :
   le strum-lift au banc (gain in-rush vs. risque de timing) avant de le gouverner.
 - **P1.7** (reste) : implémenter le `poll()` USB natif (TinyUSB S3) dans le squelette
   `MidiUsbTransport`, puis DIN/BLE ; généraliser le SysEx multi-transport.
-- **P1.11 / P1.13** : introduire `DeviceConfig{board,network,transports,safety}` séparé
-  d'`InstrumentProfile`, migration v2→v3, puis modes Setup/Performance + whitelist UDP.
+- **P1.13** (reste) : les structs + split/merge existent ; migrer WebApi/storage sur
+  ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
+  transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
 - **P2.17** : sortir la FSM de `tickString()` dans un `PlaybackScheduler`, puis
   `ApplicationRuntime`/`CommandDispatcher`/… un composant à la fois.
