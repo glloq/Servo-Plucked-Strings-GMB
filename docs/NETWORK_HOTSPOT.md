@@ -88,3 +88,41 @@ alors le réseau de l'instrument (la page se rouvre via le portail captif).
 | Redirections des sondes + `onNotFound` + `POST /api/hotspot` | `firmware/src/platform/esp32/WebApi.cpp` |
 | Bouton BOOT (GPIO0) + service hotspot | `firmware/src/main.cpp` (`serviceHotspotRequests`) |
 | Bouton « Start hotspot » + modal | `web-interface/js/settings.js`, `web-interface/js/api.js` |
+
+## 7. Modes Setup et Performance (P1.11)
+
+Deux **postures** cohérentes, obtenues avec les mécanismes déjà en place — pas un
+protocole séparé (la mission recommande de ne pas complexifier si USB/DIN est le
+transport principal).
+
+### Setup (configuration / calibration)
+
+* **AP + portail captif** disponible (§2) → la page s'ouvre seule.
+* **Configuration web** et **calibration** (banc de test servo) accessibles.
+* **Auth simplifiée** : tant qu'aucun token admin n'est défini, les écritures sont
+  autorisées (bootstrap premier démarrage — `checkToken` renvoie vrai si le token
+  stocké est vide). Le premier geste recommandé est de **définir un token admin**.
+
+### Performance (jeu)
+
+* **Administration protégée** : dès qu'un token admin est configuré, **toutes** les
+  routes d'écriture (activation de profil, réglages, servo-test, reset…) exigent le
+  token (`WebApi::authOk`). Les lectures (`/api/status`, `/api/diagnostics`) restent
+  ouvertes.
+* **USB / DIN prioritaire** quand disponible : l'abstraction transports (P1.7) permet
+  d'alimenter le même `InstrumentController` par plusieurs entrées ; USB/DIN sont à
+  privilégier en performance, le Wi-Fi UDP restant configurable.
+* **`POST /api/panic` reste accessible sans authentification** — c'est **volontaire** :
+  un arrêt d'urgence ne doit jamais dépendre d'un token (voir [`SAFETY.md`](SAFETY.md)).
+
+### Durcissement MIDI UDP — optionnel, à venir
+
+Le MIDI UDP est non authentifié par nature. Options **éventuelles** (non implémentées),
+à réserver aux déploiements où l'UDP reste le transport principal :
+
+* **whitelist d'IP** (n'accepter que des expéditeurs connus) ;
+* **session/contrôleur reconnu** (verrouiller sur le premier expéditeur) ;
+* **désactivation du transport UDP** en mode Performance (jouer via USB/DIN).
+
+Ces options appartiennent au futur `DeviceConfig` (P1.13) et doivent arriver **avec**
+le câblage runtime qui les honore, pas comme un simple champ (cf. P1.9/P1.10).

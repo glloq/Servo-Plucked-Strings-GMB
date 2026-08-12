@@ -156,10 +156,14 @@ politique déterminée réelle (annuler les commandes en attente + relâcher les
 politique sélectionnable reviendra avec le split DeviceConfig/SafetyConfig, câblée.
 
 ### P1.11 — Setup / Performance + sécurité réseau (PARTIAL)
-*Déjà en place* : token admin (protège les opérations admin), fallback AP,
-**BOOT-hotspot** (GPIO0), endpoint PANIC volontairement sans auth, AP ouvert/WPA2
-détecté. *Manque* : l'objet de mode explicite Setup/Performance, et pour l'UDP MIDI
-une whitelist d'IP / session reconnue / désactivation en mode Performance.
+*Fait* : les deux **postures** cohérentes sont désormais **documentées** et mappées
+aux mécanismes existants (`NETWORK_HOTSPOT.md` §7) — Setup (AP + portail captif,
+config/calibration, auth simplifiée tant qu'aucun token n'est défini) et Performance
+(toutes les écritures exigent le token via `WebApi::authOk`, PANIC volontairement sans
+auth, USB/DIN prioritaire via l'abstraction transports P1.7). *Reste* (optionnel, la
+mission dit « éventuellement ») : durcissement UDP — whitelist d'IP / session reconnue /
+désactivation UDP en Performance, à livrer avec le futur `DeviceConfig` (P1.13) et son
+câblage runtime.
 
 ### P1.12 — Migration de profils (DONE)
 `kCurrentProfileVersion = 2` ; `ProfileStorage::migrate(doc)` upgrade un JSON brut
