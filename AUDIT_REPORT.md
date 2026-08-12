@@ -213,18 +213,20 @@ dans les README, nombre de tests codé en dur supprimé.
 
 ### P2.17 — Réduire main.cpp (PARTIAL)
 *Fait* : la **FSM mécanique de `tickString()` est extraite dans `PlaybackScheduler`**
-(le point explicite de P2.17) — `main.cpp` passe de **1177 à 835 lignes (−29 %)**. La
+(le point explicite de P2.17) — `main.cpp` passe de **1177 à 774 lignes (−34 %)**. La
 FSM est déplacée **verbatim** (logique **prouvée byte-for-byte identique** par diff
 contre git ; les méthodes aliasent leurs collaborateurs aux anciens noms `g_*` pour un
 corps inchangé), le scheduler possède l'état par corde (StringSched + doigt pressé) et
 faute via un callback vers le chemin central. D'autres responsabilités étaient déjà
-sorties en composants : `ActuatorManager` (P1.6), `MidiTransport`/liste (P1.7),
-`Diagnostics` (P2.19), le **`CommandResultRing`** (suivi des résultats de commandes,
-désormais **testé nativement**), fonctions de service nommées. *Reste* : `ApplicationRuntime` /
-`CommandDispatcher` / `ProfileManager` / `SafetySupervisor` (pour que `main.cpp`
-devienne `app.begin()/app.tick()`) — par composants, la FSM étant seulement
-compile-vérifiée (Arduino-gated), à valider au banc. *Fichiers* :
-`platform/esp32/PlaybackScheduler.h` (nouveau), `main.cpp`.
+sorties en composants : le **`CommandDispatcher`** (queue web→loop + dispatch, les
+handlers restant injectés depuis `main.cpp`), l'**`ActuatorManager`** (P1.6), le
+**`MidiTransport`**/liste (P1.7), le **`Diagnostics`** (P2.19), les utilitaires
+host-testés **`CommandResultRing`** et **`HoldButton`** (bouton BOOT), plus des
+fonctions de service nommées. *Reste* : `ApplicationRuntime` / `ProfileManager` /
+`SafetySupervisor` (pour que `main.cpp` devienne `app.begin()/app.tick()`) — par
+composants, la FSM étant seulement compile-vérifiée (Arduino-gated), à valider au banc.
+*Fichiers* : `platform/esp32/PlaybackScheduler.h`, `platform/esp32/CommandDispatcher.h`,
+`core/util/CommandResultRing.h`, `core/util/HoldButton.h` (nouveaux), `main.cpp`.
 
 ### P2.18 — Modèle générique (DONE, documentation)
 `docs/GENERALIZATION.md` identifie les 3 hypothèses (`kMaxStrings`, `kMaxFret`,
@@ -303,5 +305,5 @@ non-régression à chaque étape) :
   ces vues, puis le split persistant (migration v2→v3), et y rattacher les configs
   transports/sécurité. **P1.11** (reste) : whitelist/désactivation UDP avec ce split.
 - **P2.17** (reste) : `PlaybackScheduler` fait ; extraire `ApplicationRuntime` /
-  `CommandDispatcher` / `ProfileManager` / `SafetySupervisor`, un composant à la fois,
+  `ProfileManager` / `SafetySupervisor` / `ApplicationRuntime`, un composant à la fois,
   pour réduire `main.cpp` à `app.begin()/app.tick()`.

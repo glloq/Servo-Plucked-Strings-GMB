@@ -37,10 +37,10 @@
 #include "core/instrument/ActuatorManager.h"
 #include "core/midi/MidiEvent.h"
 #include "core/safety/SafetyManager.h"
-#include "core/util/CommandResultRing.h"
 #include "core/util/Debounce.h"
 #include "core/util/HoldButton.h"
 #include "core/midi/MidiTransport.h"
+#include "platform/esp32/CommandDispatcher.h"
 #include "platform/esp32/MidiUsbTransport.h"
 #include "platform/esp32/MidiWifi.h"
 #include "platform/esp32/Net.h"
@@ -108,57 +108,20 @@ std::vector<TestNoteOff> g_testOffs;
 // PlaybackScheduler (g_scheduler), which owns the per-string state (P2.17).
 
 // ---- Web -> loop() command queue (P0: no mechanical state off the main loop) --
-enum class CmdType : uint8_t { Panic, Reset, ActivateProfile, TestNote, TestServo };
-struct AppCommand {
-    CmdType type;
-    uint32_t id = 0;
-    Profile* profile = nullptr;
-    uint8_t channel = 0, note = 0, velocity = 0;
-    uint16_t durationMs = 0;
-    int16_t servoIndex = -1;
-    bool servoActive = false;
-    uint16_t servoUs = 0;  // >0: drive the test servo to this exact pulse (live cal)
-};
-
-std::atomic<uint32_t> g_nextCmdId{1};
-std::atomic<int> g_cmdQueueDepth{0};  // live web->loop queue depth (diagnostics)
-// Outcomes of the last N web->loop commands (the ring logic lives in the host-tested
-// CommandResultRing; main.cpp only adds the FreeRTOS mutex around it). P2.17.
-CommandResultRing g_cmdResults;
-SemaphoreHandle_t g_resultMutex = nullptr;
-
-void setCommandResult(uint32_t id, uint8_t state) {
-    if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    g_cmdResults.set(id, state);
-    if (g_resultMutex) xSemaphoreGive(g_resultMutex);
-}
-
-std::string commandStateStr(uint32_t id) {
-    if (g_resultMutex) xSemaphoreTake(g_resultMutex, portMAX_DELAY);
-    std::string s = g_cmdResults.stateStr(id);
-    if (g_resultMutex) xSemaphoreGive(g_resultMutex);
-    return s;
-}
-QueueHandle_t g_cmdQueue = nullptr;
+// The queue/dispatch/result plumbing lives in CommandDispatcher (P2.17); the command
+// HANDLERS (do*) stay here and are injected into drain() below.
+CommandDispatcher g_commands;
 SemaphoreHandle_t g_stateMutex = nullptr;
 SemaphoreHandle_t g_storageMutex = nullptr;
 std::atomic<bool> g_panicRequested{false};
 std::atomic<bool> g_hotspotRequested{false};  // BOOT button / web -> force AP
 bool g_authConfiguredCache = false;
 
+// Thin wrapper: enqueue and feed the queue-depth high-water into diagnostics.
 uint32_t enqueueCommand(const AppCommand& in) {
-    if (!g_cmdQueue) return 0;
-    AppCommand c = in;
-    c.id = g_nextCmdId.fetch_add(1);
-    AppCommand* h = new AppCommand(c);
-    if (xQueueSend(g_cmdQueue, &h, 0) != pdTRUE) {
-        delete h->profile;
-        delete h;
-        return 0;
-    }
-    g_diag.observeCmdQueueDepth(static_cast<uint32_t>(g_cmdQueueDepth.fetch_add(1) + 1));
-    setCommandResult(c.id, 0);
-    return c.id;
+    uint32_t id = g_commands.enqueue(in);
+    if (id) g_diag.observeCmdQueueDepth(static_cast<uint32_t>(g_commands.depth()));
+    return id;
 }
 
 struct StateGuard {
@@ -427,15 +390,7 @@ bool doTestServo(int index, bool active, uint16_t us) {
     return true;
 }
 
-void purgeCommands() {
-    if (!g_cmdQueue) return;
-    AppCommand* c = nullptr;
-    while (xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE) {
-        g_cmdQueueDepth.fetch_sub(1);
-        delete c->profile;
-        delete c;
-    }
-}
+void purgeCommands() { g_commands.purge(); }
 
 bool servicePanic(uint32_t nowMs) {
     (void)nowMs;
@@ -457,31 +412,22 @@ void serviceHotspotRequests(uint32_t nowMs) {
     }
 }
 
+// Run a bounded batch of queued commands on the main loop. The command HANDLERS live
+// here (they touch instrument/servos/safety); CommandDispatcher owns the plumbing and
+// records each outcome. Handlers return whether the command succeeded.
 void drainCommands(uint32_t nowMs) {
-    if (!g_cmdQueue) return;
-    static constexpr int kMaxCommandsPerTick = 2;
-    AppCommand* c = nullptr;
-    for (int n = 0; n < kMaxCommandsPerTick && xQueueReceive(g_cmdQueue, &c, 0) == pdTRUE;
-         ++n) {
-        g_cmdQueueDepth.fetch_sub(1);
-        bool ok = true;
-        switch (c->type) {
-            case CmdType::Panic: doPanic(); purgeCommands(); break;
-            case CmdType::Reset: ok = doReset(nowMs); break;
-            case CmdType::ActivateProfile:
-                ok = c->profile && doActivateProfile(*c->profile, nowMs);
-                break;
+    g_commands.drain(2, [nowMs](const AppCommand& c) -> bool {
+        switch (c.type) {
+            case CmdType::Panic:          doPanic(); g_commands.purge(); return true;
+            case CmdType::Reset:          return doReset(nowMs);
+            case CmdType::ActivateProfile: return c.profile && doActivateProfile(*c.profile, nowMs);
             case CmdType::TestNote:
-                ok = doTestNote(c->channel, c->note, c->velocity, c->durationMs, nowMs);
-                break;
+                return doTestNote(c.channel, c.note, c.velocity, c.durationMs, nowMs);
             case CmdType::TestServo:
-                ok = doTestServo(c->servoIndex, c->servoActive, c->servoUs);
-                break;
+                return doTestServo(c.servoIndex, c.servoActive, c.servoUs);
         }
-        setCommandResult(c->id, ok ? 1 : 2);
-        delete c->profile;
-        delete c;
-    }
+        return true;
+    });
 }
 
 // App phase as the string reported to the web/API (shared by ctx.appState and the
@@ -570,10 +516,9 @@ void setup() {
     // Wire the playback scheduler to its collaborators + the central fault path (P2.17).
     g_scheduler.begin(&g_instrument, &g_servos, &g_actuators, &g_profile, faultRuntimeAxis);
 
-    g_cmdQueue = xQueueCreate(16, sizeof(AppCommand*));
+    g_commands.begin(16);  // web->loop command queue + result ring + mutex (P2.17)
     g_stateMutex = xSemaphoreCreateMutex();
     g_storageMutex = xSemaphoreCreateMutex();
-    g_resultMutex = xSemaphoreCreateMutex();
 
     g_storage.begin();
     if (g_storage.degraded()) {
@@ -636,7 +581,7 @@ void setup() {
         c.servoUs = us > 0 ? static_cast<uint16_t>(us > 65535 ? 65535 : us) : 0;
         return enqueueCommand(c);
     };
-    ctx.commandState = [](uint32_t id) -> std::string { return commandStateStr(id); };
+    ctx.commandState = [](uint32_t id) -> std::string { return g_commands.commandState(id); };
     ctx.onFormatStorage = []() -> bool { return g_storage.format(); };
     ctx.lockState = []() { if (g_stateMutex) xSemaphoreTake(g_stateMutex, portMAX_DELAY); };
     ctx.unlockState = []() { if (g_stateMutex) xSemaphoreGive(g_stateMutex); };
