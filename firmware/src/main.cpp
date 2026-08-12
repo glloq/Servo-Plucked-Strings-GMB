@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "core/app/AppPhase.h"
+#include "core/app/Readiness.h"
 #include "core/configuration/Profile.h"
 #include "core/configuration/ProfileActivation.h"
 #include "core/configuration/PluckPlan.h"
@@ -182,20 +183,13 @@ void applyProfile() {
 // excludes every disabled or runtime-faulted string, and update g_degraded.
 int rebuildRuntimeCapabilities() {
     StateGuard lock;
-    Profile rp = g_profile;
-    int originallyEnabled = 0, ready = 0;
-    for (size_t i = 0; i < rp.strings.size(); ++i) {
-        if (g_profile.strings[i].enabled) ++originallyEnabled;
-        if (!rp.strings[i].enabled || (i < g_stringFaulted.size() && g_stringFaulted[i]))
-            rp.strings[i].enabled = false;
-        else
-            ++ready;
-    }
-    g_degraded = ready < originallyEnabled;
+    Profile rp = g_profile;  // a copy: the live profile is never mutated here
+    Readiness rd = applyRuntimeFaults(rp, g_stringFaulted);  // ready-only view + counts
+    g_degraded = rd.degraded;
     g_profile.capabilitiesRevision++;
     rp.capabilitiesRevision = g_profile.capabilitiesRevision;
     g_sysex.rebuild(rp);
-    return ready;
+    return rd.ready;
 }
 
 void notifyCapabilitiesChanged() {
