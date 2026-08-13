@@ -444,6 +444,206 @@ TEST(scheduler_prepared_cc_chord_lands_together) {
     CHECK_EQ(r.faults, 0);
 }
 
+// --- abortString: full mechanical cleanup, even mid-governor (audit 3) --------
+
+// A fault while a finger release is parked on a denied governor permit: the
+// servo is STILL physically pressed although currentFinger_ was cleared.
+// abortString() must release it immediately (bypassing the governor) — it used
+// to be forgotten, leaving the actuator engaged on a "recovered" instrument.
+TEST(scheduler_abort_releases_pending_governed_finger) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 40; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 50; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 100, 20);  // 2
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 100, 20);  // 3
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 1;
+    r.p.power.staggerMs = 500;  // wide window: the second release stays parked
+    r.begin();
+
+    r.noteOn(41);
+    r.noteOn(51);
+    r.step(1600);  // both struck; the governor window is clear again
+    r.noteOff(41);
+    r.noteOff(51);
+    r.step(3);
+    // One finger got its release; the other is parked on the denied permit.
+    bool f2Released = r.servos.lastCommandedUs(2) == 1500;
+    bool f3Released = r.servos.lastCommandedUs(3) == 1500;
+    CHECK(f2Released != f3Released);  // exactly one released so far
+    size_t parked = f2Released ? 1 : 0;
+    int parkedServo = f2Released ? 3 : 2;
+    CHECK_EQ((int)r.servos.lastCommandedUs(parkedServo), 1900);  // still pressed!
+    // Fault path: abort must physically release it, bypassing the governor.
+    r.sched.abortString(parked);
+    CHECK_EQ((int)r.servos.lastCommandedUs(parkedServo), 1500);
+}
+
+// A fault while a plectrum is held against the string as a Note-Off mute: the
+// mute hold must be released by abortString() — it used to be forgotten.
+TEST(scheduler_abort_releases_held_mute) {
+    Rig r;
+    r.p = oneOpenString();
+    r.p.servos[0].muteUs = 1300;
+    r.p.pluck.muteSource = MuteSource::Plectrum;
+    r.p.pluck.muteHoldMs = 500;  // long hold so the abort lands mid-mute
+    r.begin();
+
+    r.noteOn(60);
+    r.step(300);
+    r.noteOff(60);
+    r.step(3);
+    CHECK_EQ((int)r.servos.lastCommandedUs(0), 1300);  // plectrum held on the string
+    r.sched.abortString(0);
+    CHECK_EQ((int)r.servos.lastCommandedUs(0), 1500);  // released immediately
+}
+
+// --- Governor budget honours BOTH caps (audit 3) -------------------------------
+
+// Two fingers on the SAME PCA board under a per-board cap of 1 (generous global
+// cap): the presses stagger on the board's own window, and the chord deadline
+// must budget it — reasoning with the global cap alone predicted no delay.
+TEST(scheduler_chord_budgets_per_board_cap) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 40; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 50; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 120, 30);  // 2 (board 0)
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 120, 30);  // 3 (board 0 too)
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 8;    // global cap alone would predict no wait
+    r.p.power.maxConcurrentPerBoard = 1; // ...but the shared board staggers them
+    r.p.power.staggerMs = 60;
+    r.begin();
+
+    r.noteOn(41);
+    r.noteOn(51);
+    uint32_t s0 = 0, s1 = 0;
+    for (uint32_t k = 0; k < 600 && (!s0 || !s1); ++k) {
+        r.step();
+        if (!s0 && r.servos.lastCommandedUs(0) != 1500) s0 = r.nowMs;
+        if (!s1 && r.servos.lastCommandedUs(1) != 1500) s1 = r.nowMs;
+    }
+    CHECK(s0 != 0);
+    CHECK(s1 != 0);
+    int delta = (int)s0 - (int)s1;
+    if (delta < 0) delta = -delta;
+    CHECK(delta <= 10);  // the per-board stagger is budgeted: still one chord
+    CHECK_EQ(r.faults, 0);
+}
+
+// The inverse mis-estimate: strings on DIFFERENT boards under a per-board cap
+// (no global cap) start together — the old global-or-per-board shortcut treated
+// them as one cap-1 queue and padded the chord with useless latency.
+TEST(scheduler_chord_no_false_latency_across_boards) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 40; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 50; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 100, 20);  // 2, board 0
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 100, 20);  // 3, board 1
+    f1.fret = 1;
+    f1.pcaBoard = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 0;    // no global cap
+    r.p.power.maxConcurrentPerBoard = 1; // one start per board — no cross-block
+    r.p.power.staggerMs = 200;
+    r.begin();
+
+    uint32_t t0 = r.nowMs;
+    r.noteOn(41);
+    r.noteOn(51);
+    uint32_t s0 = 0, s1 = 0;
+    for (uint32_t k = 0; k < 600 && (!s0 || !s1); ++k) {
+        r.step();
+        if (!s0 && r.servos.lastCommandedUs(0) != 1500) s0 = r.nowMs;
+        if (!s1 && r.servos.lastCommandedUs(1) != 1500) s1 = r.nowMs;
+    }
+    CHECK(s0 != 0);
+    CHECK(s1 != 0);
+    // Both presses start at once (each on its own board): ready ~ +125, and no
+    // 200 ms stagger padding is added to the deadline.
+    CHECK(s0 <= t0 + 145);
+    CHECK(s1 <= t0 + 145);
+    int delta = (int)s0 - (int)s1;
+    if (delta < 0) delta = -delta;
+    CHECK(delta <= 10);
+    CHECK_EQ(r.faults, 0);
+}
+
+// --- Prepared notes + governor: pending permits are budgeted (audit 3) --------
+
+// Two CC-prepared strings under a strict governor: one press is granted, the
+// other still WAITS for its permit when the simultaneous Note Ons arrive. The
+// remaining-preparation estimate must count the parked press (and its possible
+// permit wait), so both strikes still land together.
+TEST(scheduler_prepared_cc_with_governed_press_lands_together) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 60; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 55; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 100, 20);  // 2
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 100, 20);  // 3
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 1;
+    r.p.power.staggerMs = 80;
+    r.p.selector.mode = SelectionMode::Explicit;
+    r.p.selector.prepareOnCompleteSelection = true;
+    r.p.selector.selectionTimeoutMs = 2000;
+    r.begin();
+
+    auto ccEv = [&](uint8_t num, uint8_t val) {
+        MidiEvent e;
+        e.type = static_cast<uint8_t>(MidiType::ControlChange);
+        e.channel = 0; e.data1 = num; e.data2 = val;
+        e.timestampUs = r.nowMs * 1000u;
+        r.instrument.handleEvent(e, r.nowMs * 1000u);
+    };
+    ccEv(20, 1); ccEv(21, 1);  // prepare string 0, fret 1
+    ccEv(20, 2); ccEv(21, 1);  // prepare string 1, fret 1
+    r.step(40);  // s0's press granted and moving; s1 still waits for its permit
+    CHECK_EQ((int)r.servos.lastCommandedUs(3), 1500);  // s1 press not started
+
+    r.noteOn(61);
+    r.noteOn(56);
+    uint32_t s0 = 0, s1 = 0;
+    for (uint32_t k = 0; k < 600 && (!s0 || !s1); ++k) {
+        r.step();
+        if (!s0 && r.servos.lastCommandedUs(0) != 1500) s0 = r.nowMs;
+        if (!s1 && r.servos.lastCommandedUs(1) != 1500) s1 = r.nowMs;
+    }
+    CHECK(s0 != 0);
+    CHECK(s1 != 0);
+    int delta = (int)s0 - (int)s1;
+    if (delta < 0) delta = -delta;
+    CHECK(delta <= 10);
+    CHECK_EQ(r.faults, 0);
+}
+
 // --- Raise-to-play: the falling lift IS the mute, wait its travel (audit) -----
 
 TEST(scheduler_raise_to_play_waits_lift_travel_before_idle) {

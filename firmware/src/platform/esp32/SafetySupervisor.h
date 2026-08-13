@@ -126,6 +126,13 @@ public:
         if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) return false;
         g_safety.reset();
         g_safety.clearFaults();
+        // A reset may be requested WHILE a note sounds ("Arm for testing"): arm()
+        // parks every servo physically, so the logical state must be dropped with
+        // it or the instrument/scheduler would keep a Sustaining note and a stale
+        // commandId over a mechanically-reset instrument (audit 3). Same order as
+        // a profile activation: logical panic first, then park.
+        g_instrument.panic();
+        d_.scheduler->reset();
         for (size_t i = 0; i < g_stringFaulted.size(); ++i) {
             if (g_stringFaulted[i]) {
                 g_stringFaulted[i] = false;
