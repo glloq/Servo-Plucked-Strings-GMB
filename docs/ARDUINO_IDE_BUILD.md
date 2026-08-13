@@ -74,13 +74,18 @@ the UART/USB bridge). `Tools ▸ Board ▸ esp32 ▸ **ESP32 Dev Module**`, then
 | Option | Recommended value |
 | ------ | ----------------- |
 | Flash Size | **4MB** (typical WROOM-32 module) |
-| Partition Scheme | a scheme **with a filesystem**, e.g. *"Default 4MB with spiffs"*; if the sketch is too big, *"No OTA (2MB APP/2MB SPIFFS)"* |
+| Partition Scheme | **"No OTA (2MB APP/2MB SPIFFS)"** — required: with the embedded web UI the sketch (~1.4 MB) no longer fits the default 1.25 MB app slot |
 | CPU Frequency | 240 MHz |
 | Upload Speed | 921600 (drop to 115200 if uploads fail) |
 
 > On these boards the serial monitor uses the USB-UART bridge (115200 bauds);
 > there is no "USB CDC On Boot" option. The BOOT button is GPIO0, used for the
 > Wi-Fi hotspot fallback — see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
+>
+> Switching partition scheme relocates the LittleFS area: profiles saved under
+> the old scheme become unreadable (the device boots CONFIG_SAFE and reports
+> storage degraded). Recover with `POST /api/storage/format` from the web UI,
+> or tick "Erase All Flash Before Sketch Upload" once.
 
 ## 6. Compile and upload the firmware
 
