@@ -589,6 +589,49 @@ TEST(scheduler_chord_no_false_latency_across_boards) {
     CHECK_EQ(r.faults, 0);
 }
 
+// --- Governor history: grants issued JUST BEFORE a chord are budgeted (audit 4) --
+
+// The governor is a sliding window: a start granted right before the chord still
+// occupies it and delays the chord's first press. The deadline forecast now asks
+// the governor for its current state instead of assuming an empty window, so the
+// early strings keep waiting for the delayed ones.
+TEST(scheduler_chord_budgets_preexisting_governor_grant) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 40; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 50; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 120, 30);  // 2
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 120, 30);  // 3
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 1;
+    r.p.power.staggerMs = 60;
+    r.begin();
+
+    // Preload the governor: a staggerable start granted the instant the chord
+    // arrives (e.g. another string's release finishing just before).
+    CHECK(r.actuators.requestMove(MoveClass::Staggerable, r.nowMs, 0));
+    r.noteOn(41);
+    r.noteOn(51);
+    uint32_t s0 = 0, s1 = 0;
+    for (uint32_t k = 0; k < 800 && (!s0 || !s1); ++k) {
+        r.step();
+        if (!s0 && r.servos.lastCommandedUs(0) != 1500) s0 = r.nowMs;
+        if (!s1 && r.servos.lastCommandedUs(1) != 1500) s1 = r.nowMs;
+    }
+    CHECK(s0 != 0);
+    CHECK(s1 != 0);
+    int delta = (int)s0 - (int)s1;
+    if (delta < 0) delta = -delta;
+    CHECK(delta <= 10);  // the pre-existing grant no longer desynchronises the chord
+    CHECK_EQ(r.faults, 0);
+}
+
 // --- Prepared notes + governor: pending permits are budgeted (audit 3) --------
 
 // Two CC-prepared strings under a strict governor: one press is granted, the

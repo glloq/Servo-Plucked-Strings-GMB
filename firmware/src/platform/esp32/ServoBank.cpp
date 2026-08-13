@@ -175,16 +175,17 @@ void ServoBank::writeOff(int index) {
 #endif
 }
 
-void ServoBank::toRest(int index) {
-    if (index >= 0 && index < (int)servos_.size()) writeMicros(index, servos_[index].restUs);
+ActuatorResult ServoBank::toRest(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    return writeMicros(index, servos_[index].restUs);
 }
 
-void ServoBank::toActive(int index) {
-    if (index >= 0 && index < (int)servos_.size())
-        writeMicros(index, servos_[index].activeUs);
+ActuatorResult ServoBank::toActive(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
+    return writeMicros(index, servos_[index].activeUs);
 }
 
-void ServoBank::toMicros(int index, uint16_t us) { writeMicros(index, us); }
+ActuatorResult ServoBank::toMicros(int index, uint16_t us) { return writeMicros(index, us); }
 
 ActuatorResult ServoBank::press(int index) {
     if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
@@ -252,9 +253,14 @@ void ServoBank::update(uint32_t nowMs) {
                 if (r.returnAtMs == 0)
                     r.returnAtMs = nowMs + strikeDurationMs(static_cast<int>(i));
                 if ((int32_t)(nowMs - r.returnAtMs) >= 0) {
-                    toRest(static_cast<int>(i));
+                    ActuatorResult res = toRest(static_cast<int>(i));
                     r.mode = Mode::Rest;
                     r.restAtMs = nowMs + s.settleMs;
+                    // The automatic return is a SCHEDULED write with no caller to
+                    // check it: surface a failure to the owner instead of silently
+                    // pretending the plectrum came home (audit 4 P1.5). State is
+                    // finalised BEFORE the callback (which may abort/hard-stop).
+                    if (!ok(res) && updateFault_) updateFault_(static_cast<int>(i), res);
                 }
                 break;
             case Mode::Rest:

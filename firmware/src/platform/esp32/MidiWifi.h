@@ -72,6 +72,10 @@ public:
     // validation. rejectedCount() surfaces datagrams the gate refused (diagnostics).
     void setSourcePolicy(UdpSourcePolicy p) { gate_.setPolicy(p); }
     UdpSourcePolicy sourcePolicy() const { return gate_.policy(); }
+    // Forget the locked session so the next accepted datagram re-locks (the
+    // Settings "Unlock current sender" action, audit 4 P2.3).
+    void unlockSource() { gate_.unlock(); }
+    bool sourceLocked() const { return gate_.locked(); }
     uint32_t rejectedPackets() const { return gate_.rejectedCount(); }
 
 private:

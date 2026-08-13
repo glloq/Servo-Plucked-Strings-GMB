@@ -152,12 +152,23 @@ public:
         // one or the other under-/over-estimated the wait). The worst extra delay
         // before the LAST start is the max over every constraint's own queue:
         //   perConstraint = floor((starts_in_that_window - 1) / cap) x staggerMs.
-        uint32_t governorBudget = 0;
+        // The governor is a SLIDING window: starts granted just BEFORE this chord
+        // still occupy it and delay the batch's FIRST slot. Ask the governor for its
+        // current-state forecast instead of assuming an empty window (audit 4 P1.3);
+        // the batch's own queue budget then ADDS on top of that base delay.
+        uint32_t baseDelay = 0;
+        if (actuators_ && !startBoards.empty()) {
+            for (uint8_t bd : startBoards) {
+                uint32_t d = actuators_->nextSlotDelayMs(nowMs, bd);
+                if (d > baseDelay) baseDelay = d;
+            }
+        }
+        uint32_t queueBudget = 0;
         if (p.power.staggerMs != 0 && startBoards.size() > 1) {
             if (p.power.maxConcurrentMoves > 0) {
                 uint32_t g = (static_cast<uint32_t>(startBoards.size() - 1) /
                               p.power.maxConcurrentMoves) * p.power.staggerMs;
-                if (g > governorBudget) governorBudget = g;
+                if (g > queueBudget) queueBudget = g;
             }
             if (p.power.maxConcurrentPerBoard > 0) {
                 // Count the batch's starts per physical PCA board (0xFF = direct
@@ -170,11 +181,12 @@ public:
                     if (n > 1) {
                         uint32_t g = ((n - 1) / p.power.maxConcurrentPerBoard) *
                                      p.power.staggerMs;
-                        if (g > governorBudget) governorBudget = g;
+                        if (g > queueBudget) queueBudget = g;
                     }
                 }
             }
         }
+        uint32_t governorBudget = baseDelay + queueBudget;
         uint32_t deadline = 0;
         bool first = true;
         for (const Member& m : members) {
@@ -450,14 +462,27 @@ private:
                             // (travelMs) and held for muteHoldMs. Without the travel
                             // term the hold used to elapse mid-flight and the plectrum
                             // was recalled before it ever touched the string (audit).
-                            if (pi >= 0 && ok(g_servos.mute(pi))) {
-                                sch.muteIndex = pi;
-                                muteWaitMs = static_cast<uint32_t>(g_servos.travelMs(pi)) +
-                                             g_profile.pluck.muteHoldMs;
+                            // Disabled = no mute position calibrated (legit degrade:
+                            // let it ring); any OTHER failure faults the axis instead
+                            // of silently skipping the damp (audit 4 P1.4).
+                            if (pi >= 0) {
+                                ActuatorResult r = g_servos.mute(pi);
+                                if (ok(r)) {
+                                    sch.muteIndex = pi;
+                                    muteWaitMs =
+                                        static_cast<uint32_t>(g_servos.travelMs(pi)) +
+                                        g_profile.pluck.muteHoldMs;
+                                } else if (r != ActuatorResult::Disabled &&
+                                           !actOk(r, i, "mute servo write failed", nowMs)) {
+                                    return;  // faulted: scheduler state was reset
+                                }
                             }
                             break;
                         case MuteSource::Lift:
-                            if (li >= 0 && ok(g_servos.press(li))) {
+                            if (li >= 0) {
+                                if (!actOk(g_servos.press(li), i,
+                                           "mute lift servo write failed", nowMs))
+                                    return;
                                 sch.muteIndex = li;
                                 muteWaitMs = static_cast<uint32_t>(g_servos.travelMs(li)) +
                                              g_profile.pluck.muteHoldMs;
@@ -470,7 +495,10 @@ private:
                     // string at Note Off even when the primary mute came from elsewhere
                     // (unless something is already held, so only one is left to release).
                     if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
-                        action != MuteSource::Lift && li >= 0 && ok(g_servos.press(li))) {
+                        action != MuteSource::Lift && li >= 0) {
+                        if (!actOk(g_servos.press(li), i, "mute lift servo write failed",
+                                   nowMs))
+                            return;
                         sch.muteIndex = li;
                         uint32_t w = static_cast<uint32_t>(g_servos.travelMs(li)) +
                                      g_profile.pluck.muteHoldMs;

@@ -65,6 +65,21 @@ public:
     // diagnostics counter, deliberately NOT cleared by reset() (audit P2.19).
     uint32_t throttleCount() const { return throttles_; }
 
+    // FORECAST (audit 4 P1.3): milliseconds until ONE new start could be granted at
+    // nowMs given the CURRENT window state — 0 = immediately. Pure query, nothing is
+    // recorded. Lets the playback scheduler's chord-deadline maths account for
+    // grants issued JUST BEFORE the chord instead of assuming an empty window (and
+    // without re-implementing the governor's internals).
+    uint32_t nextSlotDelayMs(uint32_t nowMs, uint8_t board = 0xFF) const {
+        if (staggerMs_ == 0) return 0;
+        uint32_t d = global_.slotDelayMs(nowMs, staggerMs_);
+        if (board < kBoards) {
+            uint32_t b = board_[board].slotDelayMs(nowMs, staggerMs_);
+            if (b > d) d = b;
+        }
+        return d;
+    }
+
 private:
     // A rolling window: at most `cap` grants within any staggerMs window. cap == 0
     // means unlimited (always room, records nothing).
@@ -76,6 +91,12 @@ private:
             if (filled < cap) return true;             // window not yet full
             uint32_t oldest = recent[head];            // oldest of the last `cap` grants
             return static_cast<int32_t>(nowMs - oldest) >= static_cast<int32_t>(staggerMs);
+        }
+        // Forecast: ms until this window would grant one more start (0 = now).
+        uint32_t slotDelayMs(uint32_t nowMs, uint16_t staggerMs) const {
+            if (cap == 0 || filled < cap) return 0;
+            int32_t wait = static_cast<int32_t>(recent[head] + staggerMs - nowMs);
+            return wait > 0 ? static_cast<uint32_t>(wait) : 0;
         }
         void grant(uint32_t nowMs) {
             if (cap == 0) return;

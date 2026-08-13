@@ -15,6 +15,7 @@ public:
   void mode(int) {}
   bool softAP(const char*) { return true; }
   bool softAP(const char*, const char*) { return true; }
+  bool softAPdisconnect(bool = false) { return true; }
   IPAddress softAPIP() { return IPAddress(); }
   void setHostname(const char*) {}
   void begin(const char*, const char*) {}

@@ -78,6 +78,13 @@ struct WebContext {
     // SSID/mode/hostname survive a reboot INDEPENDENTLY of any profile slot
     // (audit: "Save & publish" used to lose them on reboot).
     std::function<void(const WifiSettings&)> onSetNetwork;
+    // UDP MIDI source posture (audit 4 P2.3): policy (0 open / 1 lockToFirst /
+    // 2 disabled, -1 = unchanged) stored in NVS + applied on the main loop;
+    // unlock=true forgets the currently locked sender.
+    std::function<void(int, bool)> onSetMidiSource;
+    // Live posture for the status DTO (read on the loop by refreshStatus()).
+    std::function<std::string()> midiSourcePolicy;
+    std::function<bool()> midiSourceLocked;
     // Kick an asynchronous Wi-Fi scan (serviced on the main loop) and read the
     // latest scan snapshot as a ready-to-send JSON body.
     std::function<void()> onWifiScanStart;

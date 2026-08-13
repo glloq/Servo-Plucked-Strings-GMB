@@ -50,6 +50,12 @@ public:
         return false;  // deferred (the governor counts it as a throttle)
     }
 
+    // Forecast (audit 4 P1.3): ms until one new STAGGERABLE start could be granted
+    // at nowMs on `board`, given the governor's current window state. Pure query.
+    uint32_t nextSlotDelayMs(uint32_t nowMs, uint8_t board = 0xFF) const {
+        return governor_.nextSlotDelayMs(nowMs, board);
+    }
+
     // Diagnostics (P2.19): the movement mix the manager has seen.
     uint32_t deadlineMoves() const { return deadlineMoves_; }       // sound strikes passed
     uint32_t staggerableGrants() const { return staggerableGrants_; }  // positioning starts granted

@@ -151,6 +151,11 @@ void WebApi::fillStatus(JsonDocument& doc) {
     wifi["ip"] = ctx_.net ? ctx_.net->ipAddress() : "";
     wifi["connected"] = ctx_.net ? ctx_.net->connected() : false;
     doc["midiSource"] = "wifiUdp";
+    // UDP source posture (audit 4 P2.3) so the Settings UI shows the live state.
+    doc["midiSourcePolicy"] =
+        ctx_.midiSourcePolicy ? ctx_.midiSourcePolicy() : "open";
+    doc["midiSourceLocked"] =
+        ctx_.midiSourceLocked ? ctx_.midiSourceLocked() : false;
     doc["activeProfile"] = ctx_.profile ? ctx_.profile->instrument.name : "";
     doc["capabilitiesRevision"] =
         ctx_.sysex ? ctx_.sysex->snapshot().revision : 0;
@@ -204,9 +209,18 @@ void WebApi::fillStatus(JsonDocument& doc) {
             else
                 s["note"] = nullptr;
             // Servo-per-fret: no carriage position — just which finger (if any) is
-            // pressed and whether the plucker is striking.
+            // pressed and whether the plucker is striking. The strike signal comes
+            // from the SERVO BANK (engaged until the automatic return), not the
+            // string FSM whose Plucking state lasts a single tick and was
+            // practically invisible to the UI (audit 4 P3).
             s["finger"] = fingerDown(st, open) ? "down" : "up";
-            s["plectrum"] = (st == StringState::Plucking) ? "strike" : "rest";
+            bool striking = st == StringState::Plucking;
+            if (ctx_.servos) {
+                int pi = ctx_.servos->pluckIndex(static_cast<int>(i));
+                if (pi < 0) pi = ctx_.servos->strumIndex(static_cast<int>(i));
+                if (pi >= 0 && ctx_.servos->striking(pi)) striking = true;
+            }
+            s["plectrum"] = striking ? "strike" : "rest";
             s["lastFault"] = (st == StringState::Fault) ? "fault" : "none";
         }
     }
@@ -570,11 +584,18 @@ void WebApi::registerRoutes() {
                 return;
             }
             bool saved;
+            bool startupOk = true;  // only meaningful when startup was requested
             { WebStorageLock sl(ctx_);  // serialise LittleFS; loop() never waits here
               saved = ctx_.storage->save(slot, p);
-              if (saved && (body["startup"] | false)) ctx_.storage->setStartupSlot(slot); }
-            doc["ok"] = saved;
-            sendJson(req, doc, saved ? 200 : 500);
+              if (saved && (body["startup"] | false))
+                  startupOk = ctx_.storage->setStartupSlot(slot); }
+            // A failed startup-slot write must not masquerade as success: the
+            // profile is stored, but the OLD startup profile would still boot
+            // (audit 4 P2.5).
+            doc["ok"] = saved && startupOk;
+            if (saved && !startupOk)
+                doc["error"] = "profile saved but the startup-slot write failed";
+            sendJson(req, doc, !saved ? 500 : (startupOk ? 200 : 500));
         });
     saveProfile->setMethod(HTTP_POST);
     saveProfile->setMaxContentLength(kMaxProfileJsonBytes);  // body may embed a profile
@@ -789,6 +810,40 @@ void WebApi::registerRoutes() {
         });
     setWifi->setMethod(HTTP_POST);
     server_->addHandler(setWifi);
+
+    // ---- POST /api/midi/source (UDP MIDI source posture, audit 4 P2.3) ----
+    // Body: { policy: "open"|"lockToFirst"|"disabled" (optional), unlock: bool }.
+    // The policy is stored in NVS (device state, survives reboots) and applied by
+    // the main loop; unlock forgets the currently locked sender.
+    auto* midiSource = new AsyncCallbackJsonWebHandler(
+        "/api/midi/source", [this](AsyncWebServerRequest* req, JsonVariant& body) {
+            if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized"; sendJson(req, d, 401); return; }
+            JsonDocument doc;
+            if (!ctx_.onSetMidiSource) {
+                doc["ok"] = false;
+                sendJson(req, doc, 409);
+                return;
+            }
+            int policy = -1;
+            if (!body["policy"].isNull()) {
+                std::string p = body["policy"] | "";
+                if (p == "open") policy = 0;
+                else if (p == "lockToFirst") policy = 1;
+                else if (p == "disabled") policy = 2;
+                else {
+                    doc["ok"] = false;
+                    doc["error"] = "policy must be open, lockToFirst or disabled";
+                    sendJson(req, doc, 422);
+                    return;
+                }
+            }
+            bool unlock = body["unlock"] | false;
+            ctx_.onSetMidiSource(policy, unlock);
+            doc["ok"] = true;
+            sendJson(req, doc);
+        });
+    midiSource->setMethod(HTTP_POST);
+    server_->addHandler(midiSource);
 
     // ---- GET /api/wifi/scan (survey nearby networks) ----
     // `?start=1` kicks a fresh scan (authorised like every other write); the plain

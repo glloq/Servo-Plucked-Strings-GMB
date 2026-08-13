@@ -99,20 +99,38 @@ void Net::beginStationAttempt(uint32_t nowMs) {
     attemptStartMs_ = nowMs;
     connecting_ = true;
     connected_ = false;
-    apActive_ = false;
-    stopCaptivePortal();  // leaving AP: drop the wildcard DNS
+    // Recovery attempt FROM the fallback hotspot: keep the rescue AP (and its
+    // captive portal) alive in AP+STA while the station retries — the old
+    // WIFI_STA switch made the instrument unreachable for up to ~3 x 8 s on every
+    // periodic retry while the router stayed down (audit 4 P2.1). A primary
+    // station attempt (boot / fresh settings, no AP up) behaves as before.
+    bool keepRescueAp = apActive_ && apIsFallback_;
+    if (!keepRescueAp) {
+        apActive_ = false;
+        stopCaptivePortal();  // leaving AP: drop the wildcard DNS
+    }
 #if defined(ARDUINO)
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(keepRescueAp ? WIFI_AP_STA : WIFI_STA);
     WiFi.setHostname(cfg_.hostname.c_str());
     WiFi.begin(cfg_.ssid.c_str(), password_.c_str());  // returns immediately
-    Serial.printf("[net] joining \"%s\" as \"%s\"...\n", cfg_.ssid.c_str(),
-                  cfg_.hostname.c_str());
+    Serial.printf("[net] joining \"%s\" as \"%s\"%s...\n", cfg_.ssid.c_str(),
+                  cfg_.hostname.c_str(),
+                  keepRescueAp ? " (rescue hotspot kept up)" : "");
 #endif
 }
 
 bool Net::pollStation(uint32_t nowMs) {
 #if defined(ARDUINO)
     if (WiFi.status() == WL_CONNECTED) {
+        // Station is up: if the rescue hotspot was kept alive during the retry
+        // (AP+STA), it has done its job — shut it down cleanly now.
+        if (apActive_) {
+            WiFi.softAPdisconnect(true);
+            stopCaptivePortal();
+            apActive_ = false;
+            apIsFallback_ = false;
+            WiFi.mode(WIFI_STA);
+        }
         ip_ = WiFi.localIP().toString().c_str();
         connected_ = true;
         connecting_ = false;
@@ -127,7 +145,9 @@ bool Net::pollStation(uint32_t nowMs) {
         connecting_ = false;
         Serial.printf("[net] station attempt timed out (%d/3)\n", failures_ + 1);
         if (++failures_ >= 3) {
-            startAccessPoint(true);  // fall back to AP (spec §8.1)
+            // Fall back to AP (spec §8.1). If the rescue AP was kept up during
+            // this retry it is already serving — just restart the retry clock.
+            if (!apActive_) startAccessPoint(true);
             lastStationRetryMs_ = nowMs;
         }
     }
@@ -190,15 +210,21 @@ void Net::tick(uint32_t nowMs) {
 #if defined(ARDUINO)
     if (apActive_) {
         if (dnsActive_) dns_.processNextRequest();  // captive portal
+        // A recovery attempt in AP+STA (rescue hotspot kept up): keep polling the
+        // station; success shuts the AP down inside pollStation().
+        if (connecting_) {
+            pollStation(nowMs);
+            return;
+        }
         // If the AP is only a FALLBACK (a station was configured but unreachable),
         // periodically retry the station so a transient router outage recovers.
         // A primary AP-mode profile — or a BOOT-button-forced hotspot — stays in AP
-        // and never retries.
+        // and never retries. The rescue AP stays up during the attempt (AP+STA).
         if (!apForced_ && apIsFallback_ && cfg_.mode == NetworkMode::Station &&
             !cfg_.ssid.empty() && nowMs - lastStationRetryMs_ >= 60000) {
             lastStationRetryMs_ = nowMs;
             failures_ = 0;
-            beginStationAttempt(nowMs);  // drops the AP while trying; re-falls back
+            beginStationAttempt(nowMs);
         }
         return;
     }
