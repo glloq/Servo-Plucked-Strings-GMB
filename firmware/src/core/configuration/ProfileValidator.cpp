@@ -111,6 +111,9 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
 
         std::vector<std::pair<int, int>> usedPcaChannels;   // (board, channel)
         std::vector<std::pair<int, int>> usedFingerFrets;   // (stringIndex, fret)
+        // (stringIndex, roleGroup): pluck and strum share the "striker" group —
+        // exactly one striker drives a string; strumLift and damper are unique too.
+        std::vector<std::pair<int, std::string>> usedStringRoles;
         for (size_t i = 0; i < p.servos.size(); ++i) {
             const ServoConfig& s = p.servos[i];
             if (!s.enabled) continue;
@@ -124,6 +127,30 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 if (s.stringIndex < 0 || s.stringIndex >= (int)p.strings.size())
                     err(tag + ".stringIndex",
                         "Per-string servo references a string that does not exist");
+            }
+
+            // Unique per-string actuators (audit): the runtime resolves each role by
+            // FIRST match, so a duplicate pluck/strum/strumLift/damper — or a pluck
+            // AND a strum on the same string — leaves one servo silently unused
+            // while looking "valid". Block it so the wiring matches what plays.
+            if (perString && s.function != "finger" && s.stringIndex >= 0) {
+                std::string group =
+                    (s.function == "pluck" || s.function == "strum") ? "striker"
+                                                                     : s.function;
+                std::pair<int, std::string> key{s.stringIndex, group};
+                for (auto& u : usedStringRoles)
+                    if (u == key)
+                        err(tag + ".function",
+                            group == "striker"
+                                ? "String " + std::to_string(s.stringIndex) +
+                                      " already has a pluck/strum servo — exactly one "
+                                      "striker per string (the extra one would never "
+                                      "be used)"
+                                : "String " + std::to_string(s.stringIndex) +
+                                      " already has a " + s.function +
+                                      " servo — at most one per string (the extra one "
+                                      "would never be used)");
+                usedStringRoles.push_back(key);
             }
 
             // Finger servos carry a fret: it must be a real fret (1..kMaxFret), must
@@ -206,16 +233,19 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 err(tag + ".activeAltUs",
                     "Alternate active pulse is outside the servo's min/max range");
             // Alternate up-stroke with no explicit endpoint uses the implicit mirror
-            // 2*rest-active; if that lands outside the pulse window it is silently
-            // clamped, so the "symmetric" up-stroke is weaker than intended — warn so
-            // the user sets an explicit activeAltUs (audit P-B7).
+            // 2*rest-active; if that lands outside the pulse window it would be
+            // clamped to a mechanical EXTREMITY — the plectrum sweeps far past its
+            // calibrated geometry on every second stroke. That is a miscalibration,
+            // not a preference: block activation until an explicit activeAltUs is
+            // set (audit P-B7, upgraded from warning to error).
             if (s.alternateDirection && s.activeAltUs == 0) {
                 int mirror = 2 * static_cast<int>(s.restUs) - static_cast<int>(s.activeUs);
                 if (mirror < static_cast<int>(s.pulseMinUs) ||
                     mirror > static_cast<int>(s.pulseMaxUs))
-                    warn(tag + ".activeAltUs",
-                         "Alternate up-stroke mirror (2*rest-active) is out of the pulse "
-                         "window and will be clamped; set an explicit activeAltUs");
+                    err(tag + ".activeAltUs",
+                        "Alternate up-stroke mirror (2*rest-active) is out of the pulse "
+                        "window and would clamp to an extremity; set an explicit "
+                        "activeAltUs (or disable alternateDirection)");
             }
             if (s.minStrikeUs != 0 &&
                 (s.minStrikeUs < s.pulseMinUs || s.minStrikeUs > s.pulseMaxUs))

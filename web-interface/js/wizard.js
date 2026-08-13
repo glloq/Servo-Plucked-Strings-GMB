@@ -1259,7 +1259,15 @@
       amp: GMB.usToAngle(striker, striker.activeUs) - GMB.usToAngle(striker, striker.restUs)
     };
     if (!(st.amp > 0)) st.amp = 20;
+    // The sweep must fit on BOTH sides of the contact angle, otherwise the mirrored
+    // up-stroke would pin at a pulse-window extremity (the audit P0 failure mode).
+    function fitAmp() {
+      var room = Math.min(st.contact, 180 - st.contact);
+      if (st.amp > room) st.amp = Math.max(1, Math.floor(room));
+    }
+    fitAmp();
     function reapply(previewDown) {
+      fitAmp();
       striker.restUs = GMB.angleToUs(striker, st.contact);
       striker.activeUs = GMB.angleToUs(striker, Math.min(180, st.contact + st.amp));
       striker.activeAltUs = GMB.angleToUs(striker, Math.max(0, st.contact - st.amp));
@@ -1290,12 +1298,12 @@
     if (!p.midi) p.midi = {};
     if (p.midi.noteExecutionDelayMs === undefined) p.midi.noteExecutionDelayMs = 0;
     if (p.midi.strumLeadMs === undefined) p.midi.strumLeadMs = 0;
-    // Unified plucking model: every striker rests against the string and sweeps ±
-    // an angle for alternating down/up strokes. Enforce the alternating invariant so
-    // older profiles pick up the model (only the angles differ per mounting).
-    (p.servos || []).forEach(function (sv) {
-      if (sv.function === 'pluck' || sv.function === 'strum') sv.alternateDirection = true;
-    });
+    // NEVER touch an existing striker's mechanical calibration here. Forcing
+    // alternateDirection on a loaded profile whose activeAltUs is 0 made the firmware
+    // mirror the stroke about rest (2*rest-active) — out of the pulse window on the
+    // shipped non-alternating profiles, so the "up-stroke" clamped to a mechanical
+    // extremity (audit P0). A striker only becomes alternating when the user
+    // recalibrates it in strikerAngles(), which writes rest/active/activeAlt together.
   }
 
   function stepPluck(body) {
@@ -1384,10 +1392,11 @@
     body.appendChild(h('div.card.inset', [
       h('h3', 'Timing'),
       h('p.muted',
-        'A fixed action delay (a fixed-time FIFO buffer) holds every incoming note by ' +
-        'the same amount so chords land together and the feel stays even. The fret → ' +
-        'strum delay then waits after the finger has seated a fret before the plectrum ' +
-        'strikes.'),
+        'Chords are synchronised by the firmware: the notes of a chord share one strike ' +
+        'deadline that covers the slowest string’s mechanical preparation (finger ' +
+        'travel + settle). The global action delay adds a fixed reception → sound ' +
+        'floor on top, keeping single-note feel even; the fret → strum delay waits ' +
+        'after the finger has seated a fret before the plectrum strikes.'),
       h('div.grid2', [
         GMB.field('Global action delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
           { type: 'number', min: 0, max: 2000 }), 'fixed-time FIFO buffer — reception → sound latency'),

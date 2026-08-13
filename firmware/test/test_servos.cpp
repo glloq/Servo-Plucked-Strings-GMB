@@ -35,16 +35,17 @@ TEST(default_wires_one_pca_per_string) {
         CHECK_EQ((int)s.pcaBoard, (int)s.stringIndex);
 }
 
-// A direct-GPIO servo on a free pin is valid (works without any PCA).
+// A direct-GPIO servo on a free pin is valid (works without any PCA). A damper
+// role: string 0 already carries its (unique) pluck striker.
 TEST(direct_gpio_servo_is_valid) {
     Profile p = uke();
-    ServoConfig strum;
-    strum.enabled = true;
-    strum.function = "strum";
-    strum.stringIndex = 0;
-    strum.source = ServoSource::DirectGpio;
-    strum.gpio = 2;  // recommended free pin on the DevKitC-1
-    p.servos.push_back(strum);
+    ServoConfig damper;
+    damper.enabled = true;
+    damper.function = "damper";
+    damper.stringIndex = 0;
+    damper.source = ServoSource::DirectGpio;
+    damper.gpio = 2;  // recommended free pin on the DevKitC-1
+    p.servos.push_back(damper);
     CHECK(ProfileValidator::isActivatable(p));
 }
 
@@ -93,11 +94,12 @@ TEST(duplicate_pca_channel_rejected) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
-// Up to eight PCA boards addressable (0..7); board 8 is rejected.
+// Up to eight PCA boards addressable (0..7); board 8 is rejected. (A damper
+// role — string 0's striker slot is already taken by its pluck.)
 TEST(pca_board_range) {
     Profile p = uke();
     ServoConfig ok;
-    ok.enabled = true; ok.function = "strum"; ok.stringIndex = 0;
+    ok.enabled = true; ok.function = "damper"; ok.stringIndex = 0;
     ok.source = ServoSource::Pca; ok.pcaBoard = 7; ok.channel = 0;  // free board
     p.servos.push_back(ok);
     CHECK(ProfileValidator::isActivatable(p));
@@ -286,11 +288,32 @@ TEST(alternate_stroke_uses_alt_endpoint) {
 }
 
 // activeAltUs == 0 mirrors the active pulse about rest for a symmetric up-stroke.
+// (ServoStroke still clamps defensively, but the VALIDATOR now rejects a config
+// whose mirror lands outside the pulse window — see test_audit.cpp.)
 TEST(alternate_stroke_mirrors_when_alt_zero) {
     ServoConfig s = strumServo();
     s.alternateDirection = true;   // activeAltUs stays 0
     // mirror of 1800 about rest 1000 = 2*1000 - 1800 = 200, clamped to pulseMin 500.
     CHECK_EQ((int)servoStrikeTargetUs(s, 1.0, true), 500);
+}
+
+// The guaranteed minimum strike depth holds on BOTH stroke directions: the
+// calibrated minStrikeUs (rest->active side) is read as a depth from rest and
+// mirrored onto the alternate side. The old absolute compare left the floor
+// inert on every up-stroke, so soft notes missed the string half the time (audit).
+TEST(min_strike_floor_holds_in_both_directions) {
+    ServoConfig s;
+    s.pulseMinUs = 500; s.pulseMaxUs = 2500;
+    s.restUs = 1500; s.activeUs = 1720;
+    s.activeAltUs = 1280;
+    s.alternateDirection = true;
+    s.minStrikeUs = 1610;  // depth 110 from rest
+    // Down-stroke: soft note floored up to the calibrated pulse.
+    CHECK_EQ((int)servoStrikeTargetUs(s, 0.1, false), 1610);
+    // Up-stroke: the SAME depth floors toward the alternate side (1500 - 110).
+    CHECK_EQ((int)servoStrikeTargetUs(s, 0.1, true), 1390);
+    // A full-velocity up-stroke is deeper than the floor: untouched.
+    CHECK_EQ((int)servoStrikeTargetUs(s, 1.0, true), 1280);
 }
 
 // An out-of-window alternate/min pulse is rejected by validation.
@@ -307,9 +330,12 @@ TEST(strum_alt_pulse_out_of_range_rejected) {
     CHECK(!ProfileValidator::isActivatable(p));
 }
 
-// A valid strum with alternation + floor + custom stroke time validates.
+// A valid strum with alternation + floor + custom stroke time validates. The
+// strum REPLACES string 0's pluck — exactly one striker per string.
 TEST(strum_stroke_fields_valid) {
     Profile p = uke();
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) s.enabled = false;
     ServoConfig strum = strumServo();
     strum.enabled = true;
     strum.stringIndex = 0;
