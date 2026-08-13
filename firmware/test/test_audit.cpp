@@ -164,6 +164,25 @@ TEST(validator_rejects_alternate_endpoint_equal_to_rest) {
     CHECK(ProfileValidator::isActivatable(p));
 }
 
+// Both alternate endpoints on the SAME side of rest is (almost certainly) not a
+// real down/up alternation across the string — warning, not blocking (audit 4).
+TEST(validator_warns_same_side_alternation) {
+    Profile p = uke();
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) {
+            s.restUs = 1500; s.activeUs = 1800;
+            s.alternateDirection = true;
+            s.activeAltUs = 1700;  // same side as activeUs
+        }
+    bool warned = false;
+    for (const auto& is : ProfileValidator::validate(p))
+        if (is.field.find("activeAltUs") != std::string::npos &&
+            is.severity == ValidationIssue::Severity::Warning)
+            warned = true;
+    CHECK(warned);
+    CHECK(ProfileValidator::isActivatable(p));  // exotic mechanisms stay allowed
+}
+
 // The runtime resolves per-string roles by FIRST match, so a duplicate actuator —
 // or a pluck AND a strum on the same string — leaves one servo silently unused.
 // The validator now blocks these (audit: unique actuators per string).

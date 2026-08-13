@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -35,10 +36,26 @@ public:
     void begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t scl,
                int8_t oePin, int8_t sda2 = -1, int8_t scl2 = -1, int8_t oePin2 = -1);
 
-    // Low-level "just write" primitives (no result; used internally + by tests).
-    void toRest(int index);
-    void toActive(int index);
-    void toMicros(int index, uint16_t us);
+    // Low-level "just write" primitives (used internally + by tests). They return
+    // the write result so even the AUTOMATIC strike return in update() can report a
+    // failed command instead of flipping to Rest while the actuator never moved
+    // (audit 4 P1.5); most callers may still ignore the value.
+    ActuatorResult toRest(int index);
+    ActuatorResult toActive(int index);
+    ActuatorResult toMicros(int index, uint16_t us);
+
+    // Invoked by update() when a SCHEDULED write (the automatic post-strike return
+    // to rest) fails: (servo index, result). The owner routes it to the affected
+    // string's fault path. Never invoked from hardStop/abort (best-effort paths).
+    void onUpdateFault(std::function<void(int, ActuatorResult)> fn) {
+        updateFault_ = std::move(fn);
+    }
+    // Owning string of a servo (-1 for a shared/aux servo or a bad index) — lets
+    // the update-fault handler map a servo back to the string to take out.
+    int stringIndexOf(int index) const {
+        return (index >= 0 && index < (int)servos_.size())
+            ? servos_[index].stringIndex : -1;
+    }
 
     // Scheduler-facing motion API (audit P1.4). Every one returns an ActuatorResult
     // so the playback scheduler ALWAYS knows whether the command reached the hardware
@@ -152,6 +169,13 @@ public:
     uint16_t lastCommandedUs(int index) const {
         return (index >= 0 && index < (int)rt_.size()) ? rt_[index].lastUs : 0;
     }
+    // True while a strike is physically engaged (between strike() and its automatic
+    // return to rest) — the REAL "plectrum striking" signal for telemetry, unlike
+    // the string FSM whose Plucking state lasts a single tick (audit 4 P3).
+    bool striking(int index) const {
+        return index >= 0 && index < (int)rt_.size() &&
+               rt_[index].mode == Mode::Striking;
+    }
     // Distinct physical PCA9685 board for a servo, as (i2cBus, pcaBoard) folded into
     // 0..15 — the bucket the activation governor caps per-board. 0xFF for a servo on
     // no board (direct GPIO), which the governor leaves out of any per-board window.
@@ -184,6 +208,7 @@ private:
         uint16_t lastUs = 0;        // last logical pulse commanded (pre-inversion)
     };
     std::vector<Rt> rt_;
+    std::function<void(int, ActuatorResult)> updateFault_;  // scheduled-write failures
 
     std::vector<ServoConfig> servos_;
     std::vector<int8_t> ledcCh_;  // LEDC channel per direct servo (Arduino 2.x)

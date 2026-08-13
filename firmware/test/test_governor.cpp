@@ -119,3 +119,28 @@ TEST(governor_global_and_per_board_both_apply) {
     CHECK(g.requestStart(1000, /*board*/1));    // global 2 / board 1 — global now full
     CHECK(!g.requestStart(1000, /*board*/2));   // board 2 free, but the global cap is hit
 }
+
+// Forecast (audit 4 P1.3): nextSlotDelayMs reports how long a NEW start must wait
+// given the current window state, without recording anything.
+TEST(governor_next_slot_delay_forecast) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/1, /*perBoard*/1, /*stagger*/50);
+    CHECK_EQ((int)g.nextSlotDelayMs(1000, 0), 0);   // empty windows: immediate
+    CHECK(g.requestStart(1000, /*board*/0));
+    // Global window full: a new start anywhere waits out the stagger.
+    CHECK_EQ((int)g.nextSlotDelayMs(1001, 0xFF), 49);
+    CHECK_EQ((int)g.nextSlotDelayMs(1010, 0), 40);
+    CHECK_EQ((int)g.nextSlotDelayMs(1050, 0), 0);   // window elapsed
+    // Forecasting must not consume a slot: the real grant still succeeds.
+    CHECK(g.requestStart(1050, /*board*/0));
+}
+
+// The per-board window bounds the forecast even when the global window has room.
+TEST(governor_next_slot_delay_per_board) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/8, /*perBoard*/1, /*stagger*/40);
+    CHECK(g.requestStart(2000, /*board*/3));
+    CHECK_EQ((int)g.nextSlotDelayMs(2010, 3), 30);    // board 3 window still busy
+    CHECK_EQ((int)g.nextSlotDelayMs(2010, 4), 0);     // another board: free
+    CHECK_EQ((int)g.nextSlotDelayMs(2010, 0xFF), 0);  // direct GPIO: global only
+}

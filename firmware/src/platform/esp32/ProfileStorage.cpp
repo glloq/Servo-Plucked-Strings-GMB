@@ -774,13 +774,13 @@ int ProfileStorage::startupSlot() const {
     return slot;
 }
 
-void ProfileStorage::setStartupSlot(int slot) {
-    if (slot < 0 || slot >= kMaxProfiles) return;  // never store out of range
+bool ProfileStorage::setStartupSlot(int slot) {
+    if (slot < 0 || slot >= kMaxProfiles) return false;  // never store out of range
     File f = LittleFS.open("/startup.txt", "w");
-    if (f) {
-        f.print(slot);
-        f.close();
-    }
+    if (!f) return false;  // surfaced to the API: the startup slot did NOT change
+    size_t written = f.print(slot);
+    f.close();
+    return written > 0;
 }
 #else
 // Non-Arduino stubs so the file is analysable off-target.
@@ -791,7 +791,7 @@ bool ProfileStorage::load(int, Profile&) const { return false; }
 bool ProfileStorage::save(int, const Profile&) { return false; }
 bool ProfileStorage::remove(int) { return false; }
 int ProfileStorage::startupSlot() const { return 0; }
-void ProfileStorage::setStartupSlot(int) {}
+bool ProfileStorage::setStartupSlot(int) { return false; }
 #endif
 
 }  // namespace gmb

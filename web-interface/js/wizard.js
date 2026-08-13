@@ -470,7 +470,7 @@
         h('span.spacer'),
         step < steps.length - 1
           ? GMB.button('Next', function () { goto(flowKey, step + 1); }, 'primary')
-          : GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')
+          : GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')
       ])
     ]));
     drawStep(flowKey);
@@ -921,7 +921,10 @@
       boardTried = true;
       var id = (GMB.state.profile.board && GMB.state.profile.board.profile) || fb.identifier;
       GMB.api.getBoard(id).then(function (b) {
-        if (b && b.pins) { boardModel = b; if (GMB.state.current === 'wizard') drawStep(); }
+        // The main page is 'setup' since the UI redesign — the old 'wizard' check
+        // meant a WROOM-32/DevKit board profile arriving async never refreshed the
+        // GPIO picker, leaving the S3 fallback pinout on screen (audit 4 P2.4).
+        if (b && b.pins) { boardModel = b; if (GMB.state.current === 'setup') drawStep(); }
       }).catch(function () {});
     }
     return fb.pins || [];
@@ -1014,19 +1017,12 @@
     return label ? GMB.field(label, row, hint) : row;
   }
 
-  // Per-servo PCA address + output pin pickers. The mechanism runs everything on
-  // PCA9685 boards, so a servo just needs its board (0x40–0x47) and channel (0–15).
-  function pcaPinRow(sv) {
-    var boards = [], pins = [];
-    for (var b = 0; b < 8; b++) boards.push({ value: b, label: 'PCA ' + b + ' · 0x' + (0x40 + b).toString(16) });
-    for (var c = 0; c < 16; c++) pins.push({ value: c, label: 'pin ' + c });
-    if (sv.source !== 'pca') sv.source = 'pca';
-    return h('div.grid2', [
-      GMB.field('PCA board', GMB.input(sv, 'pcaBoard',
-        { type: 'select', options: boards, coerce: Number, onChange: GMB.markDirty })),
-      GMB.field('PCA pin', GMB.input(sv, 'channel',
-        { type: 'select', options: pins, coerce: Number, onChange: GMB.markDirty }))
-    ]);
+  // Per-servo wiring block: the full source editor (PCA9685 board + I²C bus +
+  // channel, OR a direct ESP32 GPIO). NEVER mutates the servo's source — the old
+  // pcaPinRow silently converted a direct-GPIO servo to PCA just by OPENING its
+  // editor (audit 4 P1.1); mixing PCA and direct GPIO is a supported feature.
+  function wiringRow(sv) {
+    return h('div.grid2', servoSourceEditor(sv));
   }
 
   function testServoBtn(label, sv, active) {
@@ -1161,7 +1157,7 @@
     var detail = [
       h('label.inline.builder-opt', [gearToggle,
         h('span', 'One servo drives 2 frets (geared)' + (!geared && !hasAdjacent ? ' — no free adjacent fret' : ''))]),
-      pcaPinRow(sv),
+      wiringRow(sv),
       h('div.grid2', angles),
       GMB.field('Reverse rotation direction', GMB.input(sv, 'inverted', { type: 'checkbox' }),
         'flip the servo direction if the finger moves the wrong way')
@@ -1300,7 +1296,7 @@
       drawStep();
     });
     var plectrumKids = [
-      pcaPinRow(striker),
+      wiringRow(striker),
       h('div.grid2', [
         angleStepper(striker, 'restUs', 'Contact angle', 'plectrum resting against the string'),
         angleStepper(striker, 'activeUs', 'Down-stroke angle', 'stroke end on one side of contact')
@@ -1397,7 +1393,7 @@
     var descKids = [h('label.inline.builder-opt', [descToggle,
       h('span', 'Add a descent servo (lowers the plectrum onto the string only while playing)')])];
     if (lift) {
-      descKids.push(pcaPinRow(lift));
+      descKids.push(wiringRow(lift));
       descKids.push(h('div.grid2', [
         angleStepper(lift, 'restUs', 'Rest angle',
           p.pluck.liftEngage === 'raiseToPlay' ? 'plectrum ON the string (mutes at rest)'
@@ -1445,7 +1441,7 @@
     var dampKids = [h('label.inline.builder-opt', [dampToggle,
       h('span', 'Add a damper servo (strikes the string to mute it at Note Off)')])];
     if (damper) {
-      dampKids.push(pcaPinRow(damper));
+      dampKids.push(wiringRow(damper));
       dampKids.push(h('div.grid2', [
         angleStepper(damper, 'restUs', 'Rest angle', 'damper clear of the string'),
         angleStepper(damper, 'activeUs', 'Damp angle', 'damper pressed on the string')
@@ -1575,7 +1571,7 @@
           (is.field ? is.field + ' — ' : '') + is.message));
       });
     }
-    body.appendChild(h('div.row', [GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')]));
+    body.appendChild(h('div.row', [GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')]));
   }
 
   // Client-side pre-check (the firmware ProfileValidator is authoritative).
@@ -1589,8 +1585,11 @@
         anyPca = true;
         if (s.pcaBoard > 7) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA board must be 0..7' });
         if (s.channel > 15) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA channel must be 0..15' });
-        var k = s.pcaBoard + ':' + s.channel;
-        if (pcaUsed[k]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA ' + k + ' used twice' });
+        // A PCA output is identified by (i2cBus, board, channel): the same
+        // board+channel on the OTHER bus is a different physical chip, not a
+        // conflict (audit 4 P1.2 — the firmware validator already keys on all 3).
+        var k = (s.i2cBus || 0) + ':' + s.pcaBoard + ':' + s.channel;
+        if (pcaUsed[k]) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'PCA bus/board/channel ' + k + ' used twice' });
         pcaUsed[k] = true;
       } else { direct++; if (s.gpio < 0) out.push({ level: 'error', field: 'servos[' + i + ']', message: 'direct servo needs a GPIO' }); }
       if (s.function === 'finger') {

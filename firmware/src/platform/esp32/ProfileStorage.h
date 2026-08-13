@@ -64,7 +64,9 @@ public:
     bool remove(int slot);
 
     int startupSlot() const;
-    void setStartupSlot(int slot);
+    // Persist the startup slot; false when the write failed (the old startup
+    // profile then still applies at the next boot) - audit 4 P2.5.
+    bool setStartupSlot(int slot);
 
 private:
     static std::string slotPath(int slot);

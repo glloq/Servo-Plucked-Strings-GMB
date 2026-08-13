@@ -33,7 +33,7 @@
         GMB.field('Name', GMB.input(GMB.state.profile.instrument, 'name')),
         GMB.field('Startup profile', h('span.muted', 'set from the list above'))
       ]),
-      h('div.toolbar', [GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')])
+      h('div.toolbar', [GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')])
     ]));
 
     loadList();

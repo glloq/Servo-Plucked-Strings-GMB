@@ -126,7 +126,7 @@
       GMB.api.sysexRequest('notify').then(function () {
         GMB.toast('Capabilities published (block 8 notification sent).', 'ok');
       }).catch(function (e) { GMB.toast('Publish failed: ' + sysexErr(e), 'error'); });
-    });
+    }).catch(function () { /* save failed: already toasted, nothing to notify */ });
   }
 
   function testComms() {

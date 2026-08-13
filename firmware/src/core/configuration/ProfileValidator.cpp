@@ -238,6 +238,16 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 err(tag + ".activeAltUs",
                     "Alternate active pulse equals the rest pulse — every second "
                     "stroke would not move");
+            // Both stroke endpoints on the SAME side of rest is almost never a real
+            // down/up alternation (the plectrum never crosses the string). Warning
+            // only: an exotic mechanism may deliberately use two depths on one side
+            // (audit 4 P2.6).
+            if (s.alternateDirection && s.activeAltUs != 0 &&
+                (static_cast<int>(s.activeUs) - static_cast<int>(s.restUs)) *
+                (static_cast<int>(s.activeAltUs) - static_cast<int>(s.restUs)) > 0)
+                warn(tag + ".activeAltUs",
+                     "Both stroke endpoints sit on the same side of rest — not a "
+                     "true down/up alternation across the string");
             // Alternate up-stroke with no explicit endpoint uses the implicit mirror
             // 2*rest-active; if that lands outside the pulse window it would be
             // clamped to a mechanical EXTREMITY — the plectrum sweeps far past its

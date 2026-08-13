@@ -235,10 +235,92 @@
   }
 
   // ---- Advanced tab ---------------------------------------------------------
+  var adminTok = { token: '', confirm: '' };
+
+  function setAdminToken() {
+    if (!adminTok.token || adminTok.token.length < 8) {
+      GMB.toast('Admin token must be at least 8 characters.', 'error');
+      return;
+    }
+    if (adminTok.token !== adminTok.confirm) {
+      GMB.toast('The two token fields do not match.', 'error');
+      return;
+    }
+    GMB.api.setAdminTokenRemote(adminTok.token)
+      .then(function () {
+        adminTok.token = ''; adminTok.confirm = '';
+        GMB.toast('Admin token set — write API calls now require it (this browser ' +
+                  'remembers it).', 'ok');
+        drawTab();
+      })
+      .catch(function (e) {
+        GMB.toast('Token change failed: ' + ((e && e.body && e.body.error) ||
+                  (e && e.message) || e), 'error');
+      });
+  }
+
+  // Device security: admin token workflow + UDP MIDI source posture, rendered from
+  // the live status (audit 4 P2.2 / P2.3).
+  function renderSecurity(box, st) {
+    box.innerHTML = '';
+    var configured = st ? !!st.authConfigured : null;
+    box.appendChild(section('Admin access', h('div.form-grid', [
+      h('p' + (configured === false ? '.warn-text' : '.muted'),
+        configured === null ? 'Protection: …'
+          : configured ? 'Protection: configured — write API calls require the admin token.'
+                       : 'Protection: NOT configured — anyone reaching this page can ' +
+                         'change settings. Set a token before joining a shared network.'),
+      GMB.field('New admin token', GMB.input(adminTok, 'token', { type: 'password' }),
+        'at least 8 characters'),
+      GMB.field('Confirm token', GMB.input(adminTok, 'confirm', { type: 'password' })),
+      h('div.toolbar', [GMB.button('Set / change token', setAdminToken, 'primary')])
+    ]), 'Stored on the device (never exported); this browser keeps its copy locally ' +
+        'so your own writes keep working.'));
+
+    var policy = (st && st.midiSourcePolicy) || 'open';
+    var locked = !!(st && st.midiSourceLocked);
+    function policyRadio(value, label, hint) {
+      var input = h('input', { type: 'radio', name: 'midisrc', checked: policy === value });
+      input.addEventListener('change', function () {
+        GMB.api.setMidiSource({ policy: value }).then(function () {
+          GMB.toast('Network MIDI source policy: ' + label, 'ok');
+        }).catch(function (e) {
+          GMB.toast('Policy change failed: ' + ((e && e.message) || e), 'error');
+        });
+      });
+      return h('label.inline.builder-opt', [input, h('span', label + ' — ' + hint)]);
+    }
+    var midiKids = [
+      policyRadio('open', 'Accept any sender', 'any host on the network may send notes'),
+      policyRadio('lockToFirst', 'Lock to first sender',
+        'the first controller heard becomes the only accepted one' +
+        (locked ? ' (currently locked to a sender)' : '')),
+      policyRadio('disabled', 'Disable network MIDI', 'refuse every UDP MIDI packet')
+    ];
+    if (policy === 'lockToFirst') {
+      midiKids.push(h('div.toolbar', [GMB.button('Unlock current sender', function () {
+        GMB.api.setMidiSource({ unlock: true }).then(function () {
+          GMB.toast('Sender unlocked — the next controller heard will lock the session.', 'ok');
+        }).catch(function (e) {
+          GMB.toast('Unlock failed: ' + ((e && e.message) || e), 'error');
+        });
+      }, 'ghost')]));
+    }
+    box.appendChild(section('MIDI network source', h('div', midiKids),
+      'Stored on the device. On the isolated hotspot “accept any” is fine; on a ' +
+      'shared Wi-Fi prefer “lock to first sender”.'));
+  }
+
   function advancedTab(host) {
     host.appendChild(h('div.note-box',
-      'Advanced tools. GMB identity & capabilities (SysEx), the live MIDI monitor and the ' +
-      'integrated tester. Switch to “Advanced” below for the detailed options.'));
+      'Advanced tools. Device security (admin token, network MIDI policy), GMB ' +
+      'identity & capabilities (SysEx), the live MIDI monitor and the integrated ' +
+      'tester. Switch to “Advanced” below for the detailed options.'));
+    var sec = h('div', { id: 'security-section' });
+    host.appendChild(sec);
+    renderSecurity(sec, null);
+    GMB.api.getStatus().then(function (st) { renderSecurity(sec, st); })
+      .catch(function () {});
     if (GMB.views.sysex && GMB.views.sysex.render) GMB.views.sysex.render(host);
     if (GMB.midiSettings && GMB.midiSettings.tools) GMB.midiSettings.tools(host);
   }
@@ -273,16 +355,12 @@
   function onKey(e) { if (e.key === 'Escape') close(); }
 
   // ---- save -----------------------------------------------------------------
+  // Order matters (audit 4 P1.6): the PROFILE is published FIRST, over the link we
+  // still have; the network settings (device NVS) go second; and only then is the
+  // Wi-Fi change APPLIED — apply:true may tear down the very connection the
+  // browser is using (hotspot -> station or back), which used to kill the profile
+  // PUT that was still queued behind it.
   function save() {
-    function saveDraft() {
-      // saveProfile() toasts 422 issues and only clears dirty on success; the modal
-      // stays open so a rejected save can be fixed in place.
-      GMB.saveProfile();
-    }
-    // Network settings are DEVICE state: always persisted to NVS via /api/wifi so
-    // they survive reboots and profile changes (the profile draft still carries a
-    // copy for export/display). apply:true reconnects right away, with the usual
-    // hotspot fallback if the new settings fail.
     var net = GMB.state.profile.network;
     // WPA2 needs 8..63 chars — anything shorter would silently start an OPEN
     // hotspot, so refuse it here too (the API also answers 422).
@@ -296,7 +374,7 @@
       ssid: net.ssid || '',
       apSsid: net.apSsid || '',
       hostname: net.hostname || '',
-      apply: true
+      apply: true  // the device reconnects only after everything is stored
     };
     if (wifi.stationPassword) payload.stationPassword = wifi.stationPassword;
     if (wifi.apPassword) payload.apPassword = wifi.apPassword;
@@ -304,19 +382,28 @@
       payload.clearStationPassword = true;
     if (wifi.forgetAp) payload.clearApPassword = true;
     var switching = net.mode === 'station';
-    GMB.api.setWifi(payload)
-      .then(function (r) {
-        wifi.stationPassword = ''; wifi.apPassword = '';
-        wifi.forgetStation = false; wifi.forgetAp = false;
-        GMB.toast((r && r.note) ? ('Network settings ' + r.note) :
-          'Network settings stored on the device.', 'ok');
-        if (switching)
-          GMB.toast('If you are connected through the hotspot, the device may now ' +
-                    'switch networks — reconnect on the new network if this page ' +
-                    'stops responding.', 'warn');
-        saveDraft();
+    GMB.saveProfile()
+      .then(function () {
+        // Profile safely published: NOW store + apply the network settings.
+        return GMB.api.setWifi(payload).then(function (r) {
+          wifi.stationPassword = ''; wifi.apPassword = '';
+          wifi.forgetStation = false; wifi.forgetAp = false;
+          GMB.toast((r && r.note) ? ('Network settings ' + r.note) :
+            'Network settings stored on the device.', 'ok');
+          if (switching)
+            GMB.toast('If you are connected through the hotspot, the device may now ' +
+                      'switch networks — reconnect on the new network if this page ' +
+                      'stops responding.', 'warn');
+        }, function (e) {
+          var body = e && e.body;
+          GMB.toast('Network save failed: ' + ((body && body.error) || (e && e.message) || e),
+                    'error');
+        });
       })
-      .catch(function (e) { GMB.toast('Network save failed: ' + (e && e.message || e), 'error'); });
+      .catch(function () {
+        // Profile save failed (already toasted): the network change was NOT
+        // stored or applied — fix the draft and save again.
+      });
   }
 
   function startHotspot() {

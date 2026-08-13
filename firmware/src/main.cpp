@@ -149,6 +149,10 @@ int8_t pinOf(const char* signal) {
 // profile activation. Passwords stay write-only in the same namespace (spec §20).
 std::atomic<bool> g_wifiApplyRequested{false};  // POST /api/wifi apply:true
 std::atomic<bool> g_wifiScanRequested{false};   // GET /api/wifi/scan?start=1
+// UDP MIDI source posture (audit 4 P2.3): pending policy change (-1 = none;
+// 0 open / 1 lockToFirst / 2 disabled) + pending unlock, applied on the loop.
+std::atomic<int> g_midiSourceRequested{-1};
+std::atomic<bool> g_midiUnlockRequested{false};
 std::string g_wifiScanJson =                    // guarded by g_stateMutex
     "{\"ok\":true,\"scanning\":false,\"networks\":[]}";
 uint32_t g_seenScanGeneration = 0;
@@ -331,8 +335,9 @@ bool doTestServo(int index, bool active, uint16_t us) {
     if (!g_safety.actuatorsAllowed()) return false;
     if (!g_servos.commandable(index)) return false;
     if (us > 0) return ok(g_servos.moveTo(index, us));
-    if (active) g_servos.press(index); else g_servos.release(index);
-    return true;
+    // Report the REAL write result: the calibration UI used to show "→ contact"
+    // as a success even when press()/release() failed (audit 4 P1.5).
+    return active ? ok(g_servos.press(index)) : ok(g_servos.release(index));
 }
 
 void purgeCommands() { g_commands.purge(); }
@@ -402,6 +407,12 @@ void serviceWifiRequests(uint32_t nowMs) {
         g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
         Serial.println(F("[net] applying updated device network settings"));
     }
+    // UDP MIDI source posture: policy change / unlock requested by the web task,
+    // applied here (the loop owns MidiWifi) — audit 4 P2.3.
+    int midiPolicy = g_midiSourceRequested.exchange(-1);
+    if (midiPolicy >= 0 && midiPolicy <= 2)
+        g_midi.setSourcePolicy(static_cast<UdpSourcePolicy>(midiPolicy));
+    if (g_midiUnlockRequested.exchange(false)) g_midi.unlockSource();
 }
 
 // Run a bounded batch of queued commands on the main loop. The command HANDLERS live
@@ -503,6 +514,19 @@ void setup() {
     g_safety.boot();  // servos neutralised (spec §21.1)
     // Wire the playback scheduler to its collaborators + the central fault path (P2.17).
     g_scheduler.begin(&g_instrument, &g_servos, &g_actuators, &g_profile, faultRuntimeAxis);
+    // A SCHEDULED servo write that fails (the automatic post-strike return) takes
+    // the owning string out of service like any other actuator fault; a shared/aux
+    // servo failure is logged without a string to isolate (audit 4 P1.5).
+    g_servos.onUpdateFault([](int servoIndex, ActuatorResult r) {
+        int s = g_servos.stringIndexOf(servoIndex);
+        std::string reason = std::string("scheduled servo return failed [") +
+                             actuatorResultName(r) + "]";
+        if (s >= 0)
+            faultRuntimeAxis(static_cast<size_t>(s), reason.c_str(), millis());
+        else
+            g_safety.recordFault("servo", reason + " on servo " +
+                                              std::to_string(servoIndex), millis());
+    });
 
     // Bind the SafetySupervisor to the globals it operates on (P2.17). No state moves:
     // it references the same objects every other reader uses; only the arm/park/stop/
@@ -564,6 +588,16 @@ void setup() {
     prefs.end();
     g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
     g_midi.begin(5006);
+    // Restore the stored UDP MIDI source posture (device state, audit 4 P2.3):
+    // 0 open (default) / 1 lockToFirst / 2 disabled.
+    {
+        Preferences p;
+        p.begin("gmb", true);
+        int midiSrc = p.getInt("midisrc", 0);
+        p.end();
+        if (midiSrc >= 0 && midiSrc <= 2)
+            g_midi.setSourcePolicy(static_cast<UdpSourcePolicy>(midiSrc));
+    }
     g_usbMidi.begin();  // P1.7: inert until wired to native USB-MIDI (no-op elsewhere)
     g_dinMidi.begin(nullptr);  // P1.7: byte->event logic ready; inert until a DIN RX UART is bound here
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
@@ -625,6 +659,20 @@ void setup() {
         StateGuard lock;
         return g_wifiScanJson;
     };
+    ctx.onSetMidiSource = [](int policy, bool unlock) {
+        if (policy >= 0 && policy <= 2) {
+            Preferences p;
+            p.begin("gmb", false);
+            p.putInt("midisrc", policy);
+            p.end();
+            g_midiSourceRequested.store(policy);  // applied on the main loop
+        }
+        if (unlock) g_midiUnlockRequested.store(true);
+    };
+    ctx.midiSourcePolicy = []() -> std::string {
+        return udpSourcePolicyName(g_midi.sourcePolicy());
+    };
+    ctx.midiSourceLocked = []() -> bool { return g_midi.sourceLocked(); };
     ctx.checkToken = [](const std::string& provided) -> bool {
         Preferences p; p.begin("gmb", true);
         String stored = p.getString("admintoken", ""); p.end();
