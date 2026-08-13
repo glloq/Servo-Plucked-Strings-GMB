@@ -124,8 +124,10 @@ TEST(validator_rejects_absurd_timing) {
 }
 
 // An alternate up-stroke whose implicit mirror (2*rest-active) falls outside the
-// pulse window is silently clamped — the validator warns (audit P-B7).
-TEST(validator_warns_alternate_mirror_out_of_window) {
+// pulse window would clamp to a mechanical extremity — the plectrum would sweep
+// far past its calibrated geometry on every second stroke. The validator now
+// BLOCKS activation (audit P-B7, upgraded from warning to error).
+TEST(validator_rejects_alternate_mirror_out_of_window) {
     Profile p = uke();
     for (auto& s : p.servos)
         if (s.function == "pluck" && s.stringIndex == 0) {
@@ -134,13 +136,49 @@ TEST(validator_warns_alternate_mirror_out_of_window) {
             s.activeAltUs = 0;                     // use the implicit mirror
             s.restUs = 600; s.activeUs = 2400;     // mirror = -1200 -> out of window
         }
-    bool warned = false;
+    bool flagged = false;
     for (const auto& is : ProfileValidator::validate(p))
         if (is.field.find("activeAltUs") != std::string::npos &&
-            is.severity == ValidationIssue::Severity::Warning)
-            warned = true;
-    CHECK(warned);
-    CHECK(ProfileValidator::isActivatable(p));  // warning only
+            is.severity == ValidationIssue::Severity::Error)
+            flagged = true;
+    CHECK(flagged);
+    CHECK(!ProfileValidator::isActivatable(p));  // blocking: extremity clamp
+    // An explicit in-window activeAltUs (or alternate off) makes it activatable.
+    for (auto& s : p.servos)
+        if (s.function == "strum" && s.stringIndex == 0) s.activeAltUs = 700;
+    CHECK(ProfileValidator::isActivatable(p));
+}
+
+// The runtime resolves per-string roles by FIRST match, so a duplicate actuator —
+// or a pluck AND a strum on the same string — leaves one servo silently unused.
+// The validator now blocks these (audit: unique actuators per string).
+TEST(validator_rejects_duplicate_per_string_actuators) {
+    auto extra = [](const char* fn, uint8_t channel) {
+        ServoConfig s;
+        s.enabled = true;
+        s.function = fn;
+        s.stringIndex = 0;
+        s.source = ServoSource::Pca;
+        s.pcaBoard = 0;
+        s.channel = channel;  // fingers use 0..11, the pluck 12 -> 13/14 are free
+        return s;
+    };
+    // pluck + strum on the same string: two strikers, the strum never plays.
+    Profile p = uke();
+    p.servos.push_back(extra("strum", 13));
+    CHECK(!ProfileValidator::isActivatable(p));
+    // Two dampers.
+    Profile q = uke();
+    q.servos.push_back(extra("damper", 13));
+    CHECK(ProfileValidator::isActivatable(q));   // one damper is fine
+    q.servos.push_back(extra("damper", 14));
+    CHECK(!ProfileValidator::isActivatable(q));  // the second is dead weight
+    // Two strum lifts.
+    Profile r = uke();
+    r.servos.push_back(extra("strumLift", 13));
+    CHECK(ProfileValidator::isActivatable(r));
+    r.servos.push_back(extra("strumLift", 14));
+    CHECK(!ProfileValidator::isActivatable(r));
 }
 
 // A raise-to-play strum lift holds its mute AT REST, so disableAtRest would cut the

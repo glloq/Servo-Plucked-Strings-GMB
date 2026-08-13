@@ -23,6 +23,11 @@ struct StringTarget {
     uint32_t commandId = 0;
     uint8_t velocity = 0;    // raw MIDI velocity
     double intensity = 0.0;  // shaped 0..1 (velocity curve)
+    // Age (ms) the Note On spent in the chord-grouping buffer before this target
+    // was published. Lets the playback scheduler anchor the fixed execution delay
+    // to the note's RECEPTION instead of the flush, so chordWindowMs is not a
+    // hidden extra latency (audit). 0 for direct (explicit / prepared) notes.
+    uint16_t queuedMs = 0;
 };
 
 class InstrumentController {
@@ -115,7 +120,7 @@ private:
     void stopString(int stringIndex);
     int findActive(uint8_t channel, uint8_t note) const;
     void removeActiveByString(int stringIndex);
-    void flushChord();
+    void flushChord(uint32_t nowUs);
 };
 
 }  // namespace gmb

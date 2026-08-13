@@ -141,10 +141,48 @@ int8_t pinOf(const char* signal) {
     return -1;
 }
 
+// ---- Device-owned network configuration (audit) -------------------------------
+// The Settings modal's mode/SSID/hostname used to live ONLY in the (RAM-activated)
+// profile, so a reboot silently reverted them to the startup slot. They are now
+// DEVICE state in NVS: stored by POST /api/wifi, overlaid onto whatever profile is
+// live so the UI/status show what actually runs, and re-applied on every boot and
+// profile activation. Passwords stay write-only in the same namespace (spec §20).
+std::atomic<bool> g_wifiApplyRequested{false};  // POST /api/wifi apply:true
+std::atomic<bool> g_wifiScanRequested{false};   // GET /api/wifi/scan?start=1
+std::string g_wifiScanJson =                    // guarded by g_stateMutex
+    "{\"ok\":true,\"scanning\":false,\"networks\":[]}";
+uint32_t g_seenScanGeneration = 0;
+
+// Overlay the NVS device network settings (when present) onto a profile's network
+// block. Called on boot and on every profile activation, so an activated profile
+// can never revert the device's stored network choice.
+void overlayDeviceNetwork(Profile& p) {
+    Preferences prefs;
+    prefs.begin("gmb", true);
+    if (prefs.isKey("netmode")) {
+        String m = prefs.getString("netmode", "");
+        if (m == "station") p.network.mode = NetworkMode::Station;
+        else if (m == "accessPoint") p.network.mode = NetworkMode::AccessPoint;
+    }
+    if (prefs.isKey("netssid")) p.network.ssid = prefs.getString("netssid", "").c_str();
+    if (prefs.isKey("netapssid")) {
+        String s = prefs.getString("netapssid", "");
+        if (s.length() > 0) p.network.apSsid = s.c_str();  // never blank the AP name
+    }
+    if (prefs.isKey("nethost")) {
+        String h = prefs.getString("nethost", "");
+        if (h.length() > 0) p.network.hostname = h.c_str();
+    }
+    prefs.end();
+}
+
 // Reallocates the per-string vectors + reinitialises the servo hardware. The
 // CALLER must hold g_stateMutex around this (and the g_profile assignment that
 // precedes an activation) so a web read never observes the runtime half-rebuilt.
 void applyProfile() {
+    // Device network settings win over whatever the profile carries (audit): the
+    // status/UI then show the configuration that actually runs.
+    overlayDeviceNetwork(g_profile);
     g_instrument.load(g_profile);
     g_sysex.rebuild(g_profile);
     g_scheduler.configure(g_profile.strings.size());  // sizes the per-string FSM state
@@ -316,6 +354,53 @@ void serviceHotspotRequests(uint32_t nowMs) {
     if (g_hotspotRequested.exchange(false)) {
         g_net.forceAccessPoint();
         Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
+    }
+}
+
+// Serialize the latest Wi-Fi scan state into the snapshot the web task serves
+// (GET /api/wifi/scan reads it under the state lock — never the live vectors).
+void refreshWifiScanJson() {
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["scanning"] = g_net.scanInProgress();
+    JsonArray arr = doc["networks"].to<JsonArray>();
+    for (const auto& r : g_net.scanResults()) {
+        JsonObject o = arr.add<JsonObject>();
+        o["ssid"] = r.ssid;
+        o["rssi"] = r.rssi;
+        o["secure"] = r.secure;
+        o["channel"] = r.channel;
+    }
+    std::string out;
+    serializeJson(doc, out);
+    StateGuard lock;
+    g_wifiScanJson = out;
+}
+
+// Scan requests + deferred "apply now" of freshly-stored network settings. Runs on
+// the main loop (owner of Net/WiFi): the web handler only stored NVS + set a flag,
+// so the async task never touches the radio (same split as the hotspot request).
+void serviceWifiRequests(uint32_t nowMs) {
+    (void)nowMs;
+    if (g_wifiScanRequested.exchange(false)) {
+        g_net.startScan();
+        refreshWifiScanJson();  // snapshot now says scanning:true
+    }
+    if (g_net.scanGeneration() != g_seenScanGeneration) {
+        g_seenScanGeneration = g_net.scanGeneration();
+        refreshWifiScanJson();  // fresh results landed
+    }
+    if (g_wifiApplyRequested.exchange(false)) {
+        Preferences prefs;
+        prefs.begin("gmb", true);
+        String staPass = prefs.getString("wifipass", "");
+        String apPass = prefs.getString("appass", "");
+        prefs.end();
+        { StateGuard lock; overlayDeviceNetwork(g_profile); }
+        // Re-begin reconnects with the new settings; on repeated failure Net falls
+        // back to the hotspot exactly like at boot, so the device stays reachable.
+        g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
+        Serial.println(F("[net] applying updated device network settings"));
     }
 }
 
@@ -512,13 +597,30 @@ void setup() {
     ctx.unlockState = []() { if (g_stateMutex) xSemaphoreGive(g_stateMutex); };
     ctx.lockStorage = []() { if (g_storageMutex) xSemaphoreTake(g_storageMutex, portMAX_DELAY); };
     ctx.unlockStorage = []() { if (g_storageMutex) xSemaphoreGive(g_storageMutex); };
-    ctx.onSetWifi = [](bool hasSta, const std::string& sta, bool hasAp,
-                       const std::string& ap) {
-        Preferences p;
-        p.begin("gmb", false);
-        if (hasSta) p.putString("wifipass", String(sta.c_str()));
-        if (hasAp) p.putString("appass", String(ap.c_str()));
-        p.end();
+    ctx.onSetNetwork = [](const WifiSettings& w) {
+        {
+            Preferences p;
+            p.begin("gmb", false);
+            if (w.hasMode) p.putString("netmode", w.station ? "station" : "accessPoint");
+            if (w.hasSsid) p.putString("netssid", String(w.ssid.c_str()));
+            if (w.hasApSsid) p.putString("netapssid", String(w.apSsid.c_str()));
+            if (w.hasHostname) p.putString("nethost", String(w.hostname.c_str()));
+            // Passwords: overwrite when provided, ERASE when explicitly cleared
+            // (open network / forget) — an empty field still keeps the old secret.
+            if (w.clearStationPassword) p.remove("wifipass");
+            else if (w.hasStationPassword)
+                p.putString("wifipass", String(w.stationPassword.c_str()));
+            if (w.clearApPassword) p.remove("appass");
+            else if (w.hasApPassword)
+                p.putString("appass", String(w.apPassword.c_str()));
+            p.end();
+        }
+        if (w.apply) g_wifiApplyRequested.store(true);  // reconnect on the main loop
+    };
+    ctx.onWifiScanStart = []() { g_wifiScanRequested.store(true); };
+    ctx.wifiScanJson = []() -> std::string {
+        StateGuard lock;
+        return g_wifiScanJson;
     };
     ctx.checkToken = [](const std::string& provided) -> bool {
         Preferences p; p.begin("gmb", true);
@@ -593,6 +695,7 @@ void loop() {
     }
     bool panicked = servicePanic(nowMs);
     serviceHotspotRequests(nowMs);  // BOOT-button / web hotspot (independent of phase)
+    serviceWifiRequests(nowMs);     // scan + deferred network-settings apply (audit)
 
     if (!panicked) drainCommands(nowMs);
     servicePendingActivation(nowMs);
@@ -682,6 +785,10 @@ void loop() {
     }
 
     if (g_phase == AppPhase::Ready && g_safety.actuatorsAllowed()) {
+        // Chord sync: give targets that arrived together in this pass a COMMON
+        // strike deadline covering the slowest string's mechanical preparation,
+        // so a chord's strings land together (audit). Must precede the ticks.
+        g_scheduler.prepareTick(nowMs);
         for (size_t i = 0; i < g_instrument.stringCount(); ++i) {
             if (!(i < g_stringFaulted.size() && g_stringFaulted[i]))
                 g_scheduler.tick(i, nowMs);

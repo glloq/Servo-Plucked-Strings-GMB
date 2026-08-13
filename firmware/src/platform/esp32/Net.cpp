@@ -1,5 +1,7 @@
 #include "Net.h"
 
+#include <algorithm>
+
 #if defined(ARDUINO)
 #include <ESPmDNS.h>
 #include <WiFi.h>
@@ -16,6 +18,11 @@ bool Net::begin(const NetworkConfig& cfg, const std::string& stationPassword,
     cfg_ = cfg;
     password_ = stationPassword;
     apPassword_ = apPassword;
+    // A (re)begin is a fresh start: clear the failure history and any forced-AP
+    // latch so newly-stored settings get their full three attempts + fallback.
+    failures_ = 0;
+    apIsFallback_ = false;
+    apForced_ = false;
     if (cfg_.mode == NetworkMode::Station && !cfg_.ssid.empty()) {
 #if defined(ARDUINO)
         beginStationAttempt(millis());
@@ -131,7 +138,55 @@ bool Net::pollStation(uint32_t nowMs) {
 #endif
 }
 
+bool Net::startScan() {
+    if (scanning_) return false;
+#if defined(ARDUINO)
+    // Survey from the station interface. While the AP is up, switch to AP+STA so
+    // the hotspot (and the browser session riding on it) stays alive during the
+    // scan; a later station attempt / AP restart resets the mode as usual.
+    if (apActive_) WiFi.mode(WIFI_AP_STA);
+    WiFi.scanNetworks(true /*async*/, false /*skip hidden*/);
+#endif
+    scanning_ = true;
+    return true;
+}
+
+void Net::pollScan() {
+    if (!scanning_) return;
+#if defined(ARDUINO)
+    int16_t n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) return;
+    scanResults_.clear();
+    for (int i = 0; i < n; ++i) {
+        ScanResult r;
+        r.ssid = WiFi.SSID(i).c_str();
+        r.rssi = WiFi.RSSI(i);
+        r.secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+        r.channel = WiFi.channel(i);
+        if (r.ssid.empty()) continue;  // unnamed/hidden entries are unusable here
+        // Deduplicate by SSID — a mesh shows one row, the strongest signal wins.
+        bool dup = false;
+        for (auto& e : scanResults_) {
+            if (e.ssid == r.ssid) {
+                dup = true;
+                if (r.rssi > e.rssi) e = r;
+                break;
+            }
+        }
+        if (!dup) scanResults_.push_back(r);
+    }
+    std::sort(scanResults_.begin(), scanResults_.end(),
+              [](const ScanResult& a, const ScanResult& b) { return a.rssi > b.rssi; });
+    WiFi.scanDelete();
+#else
+    scanResults_.clear();
+#endif
+    scanning_ = false;
+    ++scanGeneration_;
+}
+
 void Net::tick(uint32_t nowMs) {
+    pollScan();  // harvest a finished background scan in any mode
 #if defined(ARDUINO)
     if (apActive_) {
         if (dnsActive_) dns_.processNextRequest();  // captive portal

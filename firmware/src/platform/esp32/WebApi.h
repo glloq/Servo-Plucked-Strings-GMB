@@ -21,6 +21,28 @@ namespace gmb {
 
 class ProfileStorage;
 
+// Device-side network settings carried by POST /api/wifi. Each field applies only
+// when its has* flag is set, so a partial body never clobbers stored values; the
+// clear* flags are the explicit way to ERASE a stored password (an empty password
+// field still means "keep the old one", as before — audit: clearing was impossible).
+struct WifiSettings {
+    bool hasMode = false;
+    bool station = false;             // true = station (Wi-Fi client), false = AP
+    bool hasSsid = false;
+    std::string ssid;                 // station SSID
+    bool hasApSsid = false;
+    std::string apSsid;
+    bool hasHostname = false;
+    std::string hostname;
+    bool hasStationPassword = false;
+    std::string stationPassword;
+    bool clearStationPassword = false;  // open network / forget the stored secret
+    bool hasApPassword = false;
+    std::string apPassword;
+    bool clearApPassword = false;       // make the hotspot open again
+    bool apply = false;               // reconnect now (serviced by the main loop)
+};
+
 struct WebContext {
     Profile* profile = nullptr;
     InstrumentController* instrument = nullptr;
@@ -52,8 +74,14 @@ struct WebContext {
     // flash write from the web task cannot stall the safety loop.
     std::function<void()> lockStorage;
     std::function<void()> unlockStorage;
-    // Only the flagged passwords are written (empty fields are left unchanged).
-    std::function<void(bool, const std::string&, bool, const std::string&)> onSetWifi;
+    // Device-side network settings (NVS): only flagged fields are stored, so the
+    // SSID/mode/hostname survive a reboot INDEPENDENTLY of any profile slot
+    // (audit: "Save & publish" used to lose them on reboot).
+    std::function<void(const WifiSettings&)> onSetNetwork;
+    // Kick an asynchronous Wi-Fi scan (serviced on the main loop) and read the
+    // latest scan snapshot as a ready-to-send JSON body.
+    std::function<void()> onWifiScanStart;
+    std::function<std::string()> wifiScanJson;
     // Returns true if the supplied token authorises a write (or if no admin
     // token has been configured yet — first-run bootstrap).
     std::function<bool(const std::string&)> checkToken;
