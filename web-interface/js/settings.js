@@ -21,7 +21,10 @@
 
   var overlay = null;
   var activeTab = 'network';
-  var wifi = { stationPassword: '', apPassword: '' };
+  var wifi = { stationPassword: '', apPassword: '', forgetStation: false, openNetwork: false };
+  // Wi-Fi scan state: null until a scan ran; { scanning, networks } afterwards.
+  var scan = null;
+  var scanPollTimer = null;
 
   var TABS = [
     { id: 'network',  label: 'Network' },
@@ -80,14 +83,78 @@
     drawTab();
   }
 
-  // Release anything live a tab may hold (MIDI socket, running test sequence).
+  // Release anything live a tab may hold (MIDI socket, running test sequence,
+  // Wi-Fi scan polling).
   function teardownTab() {
     if (GMB.midiSettings && GMB.midiSettings.teardown) GMB.midiSettings.teardown();
     if (GMB.views.midi && GMB.views.midi.teardown) GMB.views.midi.teardown();
     if (GMB.testRunner && GMB.testRunner.stop) GMB.testRunner.stop();
+    stopScanPoll();
   }
 
   // ---- Network tab ----------------------------------------------------------
+
+  // Poll GET /api/wifi/scan while the survey runs, re-rendering the list as
+  // results land. The timer dies with the tab/modal (teardownTab/close).
+  function pollScan() {
+    GMB.api.wifiScan(false).then(function (r) {
+      scan = r;
+      renderScanList();
+      if (r && r.scanning) scanPollTimer = setTimeout(pollScan, 800);
+      else scanPollTimer = null;
+    }).catch(function () { scanPollTimer = null; });
+  }
+
+  function startScan() {
+    scan = { scanning: true, networks: (scan && scan.networks) || [] };
+    renderScanList();
+    GMB.api.wifiScan(true).then(function (r) {
+      scan = r;
+      renderScanList();
+      if (scanPollTimer) clearTimeout(scanPollTimer);
+      scanPollTimer = setTimeout(pollScan, 800);
+    }).catch(function (e) {
+      scan = null;
+      renderScanList();
+      GMB.toast('Wi-Fi scan failed: ' + (e && e.message || e), 'error');
+    });
+  }
+
+  function stopScanPoll() {
+    if (scanPollTimer) { clearTimeout(scanPollTimer); scanPollTimer = null; }
+  }
+
+  function pickNetwork(entry) {
+    var net = GMB.state.profile.network;
+    net.mode = 'station';
+    net.ssid = entry.ssid;
+    wifi.openNetwork = !entry.secure;
+    if (wifi.openNetwork) wifi.stationPassword = '';  // open: no password to send
+    GMB.markDirty();
+    drawTab();
+  }
+
+  function renderScanList() {
+    var box = document.getElementById('wifi-scan-list');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!scan) return;
+    if (scan.scanning) box.appendChild(h('p.muted', 'Scanning…'));
+    var nets = scan.networks || [];
+    if (!scan.scanning && !nets.length)
+      box.appendChild(h('p.muted', 'No network found. Scan again, or type the SSID by hand.'));
+    nets.forEach(function (n) {
+      var row = h('button.btn.ghost.wifi-row', { type: 'button', onclick: function () { pickNetwork(n); } }, [
+        h('span', n.ssid),
+        h('span.muted', ' ' + (n.secure ? '🔒' : 'open') + ' · ' + n.rssi + ' dBm · ch ' + n.channel)
+      ]);
+      row.style.display = 'block';
+      row.style.width = '100%';
+      row.style.textAlign = 'left';
+      box.appendChild(row);
+    });
+  }
+
   function networkTab(host) {
     var net = GMB.state.profile.network;
 
@@ -101,18 +168,41 @@
       GMB.field('Access-point SSID', GMB.input(net, 'apSsid')),
       net.mode === 'station' ? GMB.field('Station SSID', GMB.input(net, 'ssid')) : null,
       GMB.field('Hostname', GMB.input(net, 'hostname'))
-    ]), 'Network changes apply after a reboot. Use “Start hotspot” to switch to the access point immediately.'));
+    ]), 'Stored on the device itself (not in the instrument profile), so it survives ' +
+        'reboots and profile changes. “Save & publish” applies it immediately; if the ' +
+        'connection fails the device falls back to its hotspot.'));
 
-    host.appendChild(section('Wi-Fi credentials', h('div.form-grid', [
-      net.mode === 'station'
-        ? GMB.field('Station password', GMB.input(wifi, 'stationPassword', { type: 'password' }))
-        : null,
-      GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' }))
-    ]), 'Write-only — never displayed or exported. Leave blank to keep unchanged. Applied after a reboot.'));
+    if (net.mode === 'station') {
+      var scanKids = [
+        h('div.toolbar', [GMB.button('Scan networks', startScan, 'ghost')]),
+        h('div', { id: 'wifi-scan-list' })
+      ];
+      host.appendChild(section('Nearby networks', h('div', scanKids),
+        'Pick a network to fill the SSID. Open networks need no password.'));
+    }
+
+    var credKids = [];
+    if (net.mode === 'station') {
+      if (wifi.openNetwork) {
+        credKids.push(h('p.muted', '“' + (net.ssid || '') + '” is an open network — no password needed.'));
+      } else {
+        credKids.push(GMB.field('Station password', GMB.input(wifi, 'stationPassword', { type: 'password' })));
+      }
+      var forget = h('input', { type: 'checkbox', checked: !!wifi.forgetStation });
+      forget.addEventListener('change', function () { wifi.forgetStation = forget.checked; });
+      credKids.push(h('label.inline.builder-opt', [forget,
+        h('span', 'Forget the stored station password')]));
+    }
+    credKids.push(GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' })));
+    host.appendChild(section('Wi-Fi credentials', h('div.form-grid', credKids),
+      'Write-only — never displayed or exported. Leave blank to keep unchanged; use ' +
+      '“Forget” (or pick an open network) to really erase a stored password.'));
 
     host.appendChild(section('Hotspot', h('div.toolbar', [
       GMB.button('Start hotspot now', startHotspot, 'ghost')
     ]), 'Switch to the access point now with a captive portal: joining the device’s Wi-Fi opens this page. Also available by holding the board BOOT button for ~2 s.'));
+
+    renderScanList();
   }
 
   // ---- Advanced tab ---------------------------------------------------------
@@ -160,17 +250,35 @@
       // stays open so a rejected save can be fixed in place.
       GMB.saveProfile();
     }
-    if (wifi.stationPassword || wifi.apPassword) {
-      GMB.api.setWifi({ stationPassword: wifi.stationPassword, apPassword: wifi.apPassword })
-        .then(function () {
-          wifi.stationPassword = ''; wifi.apPassword = '';
-          GMB.toast('Wi-Fi credentials stored (reboot to apply).', 'ok');
-          saveDraft();
-        })
-        .catch(function (e) { GMB.toast('Wi-Fi save failed: ' + (e && e.message || e), 'error'); });
-    } else {
-      saveDraft();
-    }
+    // Network settings are DEVICE state: always persisted to NVS via /api/wifi so
+    // they survive reboots and profile changes (the profile draft still carries a
+    // copy for export/display). apply:true reconnects right away, with the usual
+    // hotspot fallback if the new settings fail.
+    var net = GMB.state.profile.network;
+    var payload = {
+      mode: net.mode,
+      ssid: net.ssid || '',
+      apSsid: net.apSsid || '',
+      hostname: net.hostname || '',
+      apply: true
+    };
+    if (wifi.stationPassword) payload.stationPassword = wifi.stationPassword;
+    if (wifi.apPassword) payload.apPassword = wifi.apPassword;
+    if (wifi.forgetStation || (wifi.openNetwork && !wifi.stationPassword))
+      payload.clearStationPassword = true;
+    var switching = net.mode === 'station';
+    GMB.api.setWifi(payload)
+      .then(function (r) {
+        wifi.stationPassword = ''; wifi.apPassword = ''; wifi.forgetStation = false;
+        GMB.toast((r && r.note) ? ('Network settings ' + r.note) :
+          'Network settings stored on the device.', 'ok');
+        if (switching)
+          GMB.toast('If you are connected through the hotspot, the device may now ' +
+                    'switch networks — reconnect on the new network if this page ' +
+                    'stops responding.', 'warn');
+        saveDraft();
+      })
+      .catch(function (e) { GMB.toast('Network save failed: ' + (e && e.message || e), 'error'); });
   }
 
   function startHotspot() {

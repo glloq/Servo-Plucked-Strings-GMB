@@ -1122,12 +1122,40 @@
       return this._call('/api/commands?id=' + encodeURIComponent(id), null,
         function () { return { id: id, state: 'succeeded' }; });
     },
-    // POST /api/wifi -> { ok:true }. Passwords are write-only.
+    // POST /api/wifi -> { ok:true }. Device network settings + write-only passwords.
+    // Stored in device NVS so mode/SSID/hostname survive a reboot independently of
+    // any profile slot; `apply:true` reconnects immediately (hotspot fallback on
+    // failure). `clearStationPassword` really erases the stored secret (an empty
+    // password field still means "keep the old one").
     setWifi: function (payload) {
+      var body = {};
+      ['mode', 'ssid', 'apSsid', 'hostname'].forEach(function (k) {
+        if (payload[k] !== undefined) body[k] = payload[k];
+      });
+      if (payload.stationPassword) body.stationPassword = payload.stationPassword;
+      if (payload.apPassword) body.apPassword = payload.apPassword;
+      if (payload.clearStationPassword) body.clearStationPassword = true;
+      if (payload.clearApPassword) body.clearApPassword = true;
+      if (payload.apply) body.apply = true;
       return this._call('/api/wifi', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stationPassword: payload.stationPassword || '', apPassword: payload.apPassword || '' })
-      }, function () { return { ok: true, note: 'stored (mock); reboot to apply' }; });
+        body: JSON.stringify(body)
+      }, function () { return { ok: true, note: 'stored (mock)' }; });
+    },
+    // GET /api/wifi/scan[?start=1] -> { ok, scanning, networks:[{ssid,rssi,secure,
+    // channel}] } deduped by SSID, sorted by RSSI. Poll while `scanning` is true.
+    wifiScan: function (start) {
+      var self = this;
+      return this._call('/api/wifi/scan' + (start ? '?start=1' : ''), null, function () {
+        if (start) { MOCK.scanStartedAt = nowMs(); }
+        var elapsed = MOCK.scanStartedAt ? nowMs() - MOCK.scanStartedAt : 1e9;
+        if (elapsed < 1500) return { ok: true, scanning: true, networks: [] };
+        return { ok: true, scanning: false, networks: [
+          { ssid: 'Workshop-24', rssi: -48, secure: true, channel: 6 },
+          { ssid: 'FreeCafe', rssi: -61, secure: false, channel: 11 },
+          { ssid: 'Neighbor', rssi: -77, secure: true, channel: 1 }
+        ] };
+      });
     },
     // POST /api/hotspot -> switch to the access point + captive portal now.
     startHotspot: function () {

@@ -69,11 +69,15 @@ servo"*. Full study and calibration procedure:
 
 **Gear modal (device only).** A gear button (⚙) in the top bar opens the device
 **Settings** modal — now just two tabs, since the whole instrument setup moved to the
-Setup page: **Network** (mode / SSIDs / hostname, write-only Wi-Fi passwords, and a
-**Start hotspot now** button) and **Advanced** (GMB identity & capabilities / SysEx
-tester + the live MIDI monitor). Network and Wi-Fi changes are saved with the profile
-and apply after a reboot; the hotspot button switches to the access point
-immediately. See [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
+Setup page: **Network** (mode / SSIDs / hostname, a **Scan networks** picker,
+write-only Wi-Fi passwords, and a **Start hotspot now** button) and **Advanced**
+(GMB identity & capabilities / SysEx tester + the live MIDI monitor). Network
+settings are **device state**: saving stores them in NVS (independently of any
+profile slot, so they survive reboots and profile changes) and applies them
+immediately, with the automatic hotspot fallback if the connection fails. Picking
+an open network needs no password; "Forget the stored station password" really
+erases the stored secret (a blank field keeps it). The hotspot button switches to
+the access point immediately. See [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
 The per-fret contact-angle calibration on the Frets step is detailed in
 [`CALIBRATION.md`](CALIBRATION.md).
 
@@ -319,7 +323,8 @@ open note ─┐        fret 1   2    3     …          soundhole
 | `POST` | `/api/test/note` | play a test note (channel, note, velocity, durationMs); armed only |
 | `POST` | `/api/test/servo` | drive a servo to rest/active, or to an exact `us` pulse and hold it (live calibration, incl. a geared finger's side B); armed only |
 | `POST` | `/api/hotspot` | switch to the access point + captive portal now (see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md)) |
-| `POST` | `/api/wifi` | store Wi-Fi credentials in NVS (never exported) |
+| `POST` | `/api/wifi` | store device network settings (mode/SSID/hostname) + write-only credentials in NVS; `apply:true` reconnects now, `clearStationPassword` erases the stored secret |
+| `GET` | `/api/wifi/scan` | latest Wi-Fi survey `{scanning, networks:[{ssid,rssi,secure,channel}]}`; `?start=1` kicks a fresh scan |
 | `POST` | `/api/auth` | set the admin token (first-run bootstrap allowed) |
 | `POST` | `/api/storage/format` | deliberate LittleFS reformat |
 | `POST` | `/api/sysex/request` | run a GMB SysEx buffer → decoded response |

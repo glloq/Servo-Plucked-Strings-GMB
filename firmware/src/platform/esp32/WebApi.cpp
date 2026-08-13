@@ -708,30 +708,64 @@ void WebApi::registerRoutes() {
     // (No stepper jog / endstop routes: servo-per-fret has no carriage or
     // HOME/LIMIT sensors. Per-fret finger calibration uses POST /api/test/servo.)
 
-    // ---- POST /api/wifi (store credentials in NVS, never exported) ----
+    // ---- POST /api/wifi (device network settings -> NVS, never exported) ----
+    // Carries mode/ssid/apSsid/hostname alongside the write-only passwords, so the
+    // network configuration is DEVICE state that survives a reboot independently of
+    // any profile slot (audit). `apply:true` asks the main loop to reconnect now.
     auto* setWifi = new AsyncCallbackJsonWebHandler(
         "/api/wifi", [this](AsyncWebServerRequest* req, JsonVariant& body) {
             if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized"; sendJson(req, d, 401); return; }
             JsonDocument doc;
-            if (!ctx_.onSetWifi) {
+            if (!ctx_.onSetNetwork) {
                 doc["ok"] = false;
                 sendJson(req, doc, 409);
                 return;
             }
-            // Only overwrite a password that was actually provided (an absent or
-            // empty field leaves the stored secret unchanged).
-            bool hasSta = !body["stationPassword"].isNull() &&
-                          std::string(body["stationPassword"] | "").size() > 0;
-            bool hasAp = !body["apPassword"].isNull() &&
-                         std::string(body["apPassword"] | "").size() > 0;
-            ctx_.onSetWifi(hasSta, body["stationPassword"] | "", hasAp,
-                           body["apPassword"] | "");
+            WifiSettings w;
+            if (!body["mode"].isNull()) {
+                w.hasMode = true;
+                w.station = std::string(body["mode"] | "") == "station";
+            }
+            if (!body["ssid"].isNull()) { w.hasSsid = true; w.ssid = body["ssid"] | ""; }
+            if (!body["apSsid"].isNull()) { w.hasApSsid = true; w.apSsid = body["apSsid"] | ""; }
+            if (!body["hostname"].isNull()) { w.hasHostname = true; w.hostname = body["hostname"] | ""; }
+            // Passwords: a non-empty field overwrites; an empty/absent one keeps the
+            // stored secret; clear* explicitly erases it (open network / forget).
+            w.hasStationPassword = !body["stationPassword"].isNull() &&
+                                   std::string(body["stationPassword"] | "").size() > 0;
+            w.stationPassword = body["stationPassword"] | "";
+            w.clearStationPassword = body["clearStationPassword"] | false;
+            w.hasApPassword = !body["apPassword"].isNull() &&
+                              std::string(body["apPassword"] | "").size() > 0;
+            w.apPassword = body["apPassword"] | "";
+            w.clearApPassword = body["clearApPassword"] | false;
+            w.apply = body["apply"] | false;
+            ctx_.onSetNetwork(w);
             doc["ok"] = true;
-            doc["note"] = "stored; reboot to apply";
-            sendJson(req, doc);
+            doc["note"] = w.apply ? "stored; applying (hotspot fallback on failure)"
+                                  : "stored; applies on reboot";
+            sendJson(req, doc, w.apply ? 202 : 200);
         });
     setWifi->setMethod(HTTP_POST);
     server_->addHandler(setWifi);
+
+    // ---- GET /api/wifi/scan (survey nearby networks) ----
+    // `?start=1` kicks a fresh scan (authorised like every other write); the plain
+    // GET returns the latest snapshot: { ok, scanning, networks:[{ssid,rssi,
+    // secure,channel}] } deduped by SSID and sorted by RSSI. The UI polls while
+    // `scanning` is true.
+    server_->on("/api/wifi/scan", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        if (!ctx_.wifiScanJson) {
+            JsonDocument d; d["ok"] = false; d["error"] = "unsupported";
+            sendJson(req, d, 501);
+            return;
+        }
+        if (req->hasParam("start")) {
+            if (!authOk(req)) { JsonDocument d; d["ok"] = false; d["error"] = "unauthorized"; sendJson(req, d, 401); return; }
+            if (ctx_.onWifiScanStart) ctx_.onWifiScanStart();
+        }
+        req->send(200, "application/json", String(ctx_.wifiScanJson().c_str()));
+    });
 
     // ---- POST /api/auth (set the admin token; first-run bootstrap allowed) ----
     auto* setAuth = new AsyncCallbackJsonWebHandler(

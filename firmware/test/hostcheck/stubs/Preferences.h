@@ -7,5 +7,7 @@ public:
   size_t putString(const char*, const String&) { return 0; }
   bool getBool(const char*, bool d = false) { return d; }
   size_t putBool(const char*, bool) { return 0; }
+  bool isKey(const char*) { return false; }
+  bool remove(const char*) { return true; }
   void end() {}
 };
