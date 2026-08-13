@@ -137,6 +137,21 @@ public:
     uint16_t travelMs(int index) const {
         return (index >= 0 && index < (int)servos_.size()) ? servos_[index].travelMs : 0;
     }
+    // THE single strike-engagement duration: how long a strike() stays at its
+    // active endpoint before the automatic return to rest fires — strokeMs when
+    // calibrated, else travelMs. update() and every scheduler wait that depends on
+    // a strike (lift retract, damper walls) MUST use this same value, so the two
+    // can never disagree (audit: strokeMs vs travelMs divergence).
+    uint16_t strikeDurationMs(int index) const {
+        if (index < 0 || index >= (int)servos_.size()) return 0;
+        const ServoConfig& s = servos_[index];
+        return s.strokeMs ? s.strokeMs : s.travelMs;
+    }
+    // Test/diagnostic peek: the last LOGICAL pulse commanded (pre-inversion, post
+    // window clamp). Lets host tests observe the real command stream over time.
+    uint16_t lastCommandedUs(int index) const {
+        return (index >= 0 && index < (int)rt_.size()) ? rt_[index].lastUs : 0;
+    }
     // Distinct physical PCA9685 board for a servo, as (i2cBus, pcaBoard) folded into
     // 0..15 — the bucket the activation governor caps per-board. 0xFF for a servo on
     // no board (direct GPIO), which the governor leaves out of any per-board window.

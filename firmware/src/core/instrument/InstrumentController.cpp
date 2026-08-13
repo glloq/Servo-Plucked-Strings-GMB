@@ -95,6 +95,7 @@ void InstrumentController::prepareString(int stringIndex, int fret, uint32_t exp
     t.commandId = id;
     t.velocity = 0;
     t.intensity = 0.0;
+    t.queuedMs = 0;  // anticipated move: no grouping buffer involved
     preparedFret_[stringIndex] = fret;
     preparedId_[stringIndex] = id;
     preparedExpiryUs_[stringIndex] = expiresAtUs;
@@ -145,6 +146,7 @@ void InstrumentController::startNote(int stringIndex, int fret, uint8_t channel,
     t.commandId = id;
     t.velocity = velocity;
     t.intensity = applyVelocityCurve(velocityCurve_, velocity) * attackGain();
+    t.queuedMs = 0;  // direct note: published the instant it was received
     active_.push_back({channel, note, stringIndex, false});
 }
 
@@ -227,7 +229,7 @@ void InstrumentController::handleEvent(const MidiEvent& e, uint32_t nowUs) {
         } else {
             // Automatic allocation is deferred to group chord notes (§17.2).
             chordBuffer_.push_back({e.channel, e.data1, e.data2, nowUs});
-            if (chordWindowUs_ == 0) flushChord();
+            if (chordWindowUs_ == 0) flushChord(nowUs);
         }
         return;
     }
@@ -261,7 +263,7 @@ void InstrumentController::handleEvent(const MidiEvent& e, uint32_t nowUs) {
     }
 }
 
-void InstrumentController::flushChord() {
+void InstrumentController::flushChord(uint32_t nowUs) {
     if (chordBuffer_.empty()) return;
     std::vector<uint8_t> notes;
     notes.reserve(chordBuffer_.size());
@@ -282,6 +284,11 @@ void InstrumentController::flushChord() {
         t.commandId = id;
         t.velocity = src.velocity;
         t.intensity = applyVelocityCurve(velocityCurve_, src.velocity) * attackGain();
+        // Time spent waiting in the grouping buffer: the scheduler subtracts it so
+        // the fixed execution delay is measured from the Note On's reception, not
+        // from this flush (audit — chordWindowMs was a hidden extra latency).
+        uint32_t agedUs = nowUs - src.atUs;
+        t.queuedMs = static_cast<uint16_t>(agedUs > 65535000u ? 65535u : agedUs / 1000u);
         active_.push_back({src.channel, src.note, a.stringIndex, false});
     }
     chordBuffer_.clear();
@@ -330,7 +337,7 @@ void InstrumentController::tick(uint32_t nowUs) {
         }
     }
     if (chordBuffer_.empty()) return;
-    if (nowUs - chordBuffer_.front().atUs >= chordWindowUs_) flushChord();
+    if (nowUs - chordBuffer_.front().atUs >= chordWindowUs_) flushChord(nowUs);
 }
 
 void InstrumentController::faultString(size_t index) {

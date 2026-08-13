@@ -77,7 +77,7 @@ void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t
             attachDirect(static_cast<int>(i));
     }
 #else
-    (void)sda; (void)scl; (void)sda2; (void)scl2;
+    (void)sda; (void)scl; (void)sda2; (void)scl2; (void)busUsed;
 #endif
     hardStop();
 }
@@ -246,10 +246,11 @@ void ServoBank::update(uint32_t nowMs) {
         Rt& r = rt_[i];
         switch (r.mode) {
             case Mode::Striking:
-                // strokeMs (when set) is how long the stroke stays engaged before
-                // returning; travelMs remains the fallback and the settle base.
+                // Engagement time comes from strikeDurationMs() — the SAME value the
+                // playback scheduler waits on, so a lift can never retract while the
+                // stroke is still engaged (audit: strokeMs vs travelMs divergence).
                 if (r.returnAtMs == 0)
-                    r.returnAtMs = nowMs + (s.strokeMs ? s.strokeMs : s.travelMs);
+                    r.returnAtMs = nowMs + strikeDurationMs(static_cast<int>(i));
                 if ((int32_t)(nowMs - r.returnAtMs) >= 0) {
                     toRest(static_cast<int>(i));
                     r.mode = Mode::Rest;

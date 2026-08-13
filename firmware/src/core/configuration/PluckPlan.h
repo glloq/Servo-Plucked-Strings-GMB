@@ -30,7 +30,9 @@ inline uint16_t effectivePluckStrokeMs(const PluckConfig& pk, const ServoConfig&
 // minStrikeUs. The percentage form is servo-independent — it means the same "soft
 // notes still catch" depth on every string regardless of each plectrum's pulse
 // window. The result lands between rest and active, so it is always inside the pulse
-// window. A zero global leaves each servo's minStrikeUs untouched.
+// window. servoStrikeTargetUs() reads it as a DEPTH from rest and mirrors it onto
+// the alternate side, so the floor holds on BOTH stroke directions (audit).
+// A zero global leaves each servo's minStrikeUs untouched.
 inline uint16_t effectivePluckMinStrikeUs(const PluckConfig& pk, const ServoConfig& s) {
     if (pk.minStrikePct == 0) return s.minStrikeUs;
     int pct = pk.minStrikePct > 100 ? 100 : pk.minStrikePct;

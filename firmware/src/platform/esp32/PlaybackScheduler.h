@@ -70,12 +70,68 @@ public:
     void configure(size_t stringCount) {
         sched_.assign(stringCount, StringSched{});
         currentFinger_.assign(stringCount, -1);
+        pendingExecuteAt_.assign(stringCount, 0);
     }
 
     // Full reset of the FSM + pressed-finger state (panic / controlled park / swap).
     void reset() {
         for (auto& s : sched_) s = StringSched{};
         for (auto& f : currentFinger_) f = -1;
+        for (auto& t : pendingExecuteAt_) t = 0;
+    }
+
+    // Chord synchronisation (audit): call ONCE per loop pass, BEFORE the per-string
+    // tick()s. A chord flushed by the InstrumentController lands as several fresh
+    // targets in the same pass; when two or more arrive together, give them a COMMON
+    // strike deadline that covers the SLOWEST string's estimated mechanical
+    // preparation (damper wait + finger release/press travel + settle + the global
+    // fret->pluck delay) as well as the fixed noteExecutionDelayMs floor. Each
+    // string still waits for its own REAL mechanics via the Ready-phase max(), so an
+    // under-estimate degrades gracefully; the shared deadline is what makes the
+    // chord's strings strike together instead of each as soon as it is ready.
+    // A single fresh note keeps the plain fixed-delay anchor (no estimated padding).
+    void prepareTick(uint32_t nowMs) {
+        if (!instrument_ || !profile_) return;
+        const Profile& p = *profile_;
+        struct FreshTarget { size_t i; uint32_t byDelay; uint32_t prepMs; uint32_t liftMs; };
+        std::vector<FreshTarget> fresh;
+        int liftCount = 0;
+        for (size_t i = 0; i < sched_.size(); ++i) {
+            const StringTarget& tgt = instrument_->target(i);
+            if (!tgt.active || sched_[i].commandId == tgt.commandId) {
+                if (i < pendingExecuteAt_.size()) pendingExecuteAt_[i] = 0;
+                continue;
+            }
+            uint32_t anchorMs = nowMs - tgt.queuedMs;  // Note-On reception time
+            FreshTarget f;
+            f.i = i;
+            f.byDelay = anchorMs + p.midi.noteExecutionDelayMs;
+            f.prepMs = estimatePrepMs(i, tgt.fret) + p.pluck.fretToPluckMs;
+            f.liftMs = liftPrepMs(i);
+            if (f.liftMs) ++liftCount;
+            fresh.push_back(f);
+        }
+        if (fresh.empty()) return;
+        // The governor staggers the chord's lift engages: the LAST lift starts up
+        // to (liftCount-1) x staggerMs after the first, so the common deadline must
+        // leave that headroom or the late lifts miss the beat.
+        uint32_t staggerBudget =
+            liftCount > 1 ? static_cast<uint32_t>(liftCount - 1) * p.power.staggerMs : 0;
+        uint32_t deadline = 0;
+        bool first = true;
+        for (const FreshTarget& f : fresh) {
+            uint32_t mech = f.prepMs;
+            uint32_t lift = f.liftMs ? f.liftMs + staggerBudget : 0;
+            if (lift > mech) mech = lift;  // lift lowers in parallel with the finger
+            uint32_t byMech = nowMs + mech;
+            uint32_t want = static_cast<int32_t>(byMech - f.byDelay) > 0 ? byMech : f.byDelay;
+            if (first || static_cast<int32_t>(want - deadline) > 0) deadline = want;
+            first = false;
+        }
+        for (const FreshTarget& f : fresh) {
+            // Solo notes keep the un-padded fixed-delay anchor (handled in tick).
+            pendingExecuteAt_[f.i] = fresh.size() >= 2 ? deadline : 0;
+        }
     }
 
     // Clear only the pressed-finger record for every string (arming).
@@ -116,6 +172,44 @@ private:
         ServoBank& g_servos = *servos_;
         int p = g_servos.pluckIndex(static_cast<int>(i));
         return p >= 0 ? p : g_servos.strumIndex(static_cast<int>(i));
+    }
+
+    // Estimated mechanical preparation for string `i` to reach a Ready-to-strike
+    // state on `fret`, from the CURRENT scheduler state: damper wait when replacing
+    // a still-sounding note, previous-finger release travel, target-finger press (or
+    // direct geared sweep) travel and settle. Powers the chord-group deadline in
+    // prepareTick(); the Ready-phase max() against the real mechanics remains the
+    // hard guarantee, so this only needs to be a good estimate.
+    uint32_t estimatePrepMs(size_t i, int fret) const {
+        const ServoBank& b = *servos_;
+        const StringSched& sch = sched_[i];
+        uint32_t prep = 0;
+        if (sch.phase != StringSched::Idle && sch.phase != StringSched::WaitStopped) {
+            int di = b.damperIndex(static_cast<int>(i));
+            if (di >= 0)
+                prep += static_cast<uint32_t>(b.strikeDurationMs(di)) + b.settleMs(di);
+        }
+        int prev = i < currentFinger_.size() ? currentFinger_[i] : -1;
+        int nxt = b.fingerIndexForFret(static_cast<int>(i), fret);
+        bool sweep = prev >= 0 && nxt == prev;
+        if (!sweep && prev >= 0) prep += b.travelMs(prev);  // lift the previous finger
+        if (nxt >= 0) {
+            prep += sweep ? b.sweepMsToFret(nxt, fret) : b.travelMs(nxt);
+            prep += b.settleMs(nxt);
+        }
+        return prep;
+    }
+
+    // Time a string's strum lift needs to be engaged before its strike (0 when the
+    // string has no striker+lift pair). Runs in parallel with the finger work.
+    uint32_t liftPrepMs(size_t i) const {
+        const ServoBank& b = *servos_;
+        int pi = b.pluckIndex(static_cast<int>(i));
+        if (pi < 0) pi = b.strumIndex(static_cast<int>(i));
+        if (pi < 0) return 0;
+        int li = b.strumLiftIndex(static_cast<int>(i));
+        if (li < 0) return 0;
+        return static_cast<uint32_t>(b.travelMs(li)) + b.engageDelayMs(li);
     }
 
     // P1.4: a scheduler-issued actuator command that did not reach the hardware faults
@@ -160,8 +254,12 @@ private:
                 uint32_t muteWaitMs = 0;
                 // Raise-to-play: the lift already rests ON the string, so releasing it
                 // (just above) mutes — no other actuator should move, and pressing one
-                // would fight it. Otherwise damp via the resolved mute source.
-                if (!liftMutesAtRest(g_profile.pluck, li >= 0)) {
+                // would fight it. The fall back onto the string still takes the lift's
+                // real travel: wait for it before declaring the string damped (audit:
+                // the mute must never be reported done before the actuator arrived).
+                if (liftMutesAtRest(g_profile.pluck, li >= 0)) {
+                    muteWaitMs = g_servos.travelMs(li);
+                } else {
                     bool strikerHasMute = pi >= 0 && g_servos.muteUs(pi) != 0;
                     MuteSource action =
                         resolvePluckMute(g_profile.pluck, di >= 0, strikerHasMute, li >= 0);
@@ -171,25 +269,31 @@ private:
                                 // Throttle the damper strike through the governor (P1.6):
                                 // a chord Note-Off releases many dampers at once (real
                                 // in-rush). Defer it to the pending-damper retry below so
-                                // the governor can stagger the burst; reserve its travel
-                                // in the wait budget now. A mute delayed a few ms only
-                                // lets the string ring a hair longer — no missed beat.
+                                // the governor can stagger the burst; reserve its strike
+                                // engagement in the wait budget now. A mute delayed a few
+                                // ms only lets the string ring a hair longer — no missed
+                                // beat.
                                 sch.pendingDamper = di;
-                                muteWaitMs = g_servos.travelMs(di);
+                                muteWaitMs = g_servos.strikeDurationMs(di);
                             }
                             break;
                         case MuteSource::Plectrum:
                             // Bring the plectrum to rest against the string to damp it,
-                            // then release it to rest once the mute hold has elapsed.
+                            // then release it once it has PHYSICALLY reached the string
+                            // (travelMs) and held for muteHoldMs. Without the travel
+                            // term the hold used to elapse mid-flight and the plectrum
+                            // was recalled before it ever touched the string (audit).
                             if (pi >= 0 && ok(g_servos.mute(pi))) {
                                 sch.muteIndex = pi;
-                                muteWaitMs = g_profile.pluck.muteHoldMs;
+                                muteWaitMs = static_cast<uint32_t>(g_servos.travelMs(pi)) +
+                                             g_profile.pluck.muteHoldMs;
                             }
                             break;
                         case MuteSource::Lift:
                             if (li >= 0 && ok(g_servos.press(li))) {
                                 sch.muteIndex = li;
-                                muteWaitMs = g_profile.pluck.muteHoldMs;
+                                muteWaitMs = static_cast<uint32_t>(g_servos.travelMs(li)) +
+                                             g_profile.pluck.muteHoldMs;
                             }
                             break;
                         default:  // None: let the string ring / decay naturally.
@@ -201,7 +305,9 @@ private:
                     if (g_profile.pluck.liftMuteOnNoteOff && sch.muteIndex < 0 &&
                         action != MuteSource::Lift && li >= 0 && ok(g_servos.press(li))) {
                         sch.muteIndex = li;
-                        if (g_profile.pluck.muteHoldMs > muteWaitMs) muteWaitMs = g_profile.pluck.muteHoldMs;
+                        uint32_t w = static_cast<uint32_t>(g_servos.travelMs(li)) +
+                                     g_profile.pluck.muteHoldMs;
+                        if (w > muteWaitMs) muteWaitMs = w;
                     }
                 }
                 if (muteWaitMs > sch.releaseWaitMs) sch.releaseWaitMs = muteWaitMs;
@@ -215,7 +321,8 @@ private:
                 g_actuators.requestMove(MoveClass::Staggerable, nowMs,
                                         g_servos.board(sch.pendingDamper))) {
                 g_servos.strike(sch.pendingDamper);
-                uint32_t doneMs = (nowMs - sch.phaseStartMs) + g_servos.travelMs(sch.pendingDamper);
+                uint32_t doneMs = (nowMs - sch.phaseStartMs) +
+                                  g_servos.strikeDurationMs(sch.pendingDamper);
                 if (doneMs > sch.releaseWaitMs) sch.releaseWaitMs = doneMs;
                 sch.pendingDamper = -1;
             }
@@ -239,7 +346,8 @@ private:
                 if (di >= 0) {
                     g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(di));  // P1.6
                     g_servos.strike(di);
-                    sch.dampUntilMs = nowMs + g_servos.travelMs(di) + g_servos.settleMs(di);
+                    sch.dampUntilMs = nowMs + g_servos.strikeDurationMs(di) +
+                                      g_servos.settleMs(di);
                 }
             }
             if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
@@ -247,7 +355,20 @@ private:
             // the string, or a lift leaning on it) before starting the new one.
             if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
             sch.pendingDamper = -1;  // a new note supersedes an interrupted Note-Off damper
-            sch.executeAtMs = nowMs + g_profile.midi.noteExecutionDelayMs;
+            // Fixed-latency anchor: measured from the Note On's RECEPTION (nowMs minus
+            // the time the note sat in the chord-grouping buffer), so chordWindowMs no
+            // longer silently adds to the configured latency. When prepareTick() has
+            // computed a common chord deadline for this tick's batch, use it — that is
+            // what makes a chord's strings actually land together (audit).
+            {
+                uint32_t anchorMs = nowMs - tgt.queuedMs;
+                uint32_t at = anchorMs + g_profile.midi.noteExecutionDelayMs;
+                if (i < pendingExecuteAt_.size() && pendingExecuteAt_[i] != 0) {
+                    at = pendingExecuteAt_[i];
+                    pendingExecuteAt_[i] = 0;
+                }
+                sch.executeAtMs = at;
+            }
             sch.executeAnchored = sc.willArmOnSettle();
             sch.fingerPressStarted = false;
             sch.liftStarted = false;
@@ -341,8 +462,14 @@ private:
                     int pi = perStringStrikeIndex(i);
                     int li = pi >= 0 ? g_servos.strumLiftIndex(static_cast<int>(i)) : -1;
                     uint32_t settle = g_servos.settleMs(sch.fingerIndex);
+                    // An anticipated lift engage is a positioning move with slack:
+                    // gate it through the governor so a chord's lifts stagger like its
+                    // finger presses (audit: lifts bypassed the current limiter). A
+                    // denied permit just retries next tick.
                     if (li >= 0 &&
-                        (nowMs - sch.phaseStartMs) + g_profile.midi.strumLeadMs >= settle) {
+                        (nowMs - sch.phaseStartMs) + g_profile.midi.strumLeadMs >= settle &&
+                        g_actuators.requestMove(MoveClass::Staggerable, nowMs,
+                                                g_servos.board(li))) {
                         if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                             break;
                         sch.liftIndex = li;
@@ -381,8 +508,19 @@ private:
                     int li = g_servos.strumLiftIndex(static_cast<int>(i));
                     if (li >= 0) {
                         uint32_t liftMs = g_servos.travelMs(li) + g_servos.engageDelayMs(li);
+                        // Pre-lowering has slack (we only need the lift down by
+                        // strikeAtMs): a governed, staggerable move like the finger
+                        // presses (audit). A denied permit retries next tick; the
+                        // last-moment engage below stays a deadline move. The window
+                        // opens (stagger x strings) EARLY so the governor can spread
+                        // a chord's lifts and still have every one down on the beat.
+                        uint32_t lead = liftMs +
+                            static_cast<uint32_t>(g_profile.power.staggerMs) *
+                                static_cast<uint32_t>(g_sched.size());
                         if (static_cast<int32_t>(nowMs - strikeAtMs) +
-                                static_cast<int32_t>(liftMs) >= 0) {
+                                static_cast<int32_t>(lead) >= 0 &&
+                            g_actuators.requestMove(MoveClass::Staggerable, nowMs,
+                                                    g_servos.board(li))) {
                             if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                                 break;
                             sch.liftIndex = li;
@@ -399,6 +537,12 @@ private:
                                              : g_servos.strumLiftIndex(static_cast<int>(i));
                     if (li >= 0) {
                         if (!sch.liftStarted) {
+                            // The strike moment is here and the lift is still up: it
+                            // must engage NOW or the beat is lost — register it as a
+                            // deadline move (counted for the in-rush picture, never
+                            // throttled), like the strike it enables (P1.6/audit).
+                            g_actuators.requestMove(MoveClass::Deadline, nowMs,
+                                                    g_servos.board(li));
                             if (!actOk(g_servos.press(li), i, "strum lift servo write failed", nowMs))
                                 break;
                             sch.liftIndex = li;
@@ -432,7 +576,10 @@ private:
                 }
                 break;
             case StringSched::StrumLiftHold:
-                if (nowMs - sch.phaseStartMs >= g_servos.travelMs(sch.strikeIndex)) {
+                // Wait for the REAL stroke engagement (strokeMs when calibrated, else
+                // travelMs) — the same clock ServoBank::update() runs on — so the lift
+                // can never retract the plectrum while the stroke is still engaged.
+                if (nowMs - sch.phaseStartMs >= g_servos.strikeDurationMs(sch.strikeIndex)) {
                     if (g_profile.pluck.liftEngage == LiftEngage::RaiseToPlay) {
                         // Raise-to-play: KEEP the plectrum lifted (string free to ring)
                         // for the whole note; it falls back onto the string — muting —
@@ -461,6 +608,9 @@ private:
     FaultFn fault_;
     std::vector<StringSched> sched_;
     std::vector<int> currentFinger_;
+    // Per-string common chord deadline computed by prepareTick() for targets that
+    // arrived together in this pass; 0 = none (solo note / already consumed).
+    std::vector<uint32_t> pendingExecuteAt_;
 };
 
 }  // namespace gmb

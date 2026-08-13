@@ -32,12 +32,21 @@ inline uint16_t servoStrikeTargetUs(const ServoConfig& s, double intensity,
     int span = activeEnd - static_cast<int>(s.restUs);
     double target = static_cast<double>(s.restUs) + intensity * span;
 
-    // Guaranteed minimum depth toward the active side (grattage angle floor).
+    // Guaranteed minimum strike DEPTH, applied toward the endpoint of the stroke
+    // actually selected. minStrikeUs is calibrated as an absolute pulse on the
+    // rest->activeUs side; its distance from rest is the depth, mirrored onto the
+    // alternate side for up-strokes. The old absolute one-sided compare left the
+    // floor inert on every second (alternate) stroke, so soft notes silently
+    // missed the string half the time (audit).
     if (s.minStrikeUs != 0) {
+        int depth = static_cast<int>(s.minStrikeUs) - static_cast<int>(s.restUs);
+        if (depth < 0) depth = -depth;
+        double floorUs = span >= 0 ? static_cast<double>(s.restUs) + depth
+                                   : static_cast<double>(s.restUs) - depth;
         if (span >= 0) {
-            if (target < s.minStrikeUs) target = s.minStrikeUs;
+            if (target < floorUs) target = floorUs;
         } else {
-            if (target > s.minStrikeUs) target = s.minStrikeUs;
+            if (target > floorUs) target = floorUs;
         }
     }
 
