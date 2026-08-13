@@ -31,6 +31,15 @@ void sendJson(AsyncWebServerRequest* req, JsonDocument& doc, int code = 200) {
     req->send(code, "application/json", out);
 }
 
+// JSON bodies that carry a FULL profile (servo-per-fret: dozens of servos with
+// ~30 fields each) serialize to 26–45 KB for the shipped instruments — far over
+// AsyncCallbackJsonWebHandler's 16 KB default, which made every profile save /
+// activate / validate fail with HTTP 413. 128 KB gives ~3x headroom over the
+// largest shipped profile while still bounding a hostile body (the parse
+// allocates from the heap). Only the profile-carrying routes get this limit;
+// small-body routes keep the default.
+constexpr int kMaxProfileJsonBytes = 128 * 1024;
+
 // RAII guard for the shared-state lock supplied by the main loop. Held only while
 // a read-only handler samples g_profile / instrument / servos / sysex so a
 // reload in loop() is never observed half-applied.
@@ -524,6 +533,7 @@ void WebApi::registerRoutes() {
             sendJson(req, doc, queued ? 202 : 503);
         });
     putProfile->setMethod(HTTP_PUT);
+    putProfile->setMaxContentLength(kMaxProfileJsonBytes);  // full profile body
     server_->addHandler(putProfile);
 
     // ---- POST /api/pins/validate (full-profile validation) ----
@@ -535,6 +545,7 @@ void WebApi::registerRoutes() {
             sendJson(req, doc, doc["ok"] == true ? 200 : 422);
         });
     validatePins->setMethod(HTTP_POST);
+    validatePins->setMaxContentLength(kMaxProfileJsonBytes);  // full profile body
     server_->addHandler(validatePins);
 
     // ---- POST /api/profiles (save to a slot) ----
@@ -566,6 +577,7 @@ void WebApi::registerRoutes() {
             sendJson(req, doc, saved ? 200 : 500);
         });
     saveProfile->setMethod(HTTP_POST);
+    saveProfile->setMaxContentLength(kMaxProfileJsonBytes);  // body may embed a profile
     server_->addHandler(saveProfile);
 
     // ---- POST /api/profiles/load (activate a stored slot) ----
