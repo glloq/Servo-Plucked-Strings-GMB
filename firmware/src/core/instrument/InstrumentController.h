@@ -49,6 +49,12 @@ public:
     // sustain pedal (pedal-held notes keep sounding until the pedal is released).
     void allNotesOff();
 
+    // Abandon ONE note whose target turned out unplayable (e.g. a fretted target
+    // with no finger servo — a gap the allocator/selector normally prevent):
+    // release the note mapping, free the allocator and drop the target WITHOUT
+    // faulting the axis. The string stays in service for the next note.
+    void cancelNote(int stringIndex);
+
     // Take a string out of service at runtime (a servo fault, etc.): fault its
     // state machine, mark it faulted in the allocator, drop its target and any
     // active note. It can no longer be chosen automatically OR by explicit CC.

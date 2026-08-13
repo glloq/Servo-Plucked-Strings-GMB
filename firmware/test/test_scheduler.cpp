@@ -287,6 +287,163 @@ TEST(scheduler_lifts_staggered_by_governor) {
     CHECK_EQ(r.faults, 0);
 }
 
+// --- Fretted chord + governor: the finger stagger is budgeted (audit 2) -------
+
+// Three fretted strings under a strict governor (cap 1, stagger 40): the presses
+// start staggered, and the common deadline must cover that stagger so all three
+// strikes still land together — the first strings wait for the last one.
+TEST(scheduler_fretted_chord_syncs_with_governed_fingers) {
+    Rig r;
+    r.p.instrument.stringCount = 3;
+    r.p.strings.assign(3, StringConfig{});
+    uint8_t opens[3] = {40, 50, 60};
+    for (int i = 0; i < 3; ++i) {
+        r.p.strings[i].openNote = opens[i];
+        r.p.strings[i].maxFret = 1;
+        r.p.servos.push_back(pluckServo(i));  // indices 0..2
+    }
+    for (int i = 0; i < 3; ++i) {             // finger indices 3..5
+        ServoConfig f = servo("finger", i, 1500, 1900, 120, 30);
+        f.fret = 1;
+        r.p.servos.push_back(f);
+    }
+    r.p.power.maxConcurrentMoves = 1;
+    r.p.power.staggerMs = 40;
+    r.begin();
+
+    uint32_t t0 = r.nowMs;
+    r.noteOn(41);
+    r.noteOn(51);
+    r.noteOn(61);
+    uint32_t strike[3] = {0, 0, 0};
+    for (uint32_t k = 0; k < 600; ++k) {
+        r.step();
+        for (int i = 0; i < 3; ++i)
+            if (!strike[i] && r.servos.lastCommandedUs(i) != 1500) strike[i] = r.nowMs;
+    }
+    uint32_t lo = 0, hi = 0;
+    for (int i = 0; i < 3; ++i) {
+        CHECK(strike[i] != 0);
+        if (!lo || strike[i] < lo) lo = strike[i];
+        if (strike[i] > hi) hi = strike[i];
+    }
+    // Governed presses add ~2x40 ms: the last string is only ready around
+    // press-start(+80) + travel(120) + settle(30).
+    CHECK(lo >= t0 + 220);
+    CHECK(hi - lo <= 10);  // ...and the chord still lands together
+    CHECK_EQ(r.faults, 0);
+}
+
+// --- Note-Off releases go through the governor too (audit 2) ------------------
+
+// Two fretted strings released by the same chord Note Off: the finger releases
+// draw their in-rush like presses, so their starts must be staggered — they used
+// to bypass the governor and lift simultaneously.
+TEST(scheduler_noteoff_releases_staggered_by_governor) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 40; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 50; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 100, 20);  // 2
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 100, 20);  // 3
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 1;
+    r.p.power.staggerMs = 50;
+    r.begin();
+
+    r.noteOn(41);
+    r.noteOn(51);
+    r.step(600);  // chord played, strikes done, strings sustaining
+    CHECK_EQ((int)r.servos.lastCommandedUs(2), 1900);  // fingers still pressed
+    CHECK_EQ((int)r.servos.lastCommandedUs(3), 1900);
+
+    r.noteOff(41);
+    r.noteOff(51);
+    uint32_t rel[2] = {0, 0};
+    for (uint32_t k = 0; k < 300 && (!rel[0] || !rel[1]); ++k) {
+        r.step();
+        if (!rel[0] && r.servos.lastCommandedUs(2) == 1500) rel[0] = r.nowMs;
+        if (!rel[1] && r.servos.lastCommandedUs(3) == 1500) rel[1] = r.nowMs;
+    }
+    CHECK(rel[0] != 0);
+    CHECK(rel[1] != 0);
+    uint32_t first = rel[0] < rel[1] ? rel[0] : rel[1];
+    uint32_t second = rel[0] < rel[1] ? rel[1] : rel[0];
+    CHECK(second - first >= 50);  // staggered lifts, not a simultaneous in-rush
+    // Both strings still end up idle (the deferred release extends the wait).
+    r.step(300);
+    CHECK(r.instrument.string(0).state() == StringState::Idle);
+    CHECK(r.instrument.string(1).state() == StringState::Idle);
+    CHECK_EQ(r.faults, 0);
+}
+
+// --- CC-prepared notes join the chord synchronisation (audit 2) ---------------
+
+// Two strings pre-positioned by explicit CC selections, then triggered by
+// simultaneous Note Ons while one is still travelling: the ready string must
+// wait for the slower one instead of striking immediately (the prepared path
+// reuses its commandId, so the fresh-command grouping alone missed it).
+TEST(scheduler_prepared_cc_chord_lands_together) {
+    Rig r;
+    r.p.instrument.stringCount = 2;
+    r.p.strings.assign(2, StringConfig{});
+    r.p.strings[0].openNote = 60; r.p.strings[0].maxFret = 1;
+    r.p.strings[1].openNote = 55; r.p.strings[1].maxFret = 1;
+    r.p.servos.push_back(pluckServo(0));                       // 0
+    r.p.servos.push_back(pluckServo(1));                       // 1
+    ServoConfig f0 = servo("finger", 0, 1500, 1900, 60, 20);   // 2: fast finger
+    f0.fret = 1;
+    ServoConfig f1 = servo("finger", 1, 1500, 1900, 200, 30);  // 3: slow finger
+    f1.fret = 1;
+    r.p.servos.push_back(f0);
+    r.p.servos.push_back(f1);
+    r.p.power.maxConcurrentMoves = 0;
+    r.p.selector.mode = SelectionMode::Explicit;
+    r.p.selector.prepareOnCompleteSelection = true;
+    r.p.selector.selectionTimeoutMs = 2000;  // outlive the 100 ms of settling below
+    r.begin();
+
+    // Complete CC selections pre-position both strings (fret 1 each).
+    auto ccEv = [&](uint8_t num, uint8_t val) {
+        MidiEvent e;
+        e.type = static_cast<uint8_t>(MidiType::ControlChange);
+        e.channel = 0; e.data1 = num; e.data2 = val;
+        e.timestampUs = r.nowMs * 1000u;
+        r.instrument.handleEvent(e, r.nowMs * 1000u);
+    };
+    ccEv(20, 1); ccEv(21, 1);  // string 1 (index 0), fret 1 -> prepare
+    ccEv(20, 2); ccEv(21, 1);  // string 2 (index 1), fret 1 -> prepare
+    // Let the fast finger seat (60+20) while the slow one is still travelling.
+    r.step(100);
+    CHECK(r.instrument.string(0).state() == StringState::ReadyToPluck);
+    CHECK(r.instrument.string(1).state() != StringState::ReadyToPluck);
+
+    // Simultaneous Note Ons trigger both prepared strings.
+    uint32_t tOn = r.nowMs;
+    r.noteOn(61);  // 60 + fret 1
+    r.noteOn(56);  // 55 + fret 1
+    uint32_t s0 = 0, s1 = 0;
+    for (uint32_t k = 0; k < 400 && (!s0 || !s1); ++k) {
+        r.step();
+        if (!s0 && r.servos.lastCommandedUs(0) != 1500) s0 = r.nowMs;
+        if (!s1 && r.servos.lastCommandedUs(1) != 1500) s1 = r.nowMs;
+    }
+    CHECK(s0 != 0);
+    CHECK(s1 != 0);
+    // The ready string waited for the slow one's remaining travel (~130 ms).
+    CHECK(s0 >= tOn + 100);
+    int delta = (int)s0 - (int)s1;
+    if (delta < 0) delta = -delta;
+    CHECK(delta <= 10);
+    CHECK_EQ(r.faults, 0);
+}
+
 // --- Raise-to-play: the falling lift IS the mute, wait its travel (audit) -----
 
 TEST(scheduler_raise_to_play_waits_lift_travel_before_idle) {

@@ -232,6 +232,12 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 (s.activeAltUs < s.pulseMinUs || s.activeAltUs > s.pulseMaxUs))
                 err(tag + ".activeAltUs",
                     "Alternate active pulse is outside the servo's min/max range");
+            // An alternate endpoint equal to rest cannot strike: every second
+            // stroke would not move at all (audit follow-up).
+            if (s.alternateDirection && s.activeAltUs != 0 && s.activeAltUs == s.restUs)
+                err(tag + ".activeAltUs",
+                    "Alternate active pulse equals the rest pulse — every second "
+                    "stroke would not move");
             // Alternate up-stroke with no explicit endpoint uses the implicit mirror
             // 2*rest-active; if that lands outside the pulse window it would be
             // clamped to a mechanical EXTREMITY — the plectrum sweeps far past its

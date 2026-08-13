@@ -79,6 +79,10 @@ public:
     // so the scheduler can anchor the fixed execution delay to the Note-On instant
     // even when the note is triggered before it is mechanically ready.
     bool consumeTriggerEdge() { bool e = triggerEdge_; triggerEdge_ = false; return e; }
+    // Non-destructive peek at the pending trigger edge, so the scheduler's chord
+    // grouping pass can include a just-triggered PREPARED note in the common
+    // deadline before the per-string tick consumes the edge (audit follow-up).
+    bool hasTriggerEdge() const { return triggerEdge_; }
 
     // Release the note. Cancels any armed/prepared attack.
     void noteOff();

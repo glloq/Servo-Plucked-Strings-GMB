@@ -476,6 +476,9 @@ std::string buildDiagnosticsJson() {
     doc["faults"] = c.faults;
     doc["servoMoves"] = c.servoMoves;
     doc["governorThrottles"] = c.governorThrottles;
+    // Fretted notes abandoned because no finger servo drives the requested fret
+    // (the scheduler's last safety net — it no longer plays the wrong open note).
+    doc["notesDroppedNoFinger"] = g_scheduler.droppedNoFingerCount();
     JsonObject mv = doc["moveMix"].to<JsonObject>();  // P1.6 in-rush picture
     mv["deadline"] = c.deadlineMoves;                 // sound strikes (never throttled)
     mv["staggerableGranted"] = c.staggerableGrants;   // positioning starts granted

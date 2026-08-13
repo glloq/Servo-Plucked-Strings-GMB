@@ -316,6 +316,28 @@ TEST(min_strike_floor_holds_in_both_directions) {
     CHECK_EQ((int)servoStrikeTargetUs(s, 1.0, true), 1280);
 }
 
+// Asymmetric strokes: the mirrored floor is capped to EACH side's own amplitude,
+// so it can never push the servo past a calibrated endpoint — the shorter
+// alternate side saturates at activeAltUs instead of overshooting it (audit
+// follow-up: rest 1500 / active 1900 / alt 1400 with minStrike 1800 used to
+// floor the up-stroke at 1200 µs, 200 µs beyond the calibrated extremity).
+TEST(min_strike_depth_capped_to_asymmetric_stroke) {
+    ServoConfig s;
+    s.pulseMinUs = 500; s.pulseMaxUs = 2500;
+    s.restUs = 1500; s.activeUs = 1900;   // amplitude 400
+    s.activeAltUs = 1400;                 // amplitude only 100
+    s.alternateDirection = true;
+    s.minStrikeUs = 1800;                 // depth 300 (valid on the down side)
+    // Down-stroke: soft note floored to 1800 as calibrated.
+    CHECK_EQ((int)servoStrikeTargetUs(s, 0.1, false), 1800);
+    // Up-stroke: depth capped to the alt amplitude — saturates AT 1400, never past.
+    CHECK_EQ((int)servoStrikeTargetUs(s, 0.1, true), 1400);
+    CHECK_EQ((int)servoStrikeTargetUs(s, 1.0, true), 1400);
+    // A minStrikeUs calibrated past activeUs saturates at activeUs the same way.
+    s.minStrikeUs = 2100;
+    CHECK_EQ((int)servoStrikeTargetUs(s, 0.1, false), 1900);
+}
+
 // An out-of-window alternate/min pulse is rejected by validation.
 TEST(strum_alt_pulse_out_of_range_rejected) {
     Profile p = uke();
