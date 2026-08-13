@@ -175,11 +175,13 @@ is the source of truth).
 
 ```bash
 cd firmware
-./sync_web_data.sh          # copies the web interface into the LittleFS image
 pio run                     # build ESP32-S3-DevKitC-1
-pio run -t uploadfs         # upload the web interface
-pio run -t upload           # flash the firmware
+pio run -t upload           # flash the firmware (web interface included)
 ```
+
+The web interface is **embedded in the binary**: nothing else to upload.
+(Optional, to iterate on the UI without recompiling: `./sync_web_data.sh` then
+`pio run -t uploadfs` — LittleFS files override their embedded copy.)
 
 (Arduino IDE: open `firmware/firmware.ino`; the `src/` folder is compiled
 recursively. See [`docs/ARDUINO_IDE_BUILD.md`](docs/ARDUINO_IDE_BUILD.md).)

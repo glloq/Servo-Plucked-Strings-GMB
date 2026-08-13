@@ -36,6 +36,7 @@ units=(
   src/main.cpp
   src/platform/esp32/ProfileStorage.cpp
   src/platform/esp32/WebApi.cpp
+  src/platform/esp32/WebAssets.cpp
   src/platform/esp32/ServoBank.cpp
   src/platform/esp32/Net.cpp
   src/platform/esp32/MidiWifi.cpp

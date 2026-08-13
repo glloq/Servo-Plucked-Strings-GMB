@@ -13,9 +13,19 @@ public:
   String value() const { return String(""); }
 };
 
+class AsyncWebServerResponse {
+public:
+  void addHeader(const String&, const String&) {}
+};
+
 class AsyncWebServerRequest {
 public:
   void send(int, const String&, const String&) {}
+  void send(AsyncWebServerResponse*) {}
+  AsyncWebServerResponse* beginResponse(int, const String&, const uint8_t*, size_t) {
+    static AsyncWebServerResponse r;
+    return &r;
+  }
   void redirect(const String&) {}
   String url() const { return String("/"); }
   bool hasHeader(const char*) const { return false; }

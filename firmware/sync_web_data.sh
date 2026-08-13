@@ -29,3 +29,12 @@ rm -f "$dst/README.md"
 
 echo "Synced web-interface/ -> firmware/data/www"
 find "$dst" -type f | sed "s#$here/##" | sort
+
+# Also regenerate the embedded copy compiled INTO the firmware (WebAssets.cpp,
+# committed) so a plain Arduino IDE / PlatformIO firmware upload ships the same
+# UI with no separate filesystem-upload step.
+if command -v python3 >/dev/null 2>&1; then
+  python3 "$here/tools/embed_web_assets.py"
+else
+  echo "warning: python3 not found — src/platform/esp32/WebAssets.cpp NOT regenerated" >&2
+fi
