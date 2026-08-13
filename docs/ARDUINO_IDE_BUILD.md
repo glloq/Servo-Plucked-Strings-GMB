@@ -74,34 +74,50 @@ the UART/USB bridge). `Tools ▸ Board ▸ esp32 ▸ **ESP32 Dev Module**`, then
 | Option | Recommended value |
 | ------ | ----------------- |
 | Flash Size | **4MB** (typical WROOM-32 module) |
-| Partition Scheme | a scheme **with a filesystem**, e.g. *"Default 4MB with spiffs"*; if the sketch is too big, *"No OTA (2MB APP/2MB SPIFFS)"* |
+| Partition Scheme | **"No OTA (2MB APP/2MB SPIFFS)"** — required: with the embedded web UI the sketch (~1.4 MB) no longer fits the default 1.25 MB app slot |
 | CPU Frequency | 240 MHz |
 | Upload Speed | 921600 (drop to 115200 if uploads fail) |
 
 > On these boards the serial monitor uses the USB-UART bridge (115200 bauds);
 > there is no "USB CDC On Boot" option. The BOOT button is GPIO0, used for the
 > Wi-Fi hotspot fallback — see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
+>
+> Switching partition scheme relocates the LittleFS area: profiles saved under
+> the old scheme become unreadable (the device boots CONFIG_SAFE and reports
+> storage degraded). Recover with `POST /api/storage/format` from the web UI,
+> or tick "Erase All Flash Before Sketch Upload" once.
 
 ## 6. Compile and upload the firmware
 
 Click **Verify** (✓) to compile, then **Upload** (→) with the board connected
 via USB.
 
-## 7. Upload the Web interface (LittleFS)
+## 7. Web interface — nothing to do (embedded in the firmware)
 
-The interface is served from LittleFS (`/www`). It is uploaded separately:
+The web interface is **embedded in the firmware binary** (gzip-compressed,
+`src/platform/esp32/WebAssets.cpp`, generated from `web-interface/`): the
+Upload of §6 is the ONLY step — no filesystem upload, no plugin.
+
+<details>
+<summary>Optional: override the UI via LittleFS (developers)</summary>
+
+Files uploaded to LittleFS `/www` take precedence over their embedded copy, so
+you can iterate on the UI without recompiling:
 
 1. Generate the filesystem image from `web-interface/`:
    ```bash
    cd firmware
-   ./sync_web_data.sh        # copie web-interface/ -> firmware/data/www
+   ./sync_web_data.sh        # copies web-interface/ -> firmware/data/www
    ```
-   (On Windows without Bash: manually copy the contents of `web-interface/`
-   into `firmware/data/www/`.)
+   (This also regenerates the embedded `WebAssets.cpp` — commit it whenever
+   `web-interface/` changes, so plain firmware uploads stay current.)
 2. Install the **arduino-littlefs-upload** plugin
    (<https://github.com/earlephilhower/arduino-littlefs-upload>): place the
    `.vsix` in `~/.arduinoIDE/plugins/` then restart the IDE.
-3. `Ctrl/Cmd + Shift + P ▸ **Upload LittleFS to Pico/ESP8266/ESP32**`.
+3. `Ctrl/Cmd + Shift + P ▸ **Upload LittleFS to Pico/ESP8266/ESP32**`
+   (close the serial monitor first — the port must be free).
+
+</details>
 
 ## 8. First startup
 
@@ -118,7 +134,7 @@ At power-on, the ESP32 creates the Wi-Fi access point
 | -------- | ---------------- |
 | `fatal error: ArduinoJson.h: No such file or directory` | Library not installed — see §3. |
 | `ledcAttach was not declared` | ESP32 core is version 2.x — update to 3.x (§2). |
-| Empty Web interface / 404 | LittleFS image not uploaded — redo §7 after `sync_web_data.sh`. |
+| Old/stale web interface after a firmware update | A LittleFS `/www` override is shadowing the embedded UI — re-upload it (§7) or erase the flash. Firmware built before the UI was embedded also needs `WebAssets.cpp` regenerated (`./sync_web_data.sh`). |
 | `Sketch too big` / no FS | Choose a *Partition Scheme* with a filesystem (§5). |
 | The sketch does not compile the files in `src/` | Make sure you open `firmware/firmware.ino` (the `src/` must be **next to** the `.ino`). |
 | Unit tests | They do **not** compile in the Arduino IDE; use `cd firmware/test && make` (see [`ARCHITECTURE.md`](ARCHITECTURE.md)). |
