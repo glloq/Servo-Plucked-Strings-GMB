@@ -134,3 +134,29 @@ est **inerte** (`Open`) tant qu'un runtime/`DeviceConfig` (P1.13) n'appelle pas
 **whitelist d'IP** explicite (plusieurs expéditeurs autorisés) reste une extension
 possible du gate. *Non validé sur socket réel* : seule la règle d'acceptation/refus est
 testée en hôte ; le comportement réseau reste à valider au banc.
+
+## 8. Dépannage — « le hotspot n'apparaît pas »
+
+Le premier réflexe : **ouvrir le moniteur série à 115200 bauds** et redémarrer la
+carte (bouton EN/RST). Le firmware trace tout le démarrage réseau :
+
+```
+[boot] Servo-Plucked-Strings-GMB (reset: power-on)
+[boot] profile: none valid -> CONFIG_SAFE (web UI only)
+[net] hotspot "Servo-Plucked-Strings-GMB" up (open) — http://192.168.4.1/
+[boot] hold BOOT (GPIO0) ~2 s to force the Wi-Fi hotspot
+[boot] setup complete — state configSafe
+```
+
+| Symptôme (série) | Cause / solution |
+| ---------------- | ---------------- |
+| Aucune sortie série | Mauvais port/baudrate, ou le firmware n'a pas été flashé (une compilation seule ne suffit pas — faire **Upload**). |
+| La carte redémarre en boucle (`reset: brownout`) | Alimentation USB trop faible : le pic de courant Wi-Fi fait chuter le 3,3 V. Changer de câble/port USB ou alimenter en externe. |
+| `[net] softAP(...) FAILED — retrying shortly` en boucle | La radio ne monte pas ; le firmware retente toutes les ~2 s. Vérifier l'alimentation ; si ça persiste, flash complet avec effacement (« Erase All Flash Before Sketch Upload »). |
+| `[net] joining "<ssid>"...` au lieu du hotspot | Un profil **station** est stocké : l'AP de repli n'arrive qu'après 3 tentatives × 8 s (~24 s). Maintenir **BOOT ~2 s** pour forcer le hotspot tout de suite. |
+| Rien ne se passe à l'appui sur BOOT | C'est un **maintien d'environ 2 s**, pas un appui bref. Et l'appui se fait **après** le démarrage : GPIO0 maintenu bas **à la mise sous tension** fait entrer la ROM en mode flash (broche de strapping) — la carte ne démarre alors pas le firmware. |
+
+Rappels : le hotspot par défaut s'appelle **`Servo-Plucked-Strings-GMB`** (ouvert,
+sans mot de passe) ; la page de config est sur `http://192.168.4.1/`. Sur les cartes
+ESP32-WROOM-32, le bouton marqué **BOOT** (parfois « IO0 ») est bien GPIO0 ; le bouton
+**EN** est le reset.

@@ -31,21 +31,29 @@ bool Net::begin(const NetworkConfig& cfg, const std::string& stationPassword,
 void Net::startAccessPoint(bool fallback) {
     apIsFallback_ = fallback;
 #if defined(ARDUINO)
+    // Never bring the AP up with an empty SSID (a hand-edited/imported profile could
+    // carry one — softAP("") just fails): fall back to the project default so the
+    // hotspot always exists.
+    const char* ssid =
+        cfg_.apSsid.empty() ? "Servo-Plucked-Strings-GMB" : cfg_.apSsid.c_str();
     WiFi.mode(WIFI_AP);
+    delay(100);  // let the AP netif start before softAP() (classic-ESP32 flakiness)
     // WPA2 when a password (>= 8 chars) is set, otherwise an open AP. Honour the
     // softAP() return: a failed AP must NOT be reported as connected.
-    bool ok = (apPassword_.size() >= 8)
-                  ? WiFi.softAP(cfg_.apSsid.c_str(), apPassword_.c_str())
-                  : WiFi.softAP(cfg_.apSsid.c_str());
+    bool ok = (apPassword_.size() >= 8) ? WiFi.softAP(ssid, apPassword_.c_str())
+                                        : WiFi.softAP(ssid);
     if (ok) {
         ip_ = WiFi.softAPIP().toString().c_str();
         apActive_ = true;
         connected_ = true;
         startCaptivePortal();  // any joined client is taken straight to the page
+        Serial.printf("[net] hotspot \"%s\" up (%s) — http://%s/\n", ssid,
+                      apPassword_.size() >= 8 ? "WPA2" : "open", ip_.c_str());
     } else {
         ip_ = "";
         apActive_ = false;
         connected_ = false;  // AP creation failed — not usable
+        Serial.printf("[net] softAP(\"%s\") FAILED — retrying shortly\n", ssid);
     }
 #else
     ip_ = "192.168.4.1";
@@ -90,6 +98,8 @@ void Net::beginStationAttempt(uint32_t nowMs) {
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(cfg_.hostname.c_str());
     WiFi.begin(cfg_.ssid.c_str(), password_.c_str());  // returns immediately
+    Serial.printf("[net] joining \"%s\" as \"%s\"...\n", cfg_.ssid.c_str(),
+                  cfg_.hostname.c_str());
 #endif
 }
 
@@ -101,11 +111,14 @@ bool Net::pollStation(uint32_t nowMs) {
         connecting_ = false;
         failures_ = 0;
         if (!cfg_.hostname.empty()) MDNS.begin(cfg_.hostname.c_str());
+        Serial.printf("[net] station connected — http://%s/ (http://%s.local/)\n",
+                      ip_.c_str(), cfg_.hostname.c_str());
         return true;
     }
     // Still trying; give up on this attempt after 8 s (no blocking wait).
     if (nowMs - attemptStartMs_ > 8000) {
         connecting_ = false;
+        Serial.printf("[net] station attempt timed out (%d/3)\n", failures_ + 1);
         if (++failures_ >= 3) {
             startAccessPoint(true);  // fall back to AP (spec §8.1)
             lastStationRetryMs_ = nowMs;
@@ -147,6 +160,20 @@ void Net::tick(uint32_t nowMs) {
     // as the retry clock here; the station-retry branch above is gated off by
     // apForced_, so there is no conflict.)
     if (apForced_) {
+        if (nowMs - lastStationRetryMs_ >= 2000) {
+            lastStationRetryMs_ = nowMs;
+            startAccessPoint(false);
+        }
+        return;
+    }
+
+    // AP-primary profile (AccessPoint mode, or Station with no SSID configured):
+    // reaching here means the softAP failed to come up. Keep retrying the AP
+    // (throttled) — NEVER attempt the station: WiFi.begin() with an empty SSID just
+    // thrashes the radio and leaves the instrument unreachable. (As in the apForced_
+    // branch above, lastStationRetryMs_ doubles as the AP retry clock; the station
+    // branches below are only reachable with a real station config.)
+    if (cfg_.mode != NetworkMode::Station || cfg_.ssid.empty()) {
         if (nowMs - lastStationRetryMs_ >= 2000) {
             lastStationRetryMs_ = nowMs;
             startAccessPoint(false);

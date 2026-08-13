@@ -78,8 +78,10 @@ inline void ledcDetachPin(int) {}
 
 struct SerialStub {
   void begin(unsigned long) {}
+  void println() {}
   template <typename T> void println(T) {}
   template <typename T> void print(T) {}
+  template <typename... Args> void printf(const char*, Args...) {}
 };
 static SerialStub Serial;
 

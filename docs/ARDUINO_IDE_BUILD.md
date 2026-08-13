@@ -66,6 +66,22 @@ The IDE opens the sketch and shows `firmware.ino` as well as the `src/` tree.
 > (strapping), 48 (LED), 26–32 & 35–37 (Flash/PSRAM). The firmware and the Web
 > interface exclude them automatically — see [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
 
+### Classic ESP32 (WROOM-32 / DevKit v1)
+
+The same sketch also runs on classic ESP32 boards (no native USB — serial is on
+the UART/USB bridge). `Tools ▸ Board ▸ esp32 ▸ **ESP32 Dev Module**`, then set:
+
+| Option | Recommended value |
+| ------ | ----------------- |
+| Flash Size | **4MB** (typical WROOM-32 module) |
+| Partition Scheme | a scheme **with a filesystem**, e.g. *"Default 4MB with spiffs"*; if the sketch is too big, *"No OTA (2MB APP/2MB SPIFFS)"* |
+| CPU Frequency | 240 MHz |
+| Upload Speed | 921600 (drop to 115200 if uploads fail) |
+
+> On these boards the serial monitor uses the USB-UART bridge (115200 bauds);
+> there is no "USB CDC On Boot" option. The BOOT button is GPIO0, used for the
+> Wi-Fi hotspot fallback — see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md).
+
 ## 6. Compile and upload the firmware
 
 Click **Verify** (✓) to compile, then **Upload** (→) with the board connected
