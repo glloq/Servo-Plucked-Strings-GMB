@@ -33,7 +33,7 @@ diagnostic tools live in the gear modal.
 | ----- | ----- | ------- |
 | 1 | **Instrument** | Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), name it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the **Board** — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB reserve. A preset produces a working instrument and the wiring is (re)generated automatically; the mechanics live per-servo on the Frets / Plucking steps |
 | 2 | **Frets** | the **finger servos**, per string (string-tab strip). A clickable **coverage strip** shows which frets carry a servo (geared marked ⚙); **tap a fret** to open its **servo div** — a **"One servo drives 2 frets (geared)"** toggle, its **PCA board + pin**, the **angle(s)** set with precise **− / + steppers** (a geared servo shows both press angles; its rest sits at their midpoint automatically), and the **rotation direction**. Every change drives the servo live; **play the note** to check. An open-only string shows a one-click *Equip frets*. A **test bench** sweeps one string or all strings |
-| 3 | **Plucking** | one **sounding servo** per string: its **PCA board + pin**, the **contact angle** (plectrum against the string) and the **strum angle** (how far it sweeps, e.g. 20°) — the servo **always alternates** its stroke, so there are no direction options. Plus the **second way to strum**: an optional **descent servo** that lowers the plectrum onto the string only while it plays (its own PCA/pin + raised / lowered angles). A **test bench** plucks every open string and sweeps the strum servos |
+| 3 | **Plucking** | one **sounding servo** per string: its **PCA board + pin**, the **contact / down-stroke / up-stroke angles**, per-plectrum **alternation** and **rotation direction**, travel/settle, the **mute** policy (source, hold, plectrum mute angle) and the global **gesture** (stroke duration, minimum strike depth). Plus the optional per-string extras: a **descent servo** (rest/play angles, direction, travel, engage delay, lower- or raise-to-play) and a **damper servo** (rest/damp angles, direction, travel). A **test bench** plucks every open string and sweeps the strum servos |
 | 4 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On. The live MIDI monitor + tester stay in the gear modal (Advanced) |
 | 5 | **Timing** | two cards. **Timing** — the two global delays: the **action delay** (fixed-time FIFO buffer) and the **fret → strum delay**, plus the strum lead. **Current management** — an **optional** governor (a toggle turns it off): cap how many servos start moving at once **whole-instrument** and **per PCA board** (each 0 = no cap), plus the stagger between starts |
 | 6 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); a full-instrument **test bench**; STOP (panic) |
@@ -116,8 +116,9 @@ board + pin, the angle(s) on precise − / + steppers, and the rotation directio
 geared servo shows both press angles; its rest is their midpoint):
 <p align="center"><img src="../img/screenshots/calibration.png" alt="Setup — Frets" width="100%"/></p>
 
-**Plucking** — one sounding servo per string: PCA board + pin, contact angle + strum
-angle (always alternating), and an optional descent servo (the second way to strum):
+**Plucking** — one sounding servo per string: PCA board + pin, contact / down-stroke /
+up-stroke angles with per-plectrum alternation and direction, the mute policy and
+angle, plus optional descent and damper servos:
 <p align="center"><img src="../img/screenshots/calibration-plucking.png" alt="Setup — Plucking" width="100%"/></p>
 
 **MIDI** — channel, omni, velocity, enable string/fret selection + GMB preset:

@@ -147,11 +147,14 @@ step. Both carry an **Arm** control and a **test bench**.
   the note** checks it (`POST /api/test/note`).
 
 - **Plucking step — the sounding servo.** Per string, one **pluck/strum** servo: its
-  **PCA board + pin**, a **contact angle** and a **strum angle** (it always alternates
-  down/up = contact ± strum). Optionally add a **descent servo** (`strumLift`) — the
-  second way to strum — that lowers the plectrum onto the string only while it plays,
-  with its own PCA/pin + raised / lowered angles. Test → contact / down-stroke /
-  up-stroke and **pluck the open string**.
+  **PCA board + pin**, the **contact**, **down-stroke** and **up-stroke** angles,
+  per-plectrum **alternation** and **rotation direction**, travel/settle, plus the
+  **mute** policy (source / hold / plectrum mute angle) and the global gesture
+  (stroke duration, minimum strike depth). Optionally add a **descent servo**
+  (`strumLift`) — rest/play angles, direction, travel, engage delay, lower- or
+  raise-to-play — and a **damper servo** (rest/damp angles, direction, travel).
+  Test every position live (→ contact / down / up / mute) and **pluck the open
+  string**.
 
 Each servo carries a signal **source** in the profile (the simplified editors assign
 a **PCA board + pin**; direct-GPIO servos remain valid in the data model and the

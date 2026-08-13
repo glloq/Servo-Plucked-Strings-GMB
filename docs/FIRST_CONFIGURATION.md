@@ -95,23 +95,31 @@ string, or of all strings, in one click. See [`CALIBRATION.md`](CALIBRATION.md).
 ## 4. Step 3 — Plucking (grattage)
 
 This step sets up the **sounding servo** — the part that plucks the string. There is
-**one per string**; set just two angles:
+**one per string**; calibrate its positions directly:
 
 * the **contact angle** — the plectrum resting against the string;
-* the **strum angle** — how far it sweeps to each side of contact (e.g. 20°).
+* the **down-stroke angle** — the stroke end on one side of contact;
+* the **up-stroke angle** — the stroke end on the other side, shown when
+  **Alternate stroke direction** is enabled (successive notes then sweep
+  down/up). Alternation is a per-plectrum choice, never forced;
+* **Reverse rotation direction** mirrors the output for a mirrored mounting;
+* **Travel** and **Settle** set the servo's motion timing.
 
-The servo **always alternates** its stroke direction (down = contact + strum, up =
-contact − strum), so there are no direction options. Pick the servo's **PCA board +
-pin**, then — the **second way to strum** — optionally **add a descent servo**: a
-second servo that lowers the plectrum onto the string only while the string plays
-(its own PCA/pin plus a raised and a lowered angle).
+A **Mute** card configures Note-Off damping: the global mute source (auto /
+plectrum / damper / descent servo / none), the **mute hold** time, and — when the
+plectrum itself damps — its **mute angle** against the string. The **Gesture**
+card sets the global **stroke duration** and **minimum strike depth** shared by
+every string. Pick the servo's **PCA board + pin**, then optionally add a
+**descent servo** (`strumLift`, with rest/play angles, direction, travel, engage
+delay and the lower-to-play / raise-to-play engagement) and a **damper servo**
+(rest/damp angles, direction, travel).
 
-By default the sounding servo sits on its string's PCA9685 board. Each control has a
-live test (→ contact / → down-stroke / → up-stroke, ▶ Pluck open), and a **test
-bench** plucks every open string and sweeps the strum servos. Every string needs a
-sounding servo (the validation step flags a string that has none). The two global
-delays — the **action delay** (a fixed-time FIFO buffer) and the **fret → strum
-delay** — are set once on the **Timing** step, not here.
+By default the sounding servo sits on its string's PCA9685 board. Each position has a
+live test (→ contact / → down-stroke / → up-stroke / → mute, ▶ Pluck open), and a
+**test bench** plucks every open string and sweeps the strum servos. Every string
+needs a sounding servo (the validation step flags a string that has none). The two
+global delays — the **action delay** (a fixed-time FIFO buffer) and the **fret →
+strum delay** — are set once on the **Timing** step, not here.
 
 ---
 
