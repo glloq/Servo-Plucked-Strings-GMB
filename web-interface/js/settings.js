@@ -21,10 +21,19 @@
 
   var overlay = null;
   var activeTab = 'network';
-  var wifi = { stationPassword: '', apPassword: '', forgetStation: false, openNetwork: false };
+  // openNetwork/pickedSsid: the "no password needed" state is only trusted while
+  // the SSID field still holds the exact network picked from the scan — a manual
+  // edit falls back to "unknown security" and shows the password field again.
+  var wifi = { stationPassword: '', apPassword: '', forgetStation: false,
+               forgetAp: false, openNetwork: false, pickedSsid: '' };
   // Wi-Fi scan state: null until a scan ran; { scanning, networks } afterwards.
   var scan = null;
   var scanPollTimer = null;
+
+  function openNetworkSelected() {
+    var net = GMB.state.profile && GMB.state.profile.network;
+    return wifi.openNetwork && net && net.ssid === wifi.pickedSsid;
+  }
 
   var TABS = [
     { id: 'network',  label: 'Network' },
@@ -128,6 +137,7 @@
     var net = GMB.state.profile.network;
     net.mode = 'station';
     net.ssid = entry.ssid;
+    wifi.pickedSsid = entry.ssid;
     wifi.openNetwork = !entry.secure;
     if (wifi.openNetwork) wifi.stationPassword = '';  // open: no password to send
     GMB.markDirty();
@@ -166,7 +176,15 @@
         onChange: drawTab
       })),
       GMB.field('Access-point SSID', GMB.input(net, 'apSsid')),
-      net.mode === 'station' ? GMB.field('Station SSID', GMB.input(net, 'ssid')) : null,
+      net.mode === 'station'
+        ? GMB.field('Station SSID', GMB.input(net, 'ssid', {
+            // A hand-edited SSID is no longer the scanned (possibly open) network:
+            // security becomes unknown again, so the password field comes back.
+            onChange: function () {
+              if (net.ssid !== wifi.pickedSsid) { wifi.openNetwork = false; drawTab(); }
+            }
+          }))
+        : null,
       GMB.field('Hostname', GMB.input(net, 'hostname'))
     ]), 'Stored on the device itself (not in the instrument profile), so it survives ' +
         'reboots and profile changes. “Save & publish” applies it immediately; if the ' +
@@ -183,7 +201,7 @@
 
     var credKids = [];
     if (net.mode === 'station') {
-      if (wifi.openNetwork) {
+      if (openNetworkSelected()) {
         credKids.push(h('p.muted', '“' + (net.ssid || '') + '” is an open network — no password needed.'));
       } else {
         credKids.push(GMB.field('Station password', GMB.input(wifi, 'stationPassword', { type: 'password' })));
@@ -193,10 +211,21 @@
       credKids.push(h('label.inline.builder-opt', [forget,
         h('span', 'Forget the stored station password')]));
     }
-    credKids.push(GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' })));
+    if (!wifi.forgetAp) {
+      credKids.push(GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' }),
+        '8–63 characters (WPA2)'));
+    }
+    var forgetAp = h('input', { type: 'checkbox', checked: !!wifi.forgetAp });
+    forgetAp.addEventListener('change', function () {
+      wifi.forgetAp = forgetAp.checked;
+      if (wifi.forgetAp) wifi.apPassword = '';
+      drawTab();
+    });
+    credKids.push(h('label.inline.builder-opt', [forgetAp,
+      h('span', 'Remove the hotspot password (OPEN access point)')]));
     host.appendChild(section('Wi-Fi credentials', h('div.form-grid', credKids),
       'Write-only — never displayed or exported. Leave blank to keep unchanged; use ' +
-      '“Forget” (or pick an open network) to really erase a stored password.'));
+      '“Forget” / “Remove” (or pick an open network) to really erase a stored password.'));
 
     host.appendChild(section('Hotspot', h('div.toolbar', [
       GMB.button('Start hotspot now', startHotspot, 'ghost')
@@ -255,6 +284,13 @@
     // copy for export/display). apply:true reconnects right away, with the usual
     // hotspot fallback if the new settings fail.
     var net = GMB.state.profile.network;
+    // WPA2 needs 8..63 chars — anything shorter would silently start an OPEN
+    // hotspot, so refuse it here too (the API also answers 422).
+    if (wifi.apPassword && (wifi.apPassword.length < 8 || wifi.apPassword.length > 63)) {
+      GMB.toast('Hotspot password must be 8–63 characters (WPA2) — or use ' +
+                '“Remove the hotspot password” for an open access point.', 'error');
+      return;
+    }
     var payload = {
       mode: net.mode,
       ssid: net.ssid || '',
@@ -264,12 +300,14 @@
     };
     if (wifi.stationPassword) payload.stationPassword = wifi.stationPassword;
     if (wifi.apPassword) payload.apPassword = wifi.apPassword;
-    if (wifi.forgetStation || (wifi.openNetwork && !wifi.stationPassword))
+    if (wifi.forgetStation || (openNetworkSelected() && !wifi.stationPassword))
       payload.clearStationPassword = true;
+    if (wifi.forgetAp) payload.clearApPassword = true;
     var switching = net.mode === 'station';
     GMB.api.setWifi(payload)
       .then(function (r) {
-        wifi.stationPassword = ''; wifi.apPassword = ''; wifi.forgetStation = false;
+        wifi.stationPassword = ''; wifi.apPassword = '';
+        wifi.forgetStation = false; wifi.forgetAp = false;
         GMB.toast((r && r.note) ? ('Network settings ' + r.note) :
           'Network settings stored on the device.', 'ok');
         if (switching)

@@ -149,6 +149,21 @@ TEST(validator_rejects_alternate_mirror_out_of_window) {
     CHECK(ProfileValidator::isActivatable(p));
 }
 
+// An alternate endpoint equal to rest cannot strike: every second stroke would
+// not move at all (audit follow-up).
+TEST(validator_rejects_alternate_endpoint_equal_to_rest) {
+    Profile p = uke();
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) {
+            s.alternateDirection = true;
+            s.activeAltUs = s.restUs;  // the dead up-stroke
+        }
+    CHECK(!ProfileValidator::isActivatable(p));
+    for (auto& s : p.servos)
+        if (s.function == "pluck" && s.stringIndex == 0) s.activeAltUs = 700;
+    CHECK(ProfileValidator::isActivatable(p));
+}
+
 // The runtime resolves per-string roles by FIRST match, so a duplicate actuator —
 // or a pluck AND a strum on the same string — leaves one servo silently unused.
 // The validator now blocks these (audit: unique actuators per string).

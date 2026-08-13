@@ -740,6 +740,26 @@ void WebApi::registerRoutes() {
             w.apPassword = body["apPassword"] | "";
             w.clearApPassword = body["clearApPassword"] | false;
             w.apply = body["apply"] | false;
+            // WPA2-PSK requires 8..63 characters; the radio silently starts an OPEN
+            // hotspot for anything shorter. Refuse instead of letting the user
+            // believe a 1-7 char "password" protects anything (audit follow-up).
+            // Empty = keep the stored secret; clearApPassword = deliberately open.
+            if (w.hasApPassword &&
+                (w.apPassword.size() < 8 || w.apPassword.size() > 63)) {
+                doc["ok"] = false;
+                doc["error"] =
+                    "apPassword must be 8-63 characters (WPA2); leave empty to keep "
+                    "the stored one, or set clearApPassword for an open hotspot";
+                sendJson(req, doc, 422);
+                return;
+            }
+            // Same upper bound for the station secret (WPA2-PSK passphrase limit).
+            if (w.hasStationPassword && w.stationPassword.size() > 63) {
+                doc["ok"] = false;
+                doc["error"] = "stationPassword exceeds the 63-character WPA2 limit";
+                sendJson(req, doc, 422);
+                return;
+            }
             ctx_.onSetNetwork(w);
             doc["ok"] = true;
             doc["note"] = w.apply ? "stored; applying (hotspot fallback on failure)"

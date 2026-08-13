@@ -41,6 +41,7 @@ struct StringSched {
     int strikeIndex = -1;        // striker to fire once the lift has lowered
     int muteIndex = -1;          // plectrum/lift held against the string to damp (Note Off)
     int pendingDamper = -1;      // Note-Off damper awaiting a governor permit (P1.6), or -1
+    int pendingFingerRelease = -1;  // finger lift awaiting a governor permit, or -1
     uint32_t executeAtMs = 0;    // earliest time the note may sound (fixed delay)
     uint32_t readyAtMs = 0;      // when the string became Ready (anchors fretToPluckMs)
     bool executeAnchored = false;
@@ -82,55 +83,81 @@ public:
 
     // Chord synchronisation (audit): call ONCE per loop pass, BEFORE the per-string
     // tick()s. A chord flushed by the InstrumentController lands as several fresh
-    // targets in the same pass; when two or more arrive together, give them a COMMON
-    // strike deadline that covers the SLOWEST string's estimated mechanical
-    // preparation (damper wait + finger release/press travel + settle + the global
-    // fret->pluck delay) as well as the fixed noteExecutionDelayMs floor. Each
-    // string still waits for its own REAL mechanics via the Ready-phase max(), so an
-    // under-estimate degrades gracefully; the shared deadline is what makes the
-    // chord's strings strike together instead of each as soon as it is ready.
-    // A single fresh note keeps the plain fixed-delay anchor (no estimated padding).
+    // targets in the same pass — and a chord of CC-PREPARED notes lands as several
+    // trigger edges (same commandId, so a fresh-command test alone would miss them,
+    // audit follow-up). When two or more arrive together, give them a COMMON strike
+    // deadline that covers the SLOWEST member's estimated mechanical preparation
+    // (damper wait + finger release/press travel + settle + the global fret->pluck
+    // delay — or the REMAINING preparation of an already-moving prepared string),
+    // the governor's stagger of the chord's finger releases/presses and lift
+    // engages, and the fixed noteExecutionDelayMs floor. Each string still waits
+    // for its own REAL mechanics via the Ready-phase max(), so an under-estimate
+    // degrades gracefully; the shared deadline is what makes the chord's strings
+    // strike together instead of each as soon as it is ready.
+    // A single member keeps the plain fixed-delay anchor (no estimated padding).
     void prepareTick(uint32_t nowMs) {
         if (!instrument_ || !profile_) return;
         const Profile& p = *profile_;
-        struct FreshTarget { size_t i; uint32_t byDelay; uint32_t prepMs; uint32_t liftMs; };
-        std::vector<FreshTarget> fresh;
+        struct Member { size_t i; uint32_t byDelay; uint32_t prepMs; uint32_t liftMs; };
+        std::vector<Member> members;
         int liftCount = 0;
+        int fingerStarts = 0;  // governed finger moves (releases + presses) in the batch
         for (size_t i = 0; i < sched_.size(); ++i) {
             const StringTarget& tgt = instrument_->target(i);
-            if (!tgt.active || sched_[i].commandId == tgt.commandId) {
+            bool freshCmd = tgt.active && sched_[i].commandId != tgt.commandId;
+            bool triggered =
+                tgt.active && !freshCmd && instrument_->string(i).hasTriggerEdge();
+            if (!freshCmd && !triggered) {
                 if (i < pendingExecuteAt_.size()) pendingExecuteAt_[i] = 0;
                 continue;
             }
-            uint32_t anchorMs = nowMs - tgt.queuedMs;  // Note-On reception time
-            FreshTarget f;
-            f.i = i;
-            f.byDelay = anchorMs + p.midi.noteExecutionDelayMs;
-            f.prepMs = estimatePrepMs(i, tgt.fret) + p.pluck.fretToPluckMs;
-            f.liftMs = liftPrepMs(i);
-            if (f.liftMs) ++liftCount;
-            fresh.push_back(f);
+            Member m;
+            m.i = i;
+            if (freshCmd) {
+                // Anchor at the Note-On reception (minus the chord-buffer age).
+                m.byDelay = (nowMs - tgt.queuedMs) + p.midi.noteExecutionDelayMs;
+                m.prepMs = estimatePrepMs(i, tgt.fret) + p.pluck.fretToPluckMs;
+                int prev = i < currentFinger_.size() ? currentFinger_[i] : -1;
+                if (prev < 0) prev = sched_[i].pendingFingerRelease;
+                int nxt = servos_->fingerIndexForFret(static_cast<int>(i), tgt.fret);
+                if (prev >= 0 && prev != nxt) ++fingerStarts;  // governed release
+                if (nxt >= 0) ++fingerStarts;                  // governed press
+            } else {
+                // A prepared note triggered NOW: its Note On is this instant, and
+                // only the REMAINING part of its move still has to happen.
+                m.byDelay = nowMs + p.midi.noteExecutionDelayMs;
+                m.prepMs = remainingPrepMs(i, tgt.fret, nowMs) + p.pluck.fretToPluckMs;
+            }
+            m.liftMs = liftPrepMs(i);
+            if (m.liftMs) ++liftCount;
+            members.push_back(m);
         }
-        if (fresh.empty()) return;
-        // The governor staggers the chord's lift engages: the LAST lift starts up
-        // to (liftCount-1) x staggerMs after the first, so the common deadline must
-        // leave that headroom or the late lifts miss the beat.
-        uint32_t staggerBudget =
-            liftCount > 1 ? static_cast<uint32_t>(liftCount - 1) * p.power.staggerMs : 0;
+        if (members.empty()) return;
+        // The governor staggers the chord's governed starts: the LAST lift (or
+        // finger move) begins up to (count-1)/cap x staggerMs after the first, so
+        // the common deadline must leave that headroom or the late strings simply
+        // miss the beat (audit follow-up: the finger stagger was not budgeted).
+        uint8_t cap = p.power.maxConcurrentMoves ? p.power.maxConcurrentMoves
+                                                 : p.power.maxConcurrentPerBoard;
+        bool governed = cap != 0 && p.power.staggerMs != 0;
+        uint32_t liftBudget = (governed && liftCount > 1)
+            ? (static_cast<uint32_t>(liftCount - 1) / cap) * p.power.staggerMs : 0;
+        uint32_t fingerBudget = (governed && fingerStarts > 1)
+            ? (static_cast<uint32_t>(fingerStarts - 1) / cap) * p.power.staggerMs : 0;
         uint32_t deadline = 0;
         bool first = true;
-        for (const FreshTarget& f : fresh) {
-            uint32_t mech = f.prepMs;
-            uint32_t lift = f.liftMs ? f.liftMs + staggerBudget : 0;
+        for (const Member& m : members) {
+            uint32_t mech = m.prepMs + fingerBudget;
+            uint32_t lift = m.liftMs ? m.liftMs + liftBudget : 0;
             if (lift > mech) mech = lift;  // lift lowers in parallel with the finger
             uint32_t byMech = nowMs + mech;
-            uint32_t want = static_cast<int32_t>(byMech - f.byDelay) > 0 ? byMech : f.byDelay;
+            uint32_t want = static_cast<int32_t>(byMech - m.byDelay) > 0 ? byMech : m.byDelay;
             if (first || static_cast<int32_t>(want - deadline) > 0) deadline = want;
             first = false;
         }
-        for (const FreshTarget& f : fresh) {
+        for (const Member& m : members) {
             // Solo notes keep the un-padded fixed-delay anchor (handled in tick).
-            pendingExecuteAt_[f.i] = fresh.size() >= 2 ? deadline : 0;
+            pendingExecuteAt_[m.i] = members.size() >= 2 ? deadline : 0;
         }
     }
 
@@ -152,9 +179,14 @@ public:
     // Advance one string's mechanical sequence by one tick.
     void tick(size_t i, uint32_t nowMs) { tickString(i, nowMs); }
 
+    // Notes abandoned because a fretted target had no finger servo (the safety net
+    // that used to play the WRONG open note instead — audit follow-up). Diagnostics.
+    uint32_t droppedNoFingerCount() const { return droppedNoFinger_; }
+
 private:
-    // Lift the finger currently pressed on a string (if any). Returns its travel time
-    // so the caller can wait for it to physically lift before pressing the next one.
+    // Lift the finger currently pressed on a string (if any) IMMEDIATELY, bypassing
+    // the governor — the fault/abort path only (safety must never wait for a start
+    // permit). Returns its travel time.
     uint16_t releaseCurrentFinger(size_t i) {
         ServoBank& g_servos = *servos_;
         std::vector<int>& g_currentFinger = currentFinger_;
@@ -164,6 +196,44 @@ private:
         g_servos.release(fi);
         g_currentFinger[i] = -1;
         return g_servos.travelMs(fi);
+    }
+
+    // Start (or queue) the release of the pressed finger THROUGH the governor: a
+    // release draws its in-rush like a press, so a chord's simultaneous Note Offs
+    // must be staggered too (audit follow-up — releases used to bypass the cap).
+    // Returns the travel budget; when the permit is denied the release is parked in
+    // sch.pendingFingerRelease and the retry path extends the wait when it starts.
+    uint16_t startGovernedRelease(size_t i, StringSched& sch, uint32_t nowMs) {
+        ServoBank& g_servos = *servos_;
+        ActuatorManager& g_actuators = *actuators_;
+        if (i >= currentFinger_.size()) return 0;
+        int fi = currentFinger_[i];
+        if (fi < 0) return 0;
+        currentFinger_[i] = -1;
+        if (g_actuators.requestMove(MoveClass::Staggerable, nowMs, g_servos.board(fi))) {
+            g_servos.release(fi);
+        } else {
+            sch.pendingFingerRelease = fi;  // retried each tick; wait extended then
+        }
+        return g_servos.travelMs(fi);
+    }
+
+    // Retry a governor-deferred finger release. Returns true the moment no release
+    // is pending (started now or none queued); extends `waitMs` so the caller never
+    // declares the finger lifted before it has actually travelled.
+    bool serviceFingerRelease(StringSched& sch, uint32_t nowMs, uint16_t& waitMs) {
+        if (sch.pendingFingerRelease < 0) return true;
+        ServoBank& g_servos = *servos_;
+        ActuatorManager& g_actuators = *actuators_;
+        if (!g_actuators.requestMove(MoveClass::Staggerable, nowMs,
+                                     g_servos.board(sch.pendingFingerRelease)))
+            return false;
+        g_servos.release(sch.pendingFingerRelease);
+        uint32_t doneMs = (nowMs - sch.phaseStartMs) +
+                          g_servos.travelMs(sch.pendingFingerRelease);
+        if (doneMs > waitMs) waitMs = static_cast<uint16_t>(doneMs > 0xFFFF ? 0xFFFF : doneMs);
+        sch.pendingFingerRelease = -1;
+        return true;
     }
 
     // The per-string striker: the plectrum ('pluck') if present, otherwise the
@@ -190,6 +260,7 @@ private:
                 prep += static_cast<uint32_t>(b.strikeDurationMs(di)) + b.settleMs(di);
         }
         int prev = i < currentFinger_.size() ? currentFinger_[i] : -1;
+        if (prev < 0) prev = sch.pendingFingerRelease;  // release queued, not yet begun
         int nxt = b.fingerIndexForFret(static_cast<int>(i), fret);
         bool sweep = prev >= 0 && nxt == prev;
         if (!sweep && prev >= 0) prep += b.travelMs(prev);  // lift the previous finger
@@ -198,6 +269,31 @@ private:
             prep += b.settleMs(nxt);
         }
         return prep;
+    }
+
+    // REMAINING mechanical preparation of a string already mid-flight — a
+    // CC-prepared note being triggered by its Note On: what is left of the current
+    // FSM phase plus the phases still ahead. Powers the chord grouping of prepared
+    // notes in prepareTick() (audit follow-up).
+    uint32_t remainingPrepMs(size_t i, int fret, uint32_t nowMs) const {
+        const ServoBank& b = *servos_;
+        const StringSched& sch = sched_[i];
+        uint32_t elapsed = nowMs - sch.phaseStartMs;
+        auto left = [&](uint32_t budget) { return budget > elapsed ? budget - elapsed : 0u; };
+        int nxt = b.fingerIndexForFret(static_cast<int>(i), fret);
+        uint32_t press = nxt >= 0 ? b.travelMs(nxt) : 0;
+        uint32_t settle = nxt >= 0 ? b.settleMs(nxt) : 0;
+        switch (sch.phase) {
+            case StringSched::ReleasingFinger:
+                return left(sch.releaseWaitMs) + press + settle;
+            case StringSched::PressingFinger:
+                if (!sch.fingerPressStarted) return press + settle;  // press not begun
+                return left(sch.fingerMoveMs) + settle;
+            case StringSched::Settling:
+                return left(sch.fingerIndex >= 0 ? b.settleMs(sch.fingerIndex) : 0);
+            default:
+                return 0;  // Ready (or beyond): mechanically in place
+        }
     }
 
     // Time a string's strum lift needs to be engaged before its strike (0 when the
@@ -239,11 +335,12 @@ private:
         if (!tgt.active) {
             if (sch.phase == StringSched::Idle) return;
             if (sch.phase != StringSched::WaitStopped) {
-                // Note released / cancelled: lift the finger, then damp per the global
-                // mute policy resolved against what this string actually has wired — a
-                // damper servo, the plectrum's own mute angle (rest against the string,
-                // no dedicated damper), the strum lift, or nothing.
-                sch.releaseWaitMs = releaseCurrentFinger(i);
+                // Note released / cancelled: lift the finger (governed — a chord's
+                // simultaneous Note Offs release many fingers at once), then damp per
+                // the global mute policy resolved against what this string actually
+                // has wired — a damper servo, the plectrum's own mute angle (rest
+                // against the string, no dedicated damper), the strum lift, or nothing.
+                sch.releaseWaitMs = startGovernedRelease(i, sch, nowMs);
                 if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
                 sch.liftStarted = false;
                 sch.muteIndex = -1;
@@ -326,9 +423,14 @@ private:
                 if (doneMs > sch.releaseWaitMs) sch.releaseWaitMs = doneMs;
                 sch.pendingDamper = -1;
             }
+            // A governor-deferred finger release: keep retrying until it starts, and
+            // stretch the wait so the string is not declared idle before the finger
+            // has physically lifted.
+            serviceFingerRelease(sch, nowMs, sch.releaseWaitMs);
             // Declare idle once the finger has lifted, any held mute has released, AND
-            // no damper is still waiting for its permit.
-            if (sch.pendingDamper < 0 && nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
+            // no damper or finger release is still waiting for its permit.
+            if (sch.pendingDamper < 0 && sch.pendingFingerRelease < 0 &&
+                nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
                 if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
                 sc.dampingDone();
                 sch.phase = StringSched::Idle;
@@ -383,19 +485,35 @@ private:
             int prevFinger = i < g_currentFinger.size() ? g_currentFinger[i] : -1;
             int targetFinger = g_servos.fingerIndexForFret(static_cast<int>(i), tgt.fret);
             sch.fingerSweep = (prevFinger >= 0 && targetFinger == prevFinger);
-            sch.releaseWaitMs = sch.fingerSweep ? 0 : releaseCurrentFinger(i);
+            sch.releaseWaitMs = sch.fingerSweep ? 0 : startGovernedRelease(i, sch, nowMs);
+            // A release still pending from the PREVIOUS note (its permit never came)
+            // carries over: the ReleasingFinger phase below keeps retrying it and
+            // will not press the new finger before the old one has lifted.
+            if (sch.pendingFingerRelease >= 0 &&
+                g_servos.travelMs(sch.pendingFingerRelease) > sch.releaseWaitMs)
+                sch.releaseWaitMs = g_servos.travelMs(sch.pendingFingerRelease);
             sch.phase = StringSched::ReleasingFinger;
             sch.phaseStartMs = nowMs;
         }
 
         // A prepared (anticipated) note is "received" when its Note On triggers it.
+        // When prepareTick() grouped this trigger with others into a common chord
+        // deadline, use it — a chord of prepared notes must land together too.
         if (!sch.executeAnchored && sc.consumeTriggerEdge()) {
-            sch.executeAtMs = nowMs + g_profile.midi.noteExecutionDelayMs;
+            uint32_t at = nowMs + g_profile.midi.noteExecutionDelayMs;
+            if (i < pendingExecuteAt_.size() && pendingExecuteAt_[i] != 0) {
+                at = pendingExecuteAt_[i];
+                pendingExecuteAt_[i] = 0;
+            }
+            sch.executeAtMs = at;
             sch.executeAnchored = true;
         }
 
         switch (sch.phase) {
             case StringSched::ReleasingFinger:
+                // A previous finger still waiting for its release permit: retry it and
+                // hold this phase — never two fingers driving at once on a string.
+                if (!serviceFingerRelease(sch, nowMs, sch.releaseWaitMs)) break;
                 // Once the previous finger has lifted and the damper has acted, select
                 // the target fret's finger and advance the FSM (no carriage: instant).
                 if (nowMs - sch.phaseStartMs >= sch.releaseWaitMs &&
@@ -406,13 +524,15 @@ private:
                         sch.phase = StringSched::Ready;  // open: no finger press
                         sch.readyAtMs = nowMs;
                     } else if (sch.fingerIndex < 0) {
-                        // Fretted note but this fret has no finger servo (a gap / partial
-                        // install). Don't hang: advance the FSM so it still plucks the
-                        // open string. The validator warns about this configuration.
-                        sc.fingerPressed();
-                        sc.settled();
-                        sch.phase = StringSched::Ready;
-                        sch.readyAtMs = nowMs;
+                        // Fretted note but this fret has no finger servo — a config
+                        // gap / race the allocator and selector normally prevent.
+                        // ABANDON the note instead of sounding the wrong (open)
+                        // pitch, and count it for diagnostics (audit follow-up: a
+                        // safety net must fail silent, not play a wrong note).
+                        ++droppedNoFinger_;
+                        g_instrument.cancelNote(static_cast<int>(i));
+                        sch.phase = StringSched::Idle;
+                        sch.commandId = 0;
                     } else {
                         sch.phase = StringSched::PressingFinger;
                         sch.phaseStartMs = nowMs;
@@ -611,6 +731,7 @@ private:
     // Per-string common chord deadline computed by prepareTick() for targets that
     // arrived together in this pass; 0 = none (solo note / already consumed).
     std::vector<uint32_t> pendingExecuteAt_;
+    uint32_t droppedNoFinger_ = 0;  // fretted notes abandoned for lack of a finger servo
 };
 
 }  // namespace gmb

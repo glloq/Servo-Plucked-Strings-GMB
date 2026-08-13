@@ -150,6 +150,12 @@ void InstrumentController::startNote(int stringIndex, int fret, uint8_t channel,
     active_.push_back({channel, note, stringIndex, false});
 }
 
+void InstrumentController::cancelNote(int stringIndex) {
+    if (stringIndex < 0 || stringIndex >= static_cast<int>(strings_.size())) return;
+    removeActiveByString(stringIndex);  // its Note Off must not find a stale entry
+    stopString(stringIndex);            // noteOff + target dropped + allocator freed
+}
+
 void InstrumentController::stopString(int stringIndex) {
     if (stringIndex < 0 || stringIndex >= static_cast<int>(strings_.size())) return;
     strings_[stringIndex].noteOff();
