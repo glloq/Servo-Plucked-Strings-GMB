@@ -17,6 +17,7 @@ class AsyncWebServerRequest {
 public:
   void send(int, const String&, const String&) {}
   void redirect(const String&) {}
+  String url() const { return String("/"); }
   bool hasHeader(const char*) const { return false; }
   String header(const char*) const { return String(""); }
   bool hasParam(const char*) const { return false; }

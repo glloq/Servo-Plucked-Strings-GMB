@@ -155,6 +155,7 @@ carte (bouton EN/RST). Le firmware trace tout le démarrage réseau :
 | `[net] softAP(...) FAILED — retrying shortly` en boucle | La radio ne monte pas ; le firmware retente toutes les ~2 s. Vérifier l'alimentation ; si ça persiste, flash complet avec effacement (« Erase All Flash Before Sketch Upload »). |
 | `[net] joining "<ssid>"...` au lieu du hotspot | Un profil **station** est stocké : l'AP de repli n'arrive qu'après 3 tentatives × 8 s (~24 s). Maintenir **BOOT ~2 s** pour forcer le hotspot tout de suite. |
 | Rien ne se passe à l'appui sur BOOT | C'est un **maintien d'environ 2 s**, pas un appui bref. Et l'appui se fait **après** le démarrage : GPIO0 maintenu bas **à la mise sous tension** fait entrer la ROM en mode flash (broche de strapping) — la carte ne démarre alors pas le firmware. |
+| « Too many redirects » à la connexion, ou page d'aide « upload the web UI » | L'interface web n'est pas sur LittleFS (`/www` vide — le flash du firmware ne suffit pas, l'UI s'uploade **séparément**, §7 du [guide de build](ARDUINO_IDE_BUILD.md)). Le firmware sert désormais une page d'aide intégrée sur `/` au lieu de boucler ; la ligne série `[web] /www/index.html missing…` confirme la cause. |
 
 Rappels : le hotspot par défaut s'appelle **`Servo-Plucked-Strings-GMB`** (ouvert,
 sans mot de passe) ; la page de config est sur `http://192.168.4.1/`. Sur les cartes

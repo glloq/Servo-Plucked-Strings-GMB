@@ -105,6 +105,30 @@ const char* midiTypeName(uint8_t type) {
     }
 }
 
+// Built-in page served on "/" when the LittleFS web UI is missing (/www never
+// uploaded, or the filesystem failed to mount). Without it the captive portal
+// redirected EVERY not-found URL — including "/" itself — to the portal root,
+// i.e. "/" redirected to "/" forever: the browser's ERR_TOO_MANY_REDIRECTS.
+const char kMissingUiPage[] PROGMEM =
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    "<title>Servo-Plucked-Strings-GMB</title>"
+    "<style>body{font-family:sans-serif;max-width:38em;margin:2em auto;"
+    "padding:0 1em;line-height:1.5}code{background:#eee;padding:0 .3em;"
+    "border-radius:3px}</style></head><body>"
+    "<h1>Servo-Plucked-Strings-GMB</h1>"
+    "<p><strong>The firmware is running</strong>, but the web interface files "
+    "were not found on the device (LittleFS <code>/www</code> is empty or the "
+    "filesystem did not mount).</p>"
+    "<p>Upload the web UI, then reload this page:</p><ol>"
+    "<li>In <code>firmware/</code>, run <code>./sync_web_data.sh</code> "
+    "(copies <code>web-interface/</code> to <code>firmware/data/www</code>).</li>"
+    "<li>Upload the filesystem: PlatformIO <code>pio run -t uploadfs</code>, or "
+    "the Arduino IDE LittleFS upload plugin &mdash; see "
+    "<code>docs/ARDUINO_IDE_BUILD.md</code> &sect;7.</li></ol>"
+    "<p>The REST API is live: <a href=\"/api/status\">/api/status</a> &middot; "
+    "<a href=\"/api/diagnostics\">/api/diagnostics</a></p></body></html>";
+
 }  // namespace
 
 // Single status DTO shared by GET /api/status and the /ws/status broadcast so
@@ -210,10 +234,23 @@ void WebApi::begin(const WebContext& ctx, uint16_t port) {
 
     // Static UI from LittleFS (uploaded from web-interface/ via data/www).
     server_->serveStatic("/", LittleFS, "/www/").setDefaultFile("index.html");
+    // Warn early when the UI bundle is missing — the fallback below keeps the
+    // device reachable, but the user should know why they see the built-in page.
+    if (!LittleFS.exists("/www/index.html"))
+        Serial.println("[web] /www/index.html missing on LittleFS — serving the "
+                       "built-in setup page (upload the web UI, see "
+                       "docs/ARDUINO_IDE_BUILD.md §7)");
 
     // Anything else: in AP mode send it to the portal (catches probes we did not
     // name explicitly); otherwise a normal 404.
     server_->onNotFound([this](AsyncWebServerRequest* req) {
+        // The portal root itself missed serveStatic: the web UI is not on
+        // LittleFS. Serve the built-in setup page instead of redirecting "/" to
+        // itself (infinite loop -> the browser's "too many redirects" error).
+        if (req->url() == "/" || req->url() == "/index.html") {
+            req->send(200, "text/html", kMissingUiPage);
+            return;
+        }
         if (ctx_.net && ctx_.net->accessPointActive()) {
             req->redirect(captivePortalUrl().c_str());
         } else {

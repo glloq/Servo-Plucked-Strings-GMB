@@ -118,7 +118,7 @@ At power-on, the ESP32 creates the Wi-Fi access point
 | -------- | ---------------- |
 | `fatal error: ArduinoJson.h: No such file or directory` | Library not installed — see §3. |
 | `ledcAttach was not declared` | ESP32 core is version 2.x — update to 3.x (§2). |
-| Empty Web interface / 404 | LittleFS image not uploaded — redo §7 after `sync_web_data.sh`. |
+| Built-in "upload the web UI" page on `/` (or, before this page existed, a "too many redirects" error) | LittleFS image not uploaded — flashing the firmware is not enough, redo §7 after `sync_web_data.sh`. |
 | `Sketch too big` / no FS | Choose a *Partition Scheme* with a filesystem (§5). |
 | The sketch does not compile the files in `src/` | Make sure you open `firmware/firmware.ino` (the `src/` must be **next to** the `.ino`). |
 | Unit tests | They do **not** compile in the Arduino IDE; use `cd firmware/test && make` (see [`ARCHITECTURE.md`](ARCHITECTURE.md)). |
