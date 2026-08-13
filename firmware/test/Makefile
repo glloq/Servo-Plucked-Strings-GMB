@@ -8,6 +8,7 @@ ROOT := ..
 CORE := $(ROOT)/src/core
 
 CORE_SRC := \
+  $(ROOT)/src/platform/esp32/ServoBank.cpp \
   $(CORE)/Types.cpp \
   $(CORE)/board/BoardProfile.cpp \
   $(CORE)/board/PinManager.cpp \
@@ -35,6 +36,7 @@ TEST_SRC := \
   test_integration.cpp \
   test_midiparser.cpp \
   test_servos.cpp \
+  test_scheduler.cpp \
   test_pluck.cpp \
   test_governor.cpp \
   test_fretservo.cpp \
