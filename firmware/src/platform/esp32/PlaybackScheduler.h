@@ -98,10 +98,17 @@ public:
     void prepareTick(uint32_t nowMs) {
         if (!instrument_ || !profile_) return;
         const Profile& p = *profile_;
+        const ServoBank& b = *servos_;
         struct Member { size_t i; uint32_t byDelay; uint32_t prepMs; uint32_t liftMs; };
         std::vector<Member> members;
-        int liftCount = 0;
-        int fingerStarts = 0;  // governed finger moves (releases + presses) in the batch
+        // Board bucket of every governed (staggerable) start this batch will issue:
+        // finger releases, finger presses and lift engages — for a prepared note,
+        // only the moves its FSM has NOT yet performed. 0xFF = direct GPIO (counts
+        // toward the global cap only).
+        std::vector<uint8_t> startBoards;
+        auto addStart = [&](int servoIndex) {
+            if (servoIndex >= 0) startBoards.push_back(b.board(servoIndex));
+        };
         for (size_t i = 0; i < sched_.size(); ++i) {
             const StringTarget& tgt = instrument_->target(i);
             bool freshCmd = tgt.active && sched_[i].commandId != tgt.commandId;
@@ -113,44 +120,67 @@ public:
             }
             Member m;
             m.i = i;
+            int nxt = b.fingerIndexForFret(static_cast<int>(i), tgt.fret);
             if (freshCmd) {
                 // Anchor at the Note-On reception (minus the chord-buffer age).
                 m.byDelay = (nowMs - tgt.queuedMs) + p.midi.noteExecutionDelayMs;
                 m.prepMs = estimatePrepMs(i, tgt.fret) + p.pluck.fretToPluckMs;
                 int prev = i < currentFinger_.size() ? currentFinger_[i] : -1;
                 if (prev < 0) prev = sched_[i].pendingFingerRelease;
-                int nxt = servos_->fingerIndexForFret(static_cast<int>(i), tgt.fret);
-                if (prev >= 0 && prev != nxt) ++fingerStarts;  // governed release
-                if (nxt >= 0) ++fingerStarts;                  // governed press
+                if (prev >= 0 && prev != nxt) addStart(prev);  // governed release
+                if (nxt >= 0) addStart(nxt);                   // governed press
             } else {
                 // A prepared note triggered NOW: its Note On is this instant, and
-                // only the REMAINING part of its move still has to happen.
+                // only the REMAINING part of its move still has to happen — which
+                // may still include governed starts the FSM has not been granted
+                // yet (a parked release, a press awaiting its permit) (audit 3).
                 m.byDelay = nowMs + p.midi.noteExecutionDelayMs;
                 m.prepMs = remainingPrepMs(i, tgt.fret, nowMs) + p.pluck.fretToPluckMs;
+                const StringSched& sch = sched_[i];
+                if (sch.pendingFingerRelease >= 0) addStart(sch.pendingFingerRelease);
+                if (sch.phase == StringSched::ReleasingFinger ||
+                    (sch.phase == StringSched::PressingFinger && !sch.fingerPressStarted))
+                    addStart(nxt);  // press still ahead of / awaiting the governor
             }
             m.liftMs = liftPrepMs(i);
-            if (m.liftMs) ++liftCount;
+            if (m.liftMs) addStart(b.strumLiftIndex(static_cast<int>(i)));
             members.push_back(m);
         }
         if (members.empty()) return;
-        // The governor staggers the chord's governed starts: the LAST lift (or
-        // finger move) begins up to (count-1)/cap x staggerMs after the first, so
-        // the common deadline must leave that headroom or the late strings simply
-        // miss the beat (audit follow-up: the finger stagger was not budgeted).
-        uint8_t cap = p.power.maxConcurrentMoves ? p.power.maxConcurrentMoves
-                                                 : p.power.maxConcurrentPerBoard;
-        bool governed = cap != 0 && p.power.staggerMs != 0;
-        uint32_t liftBudget = (governed && liftCount > 1)
-            ? (static_cast<uint32_t>(liftCount - 1) / cap) * p.power.staggerMs : 0;
-        uint32_t fingerBudget = (governed && fingerStarts > 1)
-            ? (static_cast<uint32_t>(fingerStarts - 1) / cap) * p.power.staggerMs : 0;
+        // The governor staggers the batch's governed starts under TWO simultaneous
+        // caps: the global window AND each PCA board's own window (audit 3 — using
+        // one or the other under-/over-estimated the wait). The worst extra delay
+        // before the LAST start is the max over every constraint's own queue:
+        //   perConstraint = floor((starts_in_that_window - 1) / cap) x staggerMs.
+        uint32_t governorBudget = 0;
+        if (p.power.staggerMs != 0 && startBoards.size() > 1) {
+            if (p.power.maxConcurrentMoves > 0) {
+                uint32_t g = (static_cast<uint32_t>(startBoards.size() - 1) /
+                              p.power.maxConcurrentMoves) * p.power.staggerMs;
+                if (g > governorBudget) governorBudget = g;
+            }
+            if (p.power.maxConcurrentPerBoard > 0) {
+                // Count the batch's starts per physical PCA board (0xFF = direct
+                // GPIO: no per-board window applies).
+                for (size_t a = 0; a < startBoards.size(); ++a) {
+                    if (startBoards[a] == 0xFF) continue;
+                    uint32_t n = 0;
+                    for (uint8_t bd : startBoards)
+                        if (bd == startBoards[a]) ++n;
+                    if (n > 1) {
+                        uint32_t g = ((n - 1) / p.power.maxConcurrentPerBoard) *
+                                     p.power.staggerMs;
+                        if (g > governorBudget) governorBudget = g;
+                    }
+                }
+            }
+        }
         uint32_t deadline = 0;
         bool first = true;
         for (const Member& m : members) {
-            uint32_t mech = m.prepMs + fingerBudget;
-            uint32_t lift = m.liftMs ? m.liftMs + liftBudget : 0;
-            if (lift > mech) mech = lift;  // lift lowers in parallel with the finger
-            uint32_t byMech = nowMs + mech;
+            uint32_t mech = m.prepMs;
+            if (m.liftMs > mech) mech = m.liftMs;  // lift lowers in parallel
+            uint32_t byMech = nowMs + mech + governorBudget;
             uint32_t want = static_cast<int32_t>(byMech - m.byDelay) > 0 ? byMech : m.byDelay;
             if (first || static_cast<int32_t>(want - deadline) > 0) deadline = want;
             first = false;
@@ -166,12 +196,21 @@ public:
         for (auto& f : currentFinger_) f = -1;
     }
 
-    // Abort one string on a fault: lift its finger, drop any engaged lift, reset it.
+    // Abort one string on a fault: IMMEDIATE, best-effort mechanical cleanup of
+    // EVERYTHING this string may hold engaged, bypassing the governor (safety never
+    // waits for a start permit) and ignoring write results (an abort must not
+    // recurse into the fault path). Covers the pressed finger, a finger release
+    // still parked on a denied governor permit (the servo is STILL physically
+    // pressed even though currentFinger_ was already cleared — audit 3 P0), an
+    // engaged strum lift, and a plectrum/lift held against the string as a mute.
     void abortString(size_t i) {
         ServoBank& g_servos = *servos_;
         releaseCurrentFinger(i);
         if (i < sched_.size()) {
-            if (sched_[i].liftIndex >= 0) g_servos.release(sched_[i].liftIndex);
+            StringSched& sch = sched_[i];
+            if (sch.pendingFingerRelease >= 0) g_servos.release(sch.pendingFingerRelease);
+            if (sch.liftIndex >= 0) g_servos.release(sch.liftIndex);
+            if (sch.muteIndex >= 0) g_servos.release(sch.muteIndex);
             sched_[i] = StringSched{};
         }
     }
@@ -201,39 +240,50 @@ private:
     // Start (or queue) the release of the pressed finger THROUGH the governor: a
     // release draws its in-rush like a press, so a chord's simultaneous Note Offs
     // must be staggered too (audit follow-up — releases used to bypass the cap).
-    // Returns the travel budget; when the permit is denied the release is parked in
-    // sch.pendingFingerRelease and the retry path extends the wait when it starts.
-    uint16_t startGovernedRelease(size_t i, StringSched& sch, uint32_t nowMs) {
+    // `waitMs` receives the travel budget; when the permit is denied the release is
+    // parked in sch.pendingFingerRelease and the retry path extends the wait when
+    // it starts. Returns false when the release WRITE failed: the axis has been
+    // faulted and this string's scheduler state reset — the caller must stop
+    // touching it (audit 3: no mechanical command may pass unchecked).
+    bool startGovernedRelease(size_t i, StringSched& sch, uint32_t nowMs,
+                              uint16_t& waitMs) {
         ServoBank& g_servos = *servos_;
         ActuatorManager& g_actuators = *actuators_;
-        if (i >= currentFinger_.size()) return 0;
+        waitMs = 0;
+        if (i >= currentFinger_.size()) return true;
         int fi = currentFinger_[i];
-        if (fi < 0) return 0;
+        if (fi < 0) return true;
         currentFinger_[i] = -1;
+        waitMs = g_servos.travelMs(fi);
         if (g_actuators.requestMove(MoveClass::Staggerable, nowMs, g_servos.board(fi))) {
-            g_servos.release(fi);
+            if (!actOk(g_servos.release(fi), i, "finger release write failed", nowMs))
+                return false;
         } else {
             sch.pendingFingerRelease = fi;  // retried each tick; wait extended then
         }
-        return g_servos.travelMs(fi);
+        return true;
     }
 
-    // Retry a governor-deferred finger release. Returns true the moment no release
-    // is pending (started now or none queued); extends `waitMs` so the caller never
-    // declares the finger lifted before it has actually travelled.
-    bool serviceFingerRelease(StringSched& sch, uint32_t nowMs, uint16_t& waitMs) {
-        if (sch.pendingFingerRelease < 0) return true;
+    // Retry a governor-deferred finger release. Returns +1 the moment no release is
+    // pending (started now or none queued), 0 while still waiting for a permit, and
+    // -1 when the release write failed (axis faulted, scheduler state reset — the
+    // caller must stop touching it). Extends `waitMs` so the caller never declares
+    // the finger lifted before it has actually travelled.
+    int serviceFingerRelease(size_t i, StringSched& sch, uint32_t nowMs,
+                             uint16_t& waitMs) {
+        if (sch.pendingFingerRelease < 0) return 1;
         ServoBank& g_servos = *servos_;
         ActuatorManager& g_actuators = *actuators_;
         if (!g_actuators.requestMove(MoveClass::Staggerable, nowMs,
                                      g_servos.board(sch.pendingFingerRelease)))
-            return false;
-        g_servos.release(sch.pendingFingerRelease);
-        uint32_t doneMs = (nowMs - sch.phaseStartMs) +
-                          g_servos.travelMs(sch.pendingFingerRelease);
-        if (doneMs > waitMs) waitMs = static_cast<uint16_t>(doneMs > 0xFFFF ? 0xFFFF : doneMs);
+            return 0;
+        int fi = sch.pendingFingerRelease;
         sch.pendingFingerRelease = -1;
-        return true;
+        uint32_t doneMs = (nowMs - sch.phaseStartMs) + g_servos.travelMs(fi);
+        if (doneMs > waitMs) waitMs = static_cast<uint16_t>(doneMs > 0xFFFF ? 0xFFFF : doneMs);
+        if (!actOk(g_servos.release(fi), i, "finger release write failed", nowMs))
+            return -1;
+        return 1;
     }
 
     // The per-string striker: the plectrum ('pluck') if present, otherwise the
@@ -277,17 +327,31 @@ private:
     // notes in prepareTick() (audit follow-up).
     uint32_t remainingPrepMs(size_t i, int fret, uint32_t nowMs) const {
         const ServoBank& b = *servos_;
+        const Profile& p = *profile_;
         const StringSched& sch = sched_[i];
         uint32_t elapsed = nowMs - sch.phaseStartMs;
         auto left = [&](uint32_t budget) { return budget > elapsed ? budget - elapsed : 0u; };
         int nxt = b.fingerIndexForFret(static_cast<int>(i), fret);
         uint32_t press = nxt >= 0 ? b.travelMs(nxt) : 0;
         uint32_t settle = nxt >= 0 ? b.settleMs(nxt) : 0;
+        // A move still WAITING on a governor permit may sit out up to one full
+        // stagger window behind starts granted before this batch (audit 3).
+        bool governorOn = p.power.staggerMs != 0 &&
+                          (p.power.maxConcurrentMoves > 0 ||
+                           p.power.maxConcurrentPerBoard > 0);
+        uint32_t permitWait = governorOn ? p.power.staggerMs : 0;
         switch (sch.phase) {
             case StringSched::ReleasingFinger:
+                // A release still parked on a denied governor permit has performed
+                // NONE of its motion yet, whatever the elapsed time says (audit 3).
+                if (sch.pendingFingerRelease >= 0)
+                    return permitWait +
+                           static_cast<uint32_t>(b.travelMs(sch.pendingFingerRelease)) +
+                           press + settle;
                 return left(sch.releaseWaitMs) + press + settle;
             case StringSched::PressingFinger:
-                if (!sch.fingerPressStarted) return press + settle;  // press not begun
+                if (!sch.fingerPressStarted)
+                    return permitWait + press + settle;  // press awaiting its permit
                 return left(sch.fingerMoveMs) + settle;
             case StringSched::Settling:
                 return left(sch.fingerIndex >= 0 ? b.settleMs(sch.fingerIndex) : 0);
@@ -340,8 +404,14 @@ private:
                 // the global mute policy resolved against what this string actually
                 // has wired — a damper servo, the plectrum's own mute angle (rest
                 // against the string, no dedicated damper), the strum lift, or nothing.
-                sch.releaseWaitMs = startGovernedRelease(i, sch, nowMs);
-                if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
+                if (!startGovernedRelease(i, sch, nowMs, sch.releaseWaitMs)) return;
+                if (sch.liftIndex >= 0) {
+                    int li = sch.liftIndex;
+                    sch.liftIndex = -1;
+                    if (!actOk(g_servos.release(li), i, "strum lift release write failed",
+                               nowMs))
+                        return;
+                }
                 sch.liftStarted = false;
                 sch.muteIndex = -1;
 
@@ -417,21 +487,29 @@ private:
             if (sch.pendingDamper >= 0 &&
                 g_actuators.requestMove(MoveClass::Staggerable, nowMs,
                                         g_servos.board(sch.pendingDamper))) {
-                g_servos.strike(sch.pendingDamper);
-                uint32_t doneMs = (nowMs - sch.phaseStartMs) +
-                                  g_servos.strikeDurationMs(sch.pendingDamper);
-                if (doneMs > sch.releaseWaitMs) sch.releaseWaitMs = doneMs;
+                int di = sch.pendingDamper;
                 sch.pendingDamper = -1;
+                uint32_t doneMs = (nowMs - sch.phaseStartMs) +
+                                  g_servos.strikeDurationMs(di);
+                if (doneMs > sch.releaseWaitMs)
+                    sch.releaseWaitMs = static_cast<uint16_t>(doneMs > 0xFFFF ? 0xFFFF : doneMs);
+                if (!actOk(g_servos.strike(di), i, "damper servo write failed", nowMs))
+                    return;
             }
             // A governor-deferred finger release: keep retrying until it starts, and
             // stretch the wait so the string is not declared idle before the finger
             // has physically lifted.
-            serviceFingerRelease(sch, nowMs, sch.releaseWaitMs);
+            if (serviceFingerRelease(i, sch, nowMs, sch.releaseWaitMs) < 0) return;
             // Declare idle once the finger has lifted, any held mute has released, AND
             // no damper or finger release is still waiting for its permit.
             if (sch.pendingDamper < 0 && sch.pendingFingerRelease < 0 &&
                 nowMs - sch.phaseStartMs >= sch.releaseWaitMs) {
-                if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
+                if (sch.muteIndex >= 0) {
+                    int mi = sch.muteIndex;
+                    sch.muteIndex = -1;
+                    if (!actOk(g_servos.release(mi), i, "mute release write failed", nowMs))
+                        return;
+                }
                 sc.dampingDone();
                 sch.phase = StringSched::Idle;
                 sch.commandId = 0;
@@ -447,15 +525,26 @@ private:
                 int di = g_servos.damperIndex(static_cast<int>(i));
                 if (di >= 0) {
                     g_actuators.requestMove(MoveClass::Deadline, nowMs, g_servos.board(di));  // P1.6
-                    g_servos.strike(di);
                     sch.dampUntilMs = nowMs + g_servos.strikeDurationMs(di) +
                                       g_servos.settleMs(di);
+                    if (!actOk(g_servos.strike(di), i, "damper servo write failed", nowMs))
+                        return;
                 }
             }
-            if (sch.liftIndex >= 0) { g_servos.release(sch.liftIndex); sch.liftIndex = -1; }
+            if (sch.liftIndex >= 0) {
+                int li = sch.liftIndex;
+                sch.liftIndex = -1;
+                if (!actOk(g_servos.release(li), i, "strum lift release write failed", nowMs))
+                    return;
+            }
             // Drop any Note-Off mute still held from the previous note (plectrum against
             // the string, or a lift leaning on it) before starting the new one.
-            if (sch.muteIndex >= 0) { g_servos.release(sch.muteIndex); sch.muteIndex = -1; }
+            if (sch.muteIndex >= 0) {
+                int mi = sch.muteIndex;
+                sch.muteIndex = -1;
+                if (!actOk(g_servos.release(mi), i, "mute release write failed", nowMs))
+                    return;
+            }
             sch.pendingDamper = -1;  // a new note supersedes an interrupted Note-Off damper
             // Fixed-latency anchor: measured from the Note On's RECEPTION (nowMs minus
             // the time the note sat in the chord-grouping buffer), so chordWindowMs no
@@ -485,7 +574,10 @@ private:
             int prevFinger = i < g_currentFinger.size() ? g_currentFinger[i] : -1;
             int targetFinger = g_servos.fingerIndexForFret(static_cast<int>(i), tgt.fret);
             sch.fingerSweep = (prevFinger >= 0 && targetFinger == prevFinger);
-            sch.releaseWaitMs = sch.fingerSweep ? 0 : startGovernedRelease(i, sch, nowMs);
+            sch.releaseWaitMs = 0;
+            if (!sch.fingerSweep &&
+                !startGovernedRelease(i, sch, nowMs, sch.releaseWaitMs))
+                return;  // release write failed: axis faulted, state reset
             // A release still pending from the PREVIOUS note (its permit never came)
             // carries over: the ReleasingFinger phase below keeps retrying it and
             // will not press the new finger before the old one has lifted.
@@ -513,7 +605,7 @@ private:
             case StringSched::ReleasingFinger:
                 // A previous finger still waiting for its release permit: retry it and
                 // hold this phase — never two fingers driving at once on a string.
-                if (!serviceFingerRelease(sch, nowMs, sch.releaseWaitMs)) break;
+                if (serviceFingerRelease(i, sch, nowMs, sch.releaseWaitMs) <= 0) break;
                 // Once the previous finger has lifted and the damper has acted, select
                 // the target fret's finger and advance the FSM (no carriage: instant).
                 if (nowMs - sch.phaseStartMs >= sch.releaseWaitMs &&
@@ -708,9 +800,12 @@ private:
                     } else {
                         // Lower-to-play: retract the lift now so the plectrum clears the
                         // ringing string.
-                        g_servos.release(sch.liftIndex);
+                        int li = sch.liftIndex;
                         sch.liftIndex = -1;
                         sch.strikeIndex = -1;
+                        if (!actOk(g_servos.release(li), i,
+                                   "strum lift release write failed", nowMs))
+                            break;  // faulted: the scheduler state was reset
                     }
                     sch.phase = StringSched::Ready;
                 }

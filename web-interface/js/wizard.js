@@ -1227,62 +1227,6 @@
 
   // ---- Step: Plucking — plucker + strum lift + damper + aux calibration ------
 
-  // Shared editor body for a non-finger, non-plucker actuator: rest/active angles,
-  // a live test, and — in Advanced mode — the full wiring (source incl. direct GPIO)
-  // plus pulse/timing. Used for strum-lift, damper and auxiliary servos so every one
-  // of them can sit on a PCA channel OR a direct ESP32 GPIO, exactly like a finger.
-  // A generic degree stepper bound to a plain object's key (not a servo pulse) — used
-  // for the striker's derived contact / strum-amplitude angles. Same −/+ box as
-  // angleStepper; the caller's onChange turns the values into servo pulses.
-  function degStepper(obj, key, min, max, onChange) {
-    var input = h('input.angle-num', { type: 'number', min: min, max: max, step: 1, value: obj[key] });
-    function apply() {
-      var v = Math.max(min, Math.min(max, Math.round(Number(input.value) || 0)));
-      input.value = v; obj[key] = v; if (onChange) onChange();
-    }
-    input.addEventListener('change', apply);
-    function bump(d) { input.value = (Number(input.value) || 0) + d; apply(); }
-    return h('div.angle-stepper', [
-      GMB.button('−', function () { bump(-1); }, 'ghost'),
-      input, h('span.angle-unit', '°'),
-      GMB.button('+', function () { bump(1); }, 'ghost')
-    ]);
-  }
-
-  // The striker is set by just two numbers: the CONTACT angle (plectrum against the
-  // string) and the STRUM angle (how far it sweeps to each side). The servo always
-  // alternates, so the down-stroke is contact+strum and the up-stroke contact−strum.
-  // Editing either number re-derives the pulses live and previews on the hardware.
-  function strikerAngles(striker) {
-    var st = {
-      contact: GMB.usToAngle(striker, striker.restUs),
-      amp: GMB.usToAngle(striker, striker.activeUs) - GMB.usToAngle(striker, striker.restUs)
-    };
-    if (!(st.amp > 0)) st.amp = 20;
-    // The sweep must fit on BOTH sides of the contact angle, otherwise the mirrored
-    // up-stroke would pin at a pulse-window extremity (the audit P0 failure mode).
-    function fitAmp() {
-      var room = Math.min(st.contact, 180 - st.contact);
-      if (st.amp > room) st.amp = Math.max(1, Math.floor(room));
-    }
-    fitAmp();
-    function reapply(previewDown) {
-      fitAmp();
-      striker.restUs = GMB.angleToUs(striker, st.contact);
-      striker.activeUs = GMB.angleToUs(striker, Math.min(180, st.contact + st.amp));
-      striker.activeAltUs = GMB.angleToUs(striker, Math.max(0, st.contact - st.amp));
-      striker.alternateDirection = true;
-      GMB.markDirty();
-      var idx = servoIndexOf(striker);
-      if (idx >= 0) GMB.api.testServo({ index: idx, active: true,
-        us: (previewDown ? striker.activeUs : striker.restUs) | 0 }).catch(function () {});
-    }
-    return {
-      contact: degStepper(st, 'contact', 0, 180, function () { reapply(false); }),
-      amp: degStepper(st, 'amp', 1, 90, function () { reapply(true); })
-    };
-  }
-
   // Ensure a loaded/older profile carries the global plucking block and the timing
   // fields the plucking card edits (older exports predate them).
   function ensurePluckConfig(p) {
@@ -1310,11 +1254,11 @@
     var p = GMB.state.profile;
     ensurePluckConfig(p);
     body.appendChild(h('div.note-box',
-      'Plucking — one sounding servo per string. Set the contact angle (plectrum against ' +
-      'the string) and the strum angle (how far it sweeps, e.g. 20°); the servo always ' +
-      'alternates its stroke direction. Choose its PCA board + pin, and — the second way ' +
-      'to strum — optionally add a descent servo that lowers the plectrum onto the string ' +
-      'only while it plays.'));
+      'Plucking — one sounding servo per string. Calibrate the contact angle ' +
+      '(plectrum against the string) and each stroke end; alternation and rotation ' +
+      'direction are per-plectrum choices, never forced. Every position has its own ' +
+      'live test button. Optional per-string extras: a descent servo (lowers the ' +
+      'plectrum only while playing) and a damper.'));
 
     body.appendChild(armToolbar());
     body.appendChild(testBench('Plucking test bench', [
@@ -1322,33 +1266,122 @@
       { label: 'Sweep strum servos', build: pluckServoSweepSteps }
     ]));
 
+    // Global gesture (common to every string) — the firmware overlays these onto
+    // each striker at activation; 0 keeps the per-servo value.
+    body.appendChild(h('div.card.inset', [
+      h('h3', 'Gesture (all strings)'),
+      h('div.grid2', [
+        GMB.field('Stroke duration (ms)', GMB.input(p.pluck, 'strokeMs',
+          { type: 'number', min: 0, max: 2000 }),
+          'how long the plectrum stays at the stroke end before returning — 0 = each servo’s travel time'),
+        GMB.field('Minimum strike depth (%)', GMB.input(p.pluck, 'minStrikePct',
+          { type: 'number', min: 0, max: 100 }),
+          'soft (low-velocity) notes still sweep at least this share of the stroke — 0 = off')
+      ])
+    ]));
+
     body.appendChild(stringTabs());
     ensureStriker(activeStr);
     var striker = strikerFor(activeStr);
-    var ang = strikerAngles(striker);
 
-    var upStroke = function () {
-      var idx = servoIndexOf(striker); if (idx < 0) return;
-      var us = 2 * striker.restUs - striker.activeUs;    // mirror the down-stroke about contact
-      us = Math.max(striker.pulseMinUs || 500, Math.min(striker.pulseMaxUs || 2500, us));
-      GMB.api.testServo({ index: idx, active: true, us: us | 0 })
-        .then(function () { GMB.toast('Servo → up-stroke', 'ok'); })
-        .catch(function () { GMB.toast('Arm the instrument first.', 'warn'); });
-    };
-    body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Sounding servo · string ' + (activeStr + 1)),
-        h('span.muted', 'contact + strum angle, always alternating')]),
+    // ---- Plectrum card ------------------------------------------------------
+    var altToggle = h('input', { type: 'checkbox', checked: !!striker.alternateDirection });
+    altToggle.addEventListener('change', function () {
+      striker.alternateDirection = altToggle.checked;
+      if (altToggle.checked && !(striker.activeAltUs > 0)) {
+        // Seed an EXPLICIT up-stroke: the down-stroke mirrored about contact,
+        // clamped into the pulse window (the firmware refuses an implicit
+        // out-of-window mirror rather than sweeping to an extremity).
+        var mirror = 2 * striker.restUs - striker.activeUs;
+        var lo = striker.pulseMinUs || 500, hi = striker.pulseMaxUs || 2500;
+        striker.activeAltUs = Math.max(lo, Math.min(hi, mirror));
+      }
+      GMB.markDirty();
+      drawStep();
+    });
+    var plectrumKids = [
       pcaPinRow(striker),
       h('div.grid2', [
-        GMB.field('Contact angle', ang.contact, 'plectrum resting against the string'),
-        GMB.field('Strum angle', ang.amp, 'how far it sweeps to each side of contact (e.g. 20°)')
-      ]),
-      h('div.row', [
-        testServoBtn('→ contact', striker, false),
-        testPulseBtn('→ down-stroke', striker, 'activeUs', 'Servo → down-stroke'),
-        GMB.button('→ up-stroke', upStroke, 'ghost'),
-        playNoteBtn(activeStr, 0, '▶ Pluck open')
+        angleStepper(striker, 'restUs', 'Contact angle', 'plectrum resting against the string'),
+        angleStepper(striker, 'activeUs', 'Down-stroke angle', 'stroke end on one side of contact')
       ])
+    ];
+    if (striker.alternateDirection) {
+      plectrumKids.push(h('div.grid2', [
+        angleStepper(striker, 'activeAltUs', 'Up-stroke angle',
+          'stroke end on the other side — strokes alternate down/up')
+      ]));
+    }
+    plectrumKids.push(h('label.inline.builder-opt', [altToggle,
+      h('span', 'Alternate stroke direction (down/up on successive notes)')]));
+    plectrumKids.push(GMB.field('Reverse rotation direction',
+      GMB.input(striker, 'inverted', { type: 'checkbox' }),
+      'mirror the output within the pulse window (mounting on the other side)'));
+    plectrumKids.push(h('div.grid2', [
+      GMB.field('Travel (ms)', GMB.input(striker, 'travelMs',
+        { type: 'number', min: 0, max: 5000 }), 'time to sweep between two positions'),
+      GMB.field('Settle (ms)', GMB.input(striker, 'settleMs',
+        { type: 'number', min: 0, max: 5000 }), 'pause after a move before the next action')
+    ]));
+    var plectrumTests = [
+      testServoBtn('→ contact', striker, false),
+      testPulseBtn('→ down-stroke', striker, 'activeUs', 'Servo → down-stroke')
+    ];
+    if (striker.alternateDirection)
+      plectrumTests.push(testPulseBtn('→ up-stroke', striker, 'activeAltUs', 'Servo → up-stroke'));
+    plectrumTests.push(playNoteBtn(activeStr, 0, '▶ Pluck open'));
+    plectrumKids.push(h('div.row', plectrumTests));
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Plectrum · string ' + (activeStr + 1)),
+        h('span.muted', striker.alternateDirection ? 'alternating down/up strokes'
+                                                   : 'single-direction stroke')]),
+      plectrumKids
+    ]));
+
+    // ---- Mute card (global policy + this plectrum's mute position) ----------
+    var hasMutePos = (striker.muteUs | 0) > 0;
+    var muteToggle = h('input', { type: 'checkbox', checked: hasMutePos });
+    muteToggle.addEventListener('change', function () {
+      striker.muteUs = muteToggle.checked ? striker.restUs : 0;  // seed at contact
+      GMB.markDirty();
+      drawStep();
+    });
+    var muteKids = [
+      h('div.grid2', [
+        GMB.field('Mute at Note Off', GMB.input(p.pluck, 'muteSource', {
+          type: 'select',
+          options: [
+            { value: 'auto', label: 'Auto (damper if present)' },
+            { value: 'plectrum', label: 'Plectrum against the string' },
+            { value: 'damper', label: 'Damper servo' },
+            { value: 'lift', label: 'Descent servo leaning on the string' },
+            { value: 'none', label: 'None (let it ring)' }
+          ],
+          onChange: drawStep
+        }), 'who damps the string when the note is released'),
+        GMB.field('Mute hold (ms)', GMB.input(p.pluck, 'muteHoldMs',
+          { type: 'number', min: 0, max: 5000 }),
+          'hold time AFTER the mute has physically reached the string')
+      ]),
+      GMB.field('Also lean the descent servo on the string at Note Off',
+        GMB.input(p.pluck, 'liftMuteOnNoteOff', { type: 'checkbox' }),
+        'a descent servo that doubles as a damper'),
+      h('label.inline.builder-opt', [muteToggle,
+        h('span', 'This plectrum has a mute position (rests against the string to damp it)')])
+    ];
+    if (hasMutePos) {
+      muteKids.push(h('div.grid2', [
+        angleStepper(striker, 'muteUs', 'Mute angle', 'plectrum leaning on the string')
+      ]));
+      muteKids.push(h('div.row', [
+        testPulseBtn('→ mute', striker, 'muteUs', 'Servo → mute position'),
+        testServoBtn('→ contact', striker, false)
+      ]));
+    }
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Mute · string ' + (activeStr + 1)),
+        h('span.muted', 'Note-Off damping')]),
+      muteKids
     ]));
 
     // Descent servo (optional) — the second way to strum: the plectrum rests OFF the
@@ -1366,15 +1399,69 @@
     if (lift) {
       descKids.push(pcaPinRow(lift));
       descKids.push(h('div.grid2', [
-        angleStepper(lift, 'restUs', 'Raised angle', 'plectrum off the string (rest)'),
-        angleStepper(lift, 'activeUs', 'Lowered angle', 'plectrum on the string (to strum)')
+        angleStepper(lift, 'restUs', 'Rest angle',
+          p.pluck.liftEngage === 'raiseToPlay' ? 'plectrum ON the string (mutes at rest)'
+                                               : 'plectrum off the string (rest)'),
+        angleStepper(lift, 'activeUs', 'Play angle',
+          p.pluck.liftEngage === 'raiseToPlay' ? 'plectrum raised to let the string ring'
+                                               : 'plectrum on the string (to strum)')
       ]));
-      descKids.push(h('div.row', [testServoBtn('→ raised', lift, false), testServoBtn('→ lowered', lift, true)]));
+      descKids.push(GMB.field('Reverse rotation direction',
+        GMB.input(lift, 'inverted', { type: 'checkbox' }),
+        'mirror the output within the pulse window'));
+      descKids.push(h('div.grid2', [
+        GMB.field('Travel (ms)', GMB.input(lift, 'travelMs',
+          { type: 'number', min: 0, max: 5000 }), 'time to lower/raise the plectrum'),
+        GMB.field('Engage delay (ms)', GMB.input(lift, 'engageDelayMs',
+          { type: 'number', min: 0, max: 5000 }),
+          'extra pause once lowered before the stroke fires')
+      ]));
+      descKids.push(GMB.field('Engagement', GMB.input(p.pluck, 'liftEngage', {
+        type: 'select',
+        options: [
+          { value: 'lowerToPlay', label: 'Lower to play (rests clear of the string)' },
+          { value: 'raiseToPlay', label: 'Raise to play (rests ON the string, muting)' }
+        ],
+        onChange: drawStep
+      }), 'which end of the travel plays — applies to every string'));
+      descKids.push(h('div.row', [testServoBtn('→ rest', lift, false),
+                                  testServoBtn('→ play', lift, true)]));
     }
     body.appendChild(h('div.card', [
       h('div.card-head', [h('h3', 'Descent servo · string ' + (activeStr + 1)),
         h('span.muted', 'optional')]),
       descKids
+    ]));
+
+    // ---- Damper card (optional per-string Note-Off damper) -------------------
+    var damper = perStringServo(activeStr, 'damper');
+    var dampToggle = h('input', { type: 'checkbox', checked: !!damper });
+    dampToggle.addEventListener('change', function () {
+      if (dampToggle.checked && !damper) addRoleServo('damper', activeStr);
+      else if (!dampToggle.checked && damper) removeServo(damper);
+      GMB.markDirty();
+      drawStep();
+    });
+    var dampKids = [h('label.inline.builder-opt', [dampToggle,
+      h('span', 'Add a damper servo (strikes the string to mute it at Note Off)')])];
+    if (damper) {
+      dampKids.push(pcaPinRow(damper));
+      dampKids.push(h('div.grid2', [
+        angleStepper(damper, 'restUs', 'Rest angle', 'damper clear of the string'),
+        angleStepper(damper, 'activeUs', 'Damp angle', 'damper pressed on the string')
+      ]));
+      dampKids.push(GMB.field('Reverse rotation direction',
+        GMB.input(damper, 'inverted', { type: 'checkbox' }),
+        'mirror the output within the pulse window'));
+      dampKids.push(GMB.field('Travel (ms)', GMB.input(damper, 'travelMs',
+        { type: 'number', min: 0, max: 5000 }), 'time to reach the string'));
+      dampKids.push(h('div.row', [testServoBtn('→ rest', damper, false),
+                                  testServoBtn('→ damp', damper, true)]));
+    }
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Damper · string ' + (activeStr + 1)),
+        h('span.muted', 'optional')]),
+      dampKids
     ]));
   }
 

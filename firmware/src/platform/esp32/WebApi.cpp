@@ -760,6 +760,27 @@ void WebApi::registerRoutes() {
                 sendJson(req, doc, 422);
                 return;
             }
+            // 802.11 caps an SSID at 32 bytes; the ESP hostname is similar. Refuse
+            // over-long values instead of storing something the radio truncates.
+            if ((w.hasSsid && w.ssid.size() > 32) ||
+                (w.hasApSsid && w.apSsid.size() > 32)) {
+                doc["ok"] = false;
+                doc["error"] = "SSID exceeds the 32-character 802.11 limit";
+                sendJson(req, doc, 422);
+                return;
+            }
+            if (w.hasApSsid && w.apSsid.empty()) {
+                doc["ok"] = false;
+                doc["error"] = "the access-point SSID cannot be empty";
+                sendJson(req, doc, 422);
+                return;
+            }
+            if (w.hasHostname && w.hostname.size() > 32) {
+                doc["ok"] = false;
+                doc["error"] = "hostname exceeds 32 characters";
+                sendJson(req, doc, 422);
+                return;
+            }
             ctx_.onSetNetwork(w);
             doc["ok"] = true;
             doc["note"] = w.apply ? "stored; applying (hotspot fallback on failure)"

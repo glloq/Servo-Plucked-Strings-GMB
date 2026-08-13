@@ -257,6 +257,17 @@ std::vector<ValidationIssue> ProfileValidator::validate(const Profile& p) {
                 (s.minStrikeUs < s.pulseMinUs || s.minStrikeUs > s.pulseMaxUs))
                 err(tag + ".minStrikeUs",
                     "Minimum strike pulse is outside the servo's min/max range");
+            // A minimum-strike pulse outside the rest->active stroke is almost
+            // certainly a calibration slip: the runtime saturates the depth at the
+            // stroke endpoint, so the intent is not what will play (audit 3, P2).
+            if (s.minStrikeUs != 0) {
+                uint16_t lo = s.restUs < s.activeUs ? s.restUs : s.activeUs;
+                uint16_t hi = s.restUs < s.activeUs ? s.activeUs : s.restUs;
+                if (s.minStrikeUs < lo || s.minStrikeUs > hi)
+                    warn(tag + ".minStrikeUs",
+                         "Minimum strike pulse lies outside the rest->active stroke; "
+                         "the guaranteed depth saturates at the stroke endpoint");
+            }
             // Plectrum-as-mute rest position, when set, must sit in the pulse window.
             if (s.muteUs != 0 && (s.muteUs < s.pulseMinUs || s.muteUs > s.pulseMaxUs))
                 err(tag + ".muteUs",
