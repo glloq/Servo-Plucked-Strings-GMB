@@ -410,6 +410,8 @@ std::string buildDiagnosticsJson() {
 
 void setup() {
     Serial.begin(115200);
+    Serial.println();
+    Serial.printf("[boot] Servo-Plucked-Strings-GMB (reset: %s)\n", resetReasonStr());
     g_safety.boot();  // servos neutralised (spec §21.1)
     // Wire the playback scheduler to its collaborators + the central fault path (P2.17).
     g_scheduler.begin(&g_instrument, &g_servos, &g_actuators, &g_profile, faultRuntimeAxis);
@@ -463,6 +465,10 @@ void setup() {
     { StateGuard lock; applyProfile(); }
     g_sysex.setUseV2(true);
 
+    Serial.printf("[boot] profile: %s\n",
+                  haveValidProfile ? g_profile.instrument.name.c_str()
+                                   : "none valid -> CONFIG_SAFE (web UI only)");
+
     Preferences prefs;
     prefs.begin("gmb", true);
     String staPass = prefs.getString("wifipass", "");
@@ -474,6 +480,7 @@ void setup() {
     g_dinMidi.begin(nullptr);  // P1.7: byte->event logic ready; inert until a DIN RX UART is bound here
     pinMode(kBootButtonPin, INPUT_PULLUP);  // BOOT button -> force hotspot (long press)
     g_bootHold.configure(kBootHoldMs);
+    Serial.println(F("[boot] hold BOOT (GPIO0) ~2 s to force the Wi-Fi hotspot"));
 
     WebContext ctx;
     ctx.profile = &g_profile;
@@ -560,6 +567,7 @@ void setup() {
             "profile is loaded and armed from the web UI", millis());
     }
     g_web.refreshStatus();
+    Serial.printf("[boot] setup complete — state %s\n", appStateStr());
 }
 
 void loop() {
