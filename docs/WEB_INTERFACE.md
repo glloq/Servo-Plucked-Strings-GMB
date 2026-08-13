@@ -326,6 +326,7 @@ open note ─┐        fret 1   2    3     …          soundhole
 | `POST` | `/api/hotspot` | switch to the access point + captive portal now (see [`NETWORK_HOTSPOT.md`](NETWORK_HOTSPOT.md)) |
 | `POST` | `/api/wifi` | store device network settings (mode/SSID/hostname) + write-only credentials in NVS; `apply:true` reconnects now, `clearStationPassword` erases the stored secret |
 | `GET` | `/api/wifi/scan` | latest Wi-Fi survey `{scanning, networks:[{ssid,rssi,secure,channel}]}`; `?start=1` kicks a fresh scan |
+| `POST` | `/api/midi/source` | UDP MIDI source posture: `{policy: "open"\|"lockToFirst"\|"disabled", unlock: bool}` — stored device-side (NVS), applied live |
 | `POST` | `/api/auth` | set the admin token (first-run bootstrap allowed) |
 | `POST` | `/api/storage/format` | deliberate LittleFS reformat |
 | `POST` | `/api/sysex/request` | run a GMB SysEx buffer → decoded response |

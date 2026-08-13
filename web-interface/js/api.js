@@ -584,6 +584,9 @@
       wifi: { mode: p.network.mode, ssid: p.network.mode === 'station' ? p.network.ssid : p.network.apSsid,
         ip: p.network.mode === 'station' ? '192.168.1.42' : '192.168.4.1', rssi: -54, connected: true },
       midiSource: 'WebSocket MIDI (Wi-Fi)',
+      midiSourcePolicy: MOCK.midiSourcePolicy || 'open',
+      midiSourceLocked: false,
+      authConfigured: !!MOCK.authConfigured,
       activeProfile: p.instrument.name,
       stringsReady: p.instrument.stringCount, stringsTotal: p.instrument.stringCount,
       notesPlaying: 0,
@@ -949,7 +952,23 @@
       var self = this;
       return this._call('/api/auth', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: t })
-      }, function () { return { ok: true }; }).then(function (r) { self.setAdminToken(t); return r; });
+      }, function () { MOCK.authConfigured = true; return { ok: true }; })
+        .then(function (r) { self.setAdminToken(t); return r; });
+    },
+    // POST /api/midi/source -> { ok }. UDP MIDI source posture: policy
+    // "open"|"lockToFirst"|"disabled" (optional) and/or unlock:true to forget
+    // the currently locked sender. Stored device-side (NVS), survives reboots.
+    setMidiSource: function (payload) {
+      var body = {};
+      if (payload.policy) body.policy = payload.policy;
+      if (payload.unlock) body.unlock = true;
+      return this._call('/api/midi/source', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }, function () {
+        if (body.policy) MOCK.midiSourcePolicy = body.policy;
+        return { ok: true };
+      });
     },
 
     _fetch: function (path, opts) {

@@ -196,6 +196,10 @@
 
   // Save the working draft atomically (SysEx spec 15: only validated profiles
   // are published; a save increments capabilitiesRevision on the backend).
+  // The returned Promise REJECTS on failure (after toasting): callers that chain
+  // follow-up actions on a successful save must be able to tell the difference —
+  // the old swallow-and-resolve let "saved, now do X" run on a failed save
+  // (audit 4). Callers that don't care can ignore the rejection via .catch.
   GMB.saveProfile = function () {
     return GMB.api.putProfile(state.profile).then(function (res) {
       state.dirty = false;
@@ -206,8 +210,9 @@
       updateMockBadge();
     }).catch(function (e) {
       var body = e && e.body;
-      if (body && body.issues && GMB.reportIssues('Save rejected', body.issues)) return;
-      GMB.toast('Save failed: ' + ((body && body.error) || e.message), 'error');
+      if (!(body && body.issues && GMB.reportIssues('Save rejected', body.issues)))
+        GMB.toast('Save failed: ' + ((body && body.error) || e.message), 'error');
+      throw e;  // the toast is shown; callers still need the real outcome
     });
   };
 
