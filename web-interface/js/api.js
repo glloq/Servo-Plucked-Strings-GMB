@@ -413,16 +413,44 @@
     return out;
   };
 
+  // Differential regeneration (audit 5 P0): a regenerated servo that mechanically
+  // matches an EXISTING one — same string, role, fret and geared side-B — keeps the
+  // existing servo's ENTIRE configuration (source pca/gpio, board/bus/channel or
+  // GPIO, every calibrated pulse, direction, timings). Only genuinely NEW actuators
+  // receive the generated defaults. Pure: returns a new array, consumes each
+  // existing servo at most once.
+  GMB.mergeBuilderServos = function (generated, existing) {
+    var pool = (existing || []).slice();
+    function key(s) {
+      return s.function + ':' +
+        (s.fret === undefined || s.fret === null ? -1 : s.fret) + ':' +
+        (s.fretB === undefined || s.fretB === null ? -1 : s.fretB);
+    }
+    return generated.map(function (g) {
+      for (var i = 0; i < pool.length; i++) {
+        if (pool[i].stringIndex === g.stringIndex && key(pool[i]) === key(g)) {
+          return pool.splice(i, 1)[0];  // keep the calibrated servo as-is
+        }
+      }
+      return g;  // a new actuator: generated defaults
+    });
+  };
+
   // Build the whole servo list from a per-string spec function. A string whose
-  // fretting is 'custom' keeps its EXISTING servos untouched (so re-generating
-  // never destroys hand-tuned wiring); every other string is regenerated. Pure.
+  // fretting is 'custom' keeps its EXISTING servos untouched; every other string
+  // is regenerated DIFFERENTIALLY: servos that still exist mechanically keep their
+  // full calibration + wiring, only new positions get defaults (audit 5 P0 — a
+  // simple maxFret change used to silently reset every pulse to factory values).
+  // Pass existing = [] (or null) for an explicit factory reset. Pure.
   GMB.buildInstrument = function (specFor, strings, existing) {
     var out = [];
     for (var i = 0; i < strings.length; i++) {
       var es = specFor(i) || {};
+      var mine = (existing || []).filter(function (s) { return s.stringIndex === i; });
       if (es.fretting === 'custom')
-        out = out.concat((existing || []).filter(function (s) { return s.stringIndex === i; }));
-      else out = out.concat(GMB.buildStringServos(i, es));
+        out = out.concat(mine);
+      else
+        out = out.concat(GMB.mergeBuilderServos(GMB.buildStringServos(i, es), mine));
     }
     return out;
   };
@@ -955,6 +983,21 @@
       }, function () { MOCK.authConfigured = true; return { ok: true }; })
         .then(function (r) { self.setAdminToken(t); return r; });
     },
+    // POST /api/auth/check with a CANDIDATE token: 200 = it is the device's admin
+    // token (remember it locally so this browser's writes work), 401 = wrong.
+    // Never changes the stored token (audit 5 — a fresh browser knowing the token
+    // had no way to authenticate itself).
+    unlockAdminToken: function (t) {
+      var self = this;
+      return this._call('/api/auth/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-GMB-Token': t || '' },
+        body: '{}'
+      }, function () { return { ok: true }; }).then(function (r) {
+        self.setAdminToken(t);
+        return r;
+      });
+    },
     // POST /api/midi/source -> { ok }. UDP MIDI source posture: policy
     // "open"|"lockToFirst"|"disabled" (optional) and/or unlock:true to forget
     // the currently locked sender. Stored device-side (NVS), survives reboots.
@@ -976,10 +1019,11 @@
       if (this._forceMock) {
         var fm = new Error('forced-mock'); fm.network = true; return Promise.reject(fm);
       }
-      // Attach the admin token to write requests when one is configured.
+      // Attach the admin token to write requests when one is configured — unless
+      // the caller already set one (the unlock flow probes a CANDIDATE token).
       if (this._adminToken && opts && opts.method && opts.method !== 'GET') {
         opts.headers = opts.headers || {};
-        opts.headers['X-GMB-Token'] = this._adminToken;
+        if (!opts.headers['X-GMB-Token']) opts.headers['X-GMB-Token'] = this._adminToken;
       }
       return fetch(path, opts).then(function (r) {
         // Backend replied. Whatever the status, we are NOT offline.
@@ -1128,9 +1172,19 @@
     // plus an optional { us }: when present the firmware drives the servo to that
     // exact pulse and holds it (live calibration, incl. a geared finger's side-B
     // press); absent/0 keeps the rest/active press-release semantics.
+    // When the payload carries the servo's mechanical IDENTITY (function +
+    // stringIndex [+ fret]) the firmware resolves it against the ACTIVE profile
+    // instead of trusting the draft's array index — a draft whose servo list has
+    // been edited would otherwise move the WRONG actuator (audit 5 P0). It answers
+    // 409 for an actuator that only exists in the unsaved draft.
     testServo: function (payload) {
       var wire = { index: payload.index | 0, active: !!payload.active };
       if (payload.us) wire.us = payload.us | 0;
+      if (payload.function) {
+        wire.function = payload.function;
+        wire.stringIndex = payload.stringIndex | 0;
+        if (payload.fret >= 1) wire.fret = payload.fret | 0;
+      }
       return this._call('/api/test/servo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(wire)
       }, function () { return mockTestServo(payload); });

@@ -200,17 +200,63 @@
   // follow-up actions on a successful save must be able to tell the difference —
   // the old swallow-and-resolve let "saved, now do X" run on a failed save
   // (audit 4). Callers that don't care can ignore the rejection via .catch.
+  // PUT /api/profile answers 202: the activation is only QUEUED (the loop parks the
+  // old servos, swaps, re-parks, re-arms). "Saved" therefore is NOT "active": after
+  // acceptance we follow the command outcome and then poll the status until the
+  // instrument is back to ready/readyDegraded, so the success toast means the new
+  // profile actually RUNS (audit 5). Timeouts degrade to an honest "still
+  // activating" warning without rejecting (the activation continues on-device).
+  function waitForActivation(commandId) {
+    function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function pollCommand(triesLeft) {
+      if (!commandId) return Promise.resolve('succeeded');  // mock / immediate path
+      return GMB.api.commandState(commandId).then(function (r) {
+        var st = r && r.state;
+        if (st === 'succeeded') return 'succeeded';
+        if (st === 'refused') throw Object.assign(new Error('activation refused'),
+                                                  { refused: true });
+        if (triesLeft <= 0) return 'timeout';
+        return delay(300).then(function () { return pollCommand(triesLeft - 1); });
+      });
+    }
+    function pollReady(triesLeft) {
+      return GMB.api.getStatus().then(function (st) {
+        var s = String((st && st.state) || '').toLowerCase();
+        if (s === 'ready' || s === 'readydegraded') return 'ready';
+        if (triesLeft <= 0) return 'timeout';
+        return delay(500).then(function () { return pollReady(triesLeft - 1); });
+      });
+    }
+    return pollCommand(20).then(function (r) {
+      if (r === 'timeout') return 'timeout';
+      return pollReady(30);  // parking can take a mechanical settle
+    });
+  }
+
   GMB.saveProfile = function () {
     return GMB.api.putProfile(state.profile).then(function (res) {
       state.dirty = false;
       var b = document.getElementById('save-bar');
       if (b) b.classList.remove('visible');
       if (res && res.capabilitiesRevision) state.profile.capabilitiesRevision = res.capabilitiesRevision;
-      GMB.toast('Profile saved (revision ' + (state.profile.capabilitiesRevision) + ').', 'ok');
       updateMockBadge();
+      if (res && res.accepted !== undefined) {
+        GMB.toast('Profile accepted — activating…', 'ok');
+        return waitForActivation(res.commandId).then(function (r) {
+          if (r === 'timeout')
+            GMB.toast('Activation still in progress — check the status bar.', 'warn');
+          else
+            GMB.toast('Profile published and ACTIVE (revision ' +
+                      state.profile.capabilitiesRevision + ').', 'ok');
+        });
+      }
+      // Mock / legacy backend: no queue — the save is the whole story.
+      GMB.toast('Profile saved (revision ' + (state.profile.capabilitiesRevision) + ').', 'ok');
     }).catch(function (e) {
       var body = e && e.body;
-      if (!(body && body.issues && GMB.reportIssues('Save rejected', body.issues)))
+      if (e && e.refused)
+        GMB.toast('Activation refused by the device (safety locked or invalid profile).', 'error');
+      else if (!(body && body.issues && GMB.reportIssues('Save rejected', body.issues)))
         GMB.toast('Save failed: ' + ((body && body.error) || e.message), 'error');
       throw e;  // the toast is shown; callers still need the real outcome
     });

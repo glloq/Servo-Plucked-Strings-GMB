@@ -235,7 +235,32 @@
   }
 
   // ---- Advanced tab ---------------------------------------------------------
-  var adminTok = { token: '', confirm: '' };
+  var adminTok = { token: '', confirm: '', current: '' };
+
+  // Re-read the live status and re-render the security section (policy radios,
+  // unlock button, protection banner) so a change is visible IMMEDIATELY.
+  function refreshSecurity() {
+    var sec = document.getElementById('security-section');
+    if (!sec) return;
+    GMB.api.getStatus().then(function (st) { renderSecurity(sec, st); })
+      .catch(function () {});
+  }
+
+  function unlockBrowser() {
+    if (!adminTok.current) {
+      GMB.toast('Enter the current admin token first.', 'warn');
+      return;
+    }
+    GMB.api.unlockAdminToken(adminTok.current)
+      .then(function () {
+        adminTok.current = '';
+        GMB.toast('Token accepted — this browser is now authorised for writes.', 'ok');
+        refreshSecurity();
+      })
+      .catch(function () {
+        GMB.toast('Wrong token — the device refused it.', 'error');
+      });
+  }
 
   function setAdminToken() {
     if (!adminTok.token || adminTok.token.length < 8) {
@@ -264,18 +289,30 @@
   function renderSecurity(box, st) {
     box.innerHTML = '';
     var configured = st ? !!st.authConfigured : null;
-    box.appendChild(section('Admin access', h('div.form-grid', [
+    var adminKids = [
       h('p' + (configured === false ? '.warn-text' : '.muted'),
         configured === null ? 'Protection: …'
           : configured ? 'Protection: configured — write API calls require the admin token.'
                        : 'Protection: NOT configured — anyone reaching this page can ' +
-                         'change settings. Set a token before joining a shared network.'),
-      GMB.field('New admin token', GMB.input(adminTok, 'token', { type: 'password' }),
-        'at least 8 characters'),
-      GMB.field('Confirm token', GMB.input(adminTok, 'confirm', { type: 'password' })),
-      h('div.toolbar', [GMB.button('Set / change token', setAdminToken, 'primary')])
-    ]), 'Stored on the device (never exported); this browser keeps its copy locally ' +
-        'so your own writes keep working.'));
+                         'change settings. Set a token before joining a shared network.')
+    ];
+    if (configured) {
+      // A NEW browser that KNOWS the token must be able to authorise itself
+      // without changing the device's token (audit 5): verify via
+      // /api/auth/check, then remember it locally.
+      adminKids.push(GMB.field('Current admin token',
+        GMB.input(adminTok, 'current', { type: 'password' }),
+        'authorise THIS browser with the existing token'));
+      adminKids.push(h('div.toolbar', [GMB.button('Unlock this browser', unlockBrowser, 'primary')]));
+    }
+    adminKids.push(GMB.field(configured ? 'New admin token' : 'Admin token',
+      GMB.input(adminTok, 'token', { type: 'password' }), 'at least 8 characters'));
+    adminKids.push(GMB.field('Confirm token', GMB.input(adminTok, 'confirm', { type: 'password' })));
+    adminKids.push(h('div.toolbar', [GMB.button(configured ? 'Change token' : 'Set token',
+      setAdminToken, configured ? 'ghost' : 'primary')]));
+    box.appendChild(section('Admin access', h('div.form-grid', adminKids),
+      'Stored on the device (never exported); this browser keeps its copy locally ' +
+      'so your own writes keep working.'));
 
     var policy = (st && st.midiSourcePolicy) || 'open';
     var locked = !!(st && st.midiSourceLocked);
@@ -284,6 +321,7 @@
       input.addEventListener('change', function () {
         GMB.api.setMidiSource({ policy: value }).then(function () {
           GMB.toast('Network MIDI source policy: ' + label, 'ok');
+          refreshSecurity();  // show the unlock button / lock state right away
         }).catch(function (e) {
           GMB.toast('Policy change failed: ' + ((e && e.message) || e), 'error');
         });
@@ -301,6 +339,7 @@
       midiKids.push(h('div.toolbar', [GMB.button('Unlock current sender', function () {
         GMB.api.setMidiSource({ unlock: true }).then(function () {
           GMB.toast('Sender unlocked — the next controller heard will lock the session.', 'ok');
+          refreshSecurity();
         }).catch(function (e) {
           GMB.toast('Unlock failed: ' + ((e && e.message) || e), 'error');
         });

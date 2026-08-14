@@ -5,7 +5,7 @@ name: CI
 #                 the platform compile-check (main.cpp + ESP32 adapters) and the
 #                 ServoBank routing / controlled-park runtime check.
 #   profiles    — JSON format lint + the C++ profile validator over every profile.
-#   web-js      — syntax-checks every web-interface JS file.
+#   web-js      — syntax-checks every web JS file + behavioural tests of the pure UI logic.
 #   firmware    — builds the ANNOUNCED ESP32 boards with PlatformIO (a board is only
 #                 claimed as supported if it compiles here) and reports flash/RAM size.
 on:
@@ -52,7 +52,7 @@ jobs:
         run: bash firmware/test/profilecheck/run.sh
 
   web-js:
-    name: Web interface JS syntax
+    name: Web interface JS syntax + behaviour
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +67,8 @@ jobs:
             node --check "$f" || fail=1
           done
           exit $fail
+      - name: Behavioural tests (builder merge keeps calibration, audit 5)
+        run: node web-interface/test/run-tests.js
 
   firmware:
     name: Firmware build (${{ matrix.env }})
