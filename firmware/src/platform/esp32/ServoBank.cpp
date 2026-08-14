@@ -146,6 +146,10 @@ ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
     rt_[index].pwmOff = false;
 #else
     (void)us;
+    if (hostWriteResult) {
+        ActuatorResult forced = hostWriteResult(index);
+        if (forced != ActuatorResult::Ok) return forced;
+    }
 #endif
     ++moveCount_;  // a servo pulse actually reached an output (diagnostics, P2.19)
     return ActuatorResult::Ok;
@@ -336,21 +340,37 @@ void ServoBank::hardStop() {
     // (do not wait for settleMs), regardless of disableAtRest. Used for E-stop /
     // panic / major fault and as the final cut of a controlled park. Never gated on
     // a mechanical movement completing (spec P0 §21.2).
-    outputEnable(false);
-    for (int i = 0; i < (int)servos_.size(); ++i) {
-        if (servos_[i].source == ServoSource::DirectGpio)
-            writeOff(i);
-        else
-            toRest(i);
-        if (i < (int)rt_.size()) rt_[i] = Rt{};
-    }
+    //
+    // Strict pass order (audit 7 P0): every NEUTRALISING action runs before any
+    // I2C traffic. A hard stop is most needed precisely when hardware misbehaves,
+    // and a wedged/slow I2C bus in the old per-servo loop could delay the
+    // direct-GPIO cut behind dozens of blocking PCA transactions.
+    outputEnable(false);  // pass 1: every PCA output dead at once (GPIO /OE line)
+    for (int i = 0; i < (int)servos_.size(); ++i)  // pass 2: direct PWM off — no
+        if (servos_[i].source == ServoSource::DirectGpio) writeOff(i);  // I2C yet
+    // pass 3 (best effort, everything already neutralised): preload REST into the
+    // PCA registers so a later outputEnable(true) re-lights at rest, not at the
+    // last played position. Harmless if a board is gone — /OE already cut it.
+    for (int i = 0; i < (int)servos_.size(); ++i)
+        if (servos_[i].source != ServoSource::DirectGpio) toRest(i);
+    for (auto& r : rt_) r = Rt{};  // pass 4: runtime state cleared
 }
 
-void ServoBank::moveAllToRest() {
+ServoBank::ParkResult ServoBank::moveAllToRest() {
     // Controlled park phase 1: drive every servo to rest with outputs kept live. Each
     // release() writes the rest pulse and lets update()/disableAtRest cut idle PWM in
     // the normal way; the caller waits parkDurationMs() for the travel to finish.
-    for (int i = 0; i < (int)servos_.size(); ++i) release(i);
+    // The FIRST failed rest command is reported (audit 7 P1): a park whose write
+    // never reached a servo must not let the caller assume the finger lifted —
+    // arming / a profile swap has to abort instead of tearing the old config down.
+    ParkResult out;
+    for (int i = 0; i < (int)servos_.size(); ++i) {
+        ActuatorResult r = release(i);
+        // Disabled servos are not part of the mechanical park (never driven).
+        if (r == ActuatorResult::Ok || r == ActuatorResult::Disabled) continue;
+        if (out.ok) { out.ok = false; out.failedServo = i; out.reason = r; }
+    }
+    return out;
 }
 
 uint32_t ServoBank::parkDurationMs() const {
