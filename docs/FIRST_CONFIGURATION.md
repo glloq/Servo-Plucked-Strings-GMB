@@ -3,8 +3,9 @@
 > Source: `SPECIFICATION.md` §8, §10, §26 (first configuration guide).
 > Related documents: [`WEB_INTERFACE.md`](WEB_INTERFACE.md) · [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) · [`CALIBRATION.md`](CALIBRATION.md) · [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) · [`SAFETY.md`](SAFETY.md).
 
-This guide walks a beginner from first power-on to the first note, using only
-the **simplified mode** of the Web interface. No code modification is needed.
+This guide walks a beginner from first power-on to the first note through the Web
+interface, which is deliberately **simplified-only** (there is no expert mode to
+switch on). No code modification is needed.
 
 ---
 
@@ -29,8 +30,11 @@ Default SSID: Servo-Plucked-Strings-GMB
 ```
 
 1. Connect your phone/computer to this Wi-Fi network.
-2. Open the local address shown (or the captive portal).
-3. The configuration wizard opens.
+2. Open the local address shown (or let the captive portal open it for you).
+3. The interface lands on the **Instrument** page. The sidebar holds three pages —
+   **Instrument** (playable neck), **Setup** (the whole configuration flow) and
+   **Wiring & GPIO** (the electrical reference); the gear button (⚙, top-right) holds
+   the device's Wi-Fi and the diagnostic tools. Go to **Setup** to configure.
 
 You can later switch to **client mode** (the ESP32 joins your network): SSID,
 password, and the mDNS host name (used as `<hostname>.local`). The address is
@@ -125,11 +129,20 @@ strum delay** — are set once on the **Timing** step, not here.
 
 ## 5. Step 4 — MIDI
 
-Global MIDI channel, Omni, sustain pedal, velocity curve, and **string/fret
-selection**: `CC20` selects the string and `CC21` the fret before a `Note On`
-(General-Midi-Boop tablature). The full CC/selection editor is on this step in
-**Advanced** mode; the GMB identity/capabilities and the live MIDI monitor are in
-the gear modal (Advanced) — see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3.
+Two short cards:
+
+* **MIDI parameters** — global MIDI channel (stored zero-based, `0` = channel 1),
+  **Omni** mode and the **velocity curve** (linear / soft / hard / exponential).
+* **String / fret selection** — an *Enable string/fret selection* toggle and an
+  **Apply General-Midi-Boop preset** button: `CC20` then selects the string and
+  `CC21` the fret before a `Note On` (GMB tablature), in *hybrid* mode — the CCs are
+  used when valid, otherwise the note falls back to automatic allocation.
+
+The interface is simplified-only, so the individual CC numbers, string numbering /
+order and the missing-CC policy are **not** editable on screen: the preset writes the
+General-Midi-Boop values, and an imported profile can carry anything else. The GMB
+identity/capabilities and the live MIDI monitor live in the gear modal (⚙ → Advanced)
+— see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3.
 
 ---
 
@@ -171,30 +184,54 @@ General-Midi-Boop.
 
 ---
 
-## 9. GPIO pins (the Pins tab)
+## 9. Wiring & GPIO — the third main page
 
-Pin assignment is **not a wizard step** — it lives on the **GPIO Pins tab**.
-**"Assign automatically"** places only the board-level signals a PCA9685 needs:
-I²C `SDA = 40`, `SCL = 41`, and the PCA `/OE` safety line `SERVO_OE = 47`. There
-are **no per-string STEP / DIR / HOME / ENABLE pins**. A direct-GPIO servo
+Pin assignment is **not a setup step**: it lives on the **Wiring & GPIO** page, which
+gathers the whole electrical side of the build behind five sub-tabs:
+
+| Sub-tab | What you do there |
+| ------- | ----------------- |
+| **Harness** | read the generated ESP32 + PCA9685 harness (boards, addresses, per-pin string·role), check the live wiring warnings, download the SVG, and follow the **Power wiring** advice (star wiring, one bulk cap per board, 100 nF ceramic, fail-safe `/OE`) |
+| **Power & safety** | tick what is really **fitted on the machine** (`/OE` pull-up, gated enable stage, E-stop contactor, main + branch fuses); undeclared parts draw dashed in the power tree. Size fuses, caps, PSU and wire section with the **current estimator** |
+| **I²C & PCA** | check each board's address and its **A0–A2 jumpers**, and the **pull-up budget** (one equivalent 2.2–4.7 kΩ per bus line) |
+| **GPIO pins** | **"Assign automatically"** places only the board-level signals a PCA9685 needs: I²C `SDA = 40`, `SCL = 41` and the PCA `/OE` safety line `SERVO_OE = 47`. Declare the **hardware E-stop** here too (contact wiring + its `ESTOP` GPIO) |
+| **Commissioning** | walk the staged power-up checklist before the first note; each stage is a gate |
+
+There are **no per-string STEP / DIR / HOME / ENABLE pins**. A direct-GPIO servo
 carries its own pin in its servo entry (on the Frets or Plucking step), not here.
-See [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md).
+See [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md),
+[`../hardware/POWER_AND_SAFETY.md`](../hardware/POWER_AND_SAFETY.md) and
+[`../hardware/COMMISSIONING.md`](../hardware/COMMISSIONING.md).
 
 ---
 
 ## 10. Connecting General-Midi-Boop (optional)
 
-On the "MIDI > GMB identity and capabilities" page, apply the **General-Midi-Boop**
-preset (CC20 = string, CC21 = fret, hybrid mode). GMB then automatically
-discovers the instrument (identity, capabilities, strings) via SysEx. See
-[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3 and [`WEB_INTERFACE.md`](WEB_INTERFACE.md) §3.3.
+Two places, both already covered above:
+
+1. On **Setup → MIDI**, press **Apply General-Midi-Boop preset** (CC20 = string,
+   CC21 = fret, hybrid mode).
+2. In the **gear modal (⚙) → Advanced**, keep *Enable GMB detection* on and press
+   **Publish capabilities**.
+
+GMB then discovers the instrument (identity, capabilities, strings) via SysEx. The
+same tab carries a **SysEx tester** (descriptor, identity, capabilities, string
+config, full discovery) to check the exchange. See
+[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2–3 and
+[`WEB_INTERFACE.md`](WEB_INTERFACE.md) §3.3.
 
 ---
 
 ## 11. Save and get going
 
-Save your configuration as a profile (at least 8 slots), export it as JSON to
-keep it, and set the startup profile. The Wi-Fi password is not included in
-ordinary exports.
+**Save & publish** (the last step of the Setup flow, or the bar that appears as soon
+as something is edited) validates the draft, activates it and publishes the new
+capabilities. "Saved" means *active*: the interface follows the device through
+parking → swap → re-arming and only confirms once the new profile really runs.
+
+Profile **slots** (8 of them, with export / import / startup slot) exist in the
+firmware and in the REST API, but are deliberately **not exposed** in the interface —
+saving activates the profile in place. The Wi-Fi password is never included in an
+export.
 
 Enjoy your first note!

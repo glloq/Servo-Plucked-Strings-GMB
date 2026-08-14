@@ -17,8 +17,9 @@ wiring diagrams, test buttons, automatic validation and understandable error
 messages. It shows only the **green** GPIOs (see
 [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md)) and keeps each step to the few
 choices that matter: per-servo you set the **PCA board + pin** and the **angle(s)**
-right where you calibrate; the fine timing (pulse window, travel/settle) uses sane
-defaults and is not surfaced.
+right where you calibrate. The servo's mechanical **pulse window**
+(`pulseMinUs`/`pulseMaxUs`) is never surfaced — the angles are converted against it —
+and travel/settle appear only where they change the gesture (the Plucking step).
 
 ---
 
@@ -31,25 +32,31 @@ diagnostic tools live in the gear modal.
 
 | Step | Title | Content |
 | ----- | ----- | ------- |
-| 1 | **Instrument** | Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), name it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the **Board** — the **ESP32 board selector** (S3 / WROOM-32 / DevKit v1) + native-USB reserve. A preset produces a working instrument and the wiring is (re)generated automatically; the mechanics live per-servo on the Frets / Plucking steps |
+| 1 | **Instrument** | Pick a **preset** (ukulele/guitar/bass/mandolin/banjo/custom — type is cosmetic), name it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the **Board** — the **ESP32 board selector** (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1 — the two S3 revisions are separate boards, their RGB-LED pin differs) + native-USB reserve. A preset produces a working instrument and the wiring is (re)generated automatically; the mechanics live per-servo on the Frets / Plucking steps |
 | 2 | **Frets** | the **finger servos**, per string (string-tab strip). A clickable **coverage strip** shows which frets carry a servo (geared marked ⚙); **tap a fret** to open its **servo div** — a **"One servo drives 2 frets (geared)"** toggle, its **PCA board + pin**, the **angle(s)** set with precise **− / + steppers** (a geared servo shows both press angles; its rest sits at their midpoint automatically), and the **rotation direction**. Every change drives the servo live; **play the note** to check. An open-only string shows a one-click *Equip frets*. A **test bench** sweeps one string or all strings |
 | 3 | **Plucking** | one **sounding servo** per string: its **PCA board + pin**, the **contact / down-stroke / up-stroke angles**, per-plectrum **alternation** and **rotation direction**, travel/settle, the **mute** policy (source, hold, plectrum mute angle) and the global **gesture** (stroke duration, minimum strike depth). Plus the optional per-string extras: a **descent servo** (rest/play angles, direction, travel, engage delay, lower- or raise-to-play) and a **damper servo** (rest/damp angles, direction, travel). A **test bench** plucks every open string and sweeps the strum servos |
-| 4 | **MIDI** | global channel, Omni, sustain pedal, velocity curve; a reminder that **CC20 selects the string** and **CC21 the fret** before a Note On. The live MIDI monitor + tester stay in the gear modal (Advanced) |
+| 4 | **MIDI** | two cards. **MIDI parameters** — global channel, Omni, velocity curve. **String / fret selection** — an *Enable string/fret selection* toggle and an **Apply General-Midi-Boop preset** button (**CC20 selects the string**, **CC21 the fret**, before a Note On). The live MIDI monitor + tester stay in the gear modal (Advanced) |
 | 5 | **Timing** | two cards. **Timing** — the two global delays: the **action delay** (fixed-time FIFO buffer) and the **fret → strum delay**, plus the strum lead. **Current management** — an **optional** governor (a toggle turns it off): cap how many servos start moving at once **whole-instrument** and **per PCA board** (each 0 = no cap), plus the stagger between starts |
 | 6 | **Test** | play an **open (fret 0)** note and a fretted note on each string (arm first); a full-instrument **test bench**; STOP (panic) |
 | 7 | **Validation** | "No problems found" or a precise list of problems; the firmware `ProfileValidator` is authoritative and no actuator is driven until the critical errors are fixed |
 
 **Board** selection lives in the **Instrument** step; **Network** (Wi-Fi) settings are
 in the gear modal — they belong to the device, not the instrument. The **automatic
-pin assignment** is a button on the **GPIO Pins** page; neither is a separate setup
-step.
+pin assignment** is a button on the **GPIO pins** sub-tab of the *Wiring & GPIO* page;
+none of these is a separate setup step.
 
 The per-string steps (**Frets** and **Plucking**) show **one string at a time** via
 a string-tab strip, so a 6-string instrument stays navigable. Each servo carries its
-own **PCA board + pin** and **angle(s)** right where you calibrate it; the fine timing
-(pulse window, travel/settle) uses sane defaults and is not surfaced. General MIDI
-parameters (sustain, chord **saturation strategy**, velocity curve…) live on the
-**MIDI** step.
+own **PCA board + pin**, its **I²C bus** and **angle(s)** right where you calibrate it.
+
+**What the simplified UI does not surface.** The profile carries more MIDI fields than
+the interface shows — transpose, chord window, sustain pedal + its CC, chord
+**saturation strategy**, and the detailed string/fret selection editor (CC numbers,
+numbering, order, missing-CC policy). Since the expert mode was removed these keep
+their profile defaults (or whatever an imported JSON sets) and are edited by importing
+a profile, not from the screen. The same applies to the **/OE split per bus**
+(`SERVO_OE2`): the data model and the firmware support it, but no control creates it —
+both buses share a single `/OE`.
 
 **Testing one servo or a group.** The Frets, Plucking and Test steps each carry an
 **Arm** control and a **test bench**: single-servo buttons, plus group tests (sweep
@@ -71,7 +78,8 @@ servo"*. Full study and calibration procedure:
 **Settings** modal — now just two tabs, since the whole instrument setup moved to the
 Setup page: **Network** (mode / SSIDs / hostname, a **Scan networks** picker,
 write-only Wi-Fi passwords, and a **Start hotspot now** button) and **Advanced**
-(GMB identity & capabilities / SysEx tester + the live MIDI monitor). Network
+(device security — admin token and UDP MIDI source policy — then GMB identity &
+capabilities / SysEx tester and the live MIDI monitor + tester). Network
 settings are **device state**: saving stores them in NVS (independently of any
 profile slot, so they survive reboots and profile changes) and applies them
 immediately, with the automatic hotspot fallback if the connection fails. Picking
@@ -121,14 +129,18 @@ up-stroke angles with per-plectrum alternation and direction, the mute policy an
 angle, plus optional descent and damper servos:
 <p align="center"><img src="../img/screenshots/calibration-plucking.png" alt="Setup — Plucking" width="100%"/></p>
 
-**MIDI** — channel, omni, velocity, enable string/fret selection + GMB preset:
+**MIDI** — global channel, Omni and velocity curve, then the string/fret selection
+toggle + the General-Midi-Boop preset button:
 <p align="center"><img src="../img/screenshots/midi.png" alt="Setup — MIDI" width="100%"/></p>
 
 **Timing** — the two global delays (action delay / FIFO buffer, fret → strum delay, strum lead) + the **optional** PCA9685 in-rush governor (whole-instrument and per-board caps):
 <p align="center"><img src="../img/screenshots/power.png" alt="Setup — Timing" width="100%"/></p>
 
-**Test** — full-instrument group tests: play every open string, sweep every finger / plucker, run a scale, test everything (Validation is the final step, then Save):
+**Test** — full-instrument group tests: play every open string, sweep every finger / plucker, run a scale, test everything; below them a per-string quick play (open + fret 5) and the STOP (panic) button:
 <p align="center"><img src="../img/screenshots/calibration-test.png" alt="Setup — Test" width="100%"/></p>
+
+**Validation** — the last step: `ProfileValidator`'s verdict, then **Save & publish**:
+<p align="center"><img src="../img/screenshots/validation.png" alt="Setup — Validation" width="100%"/></p>
 
 #### Main page 3 — Wiring & GPIO
 
@@ -159,16 +171,20 @@ and a **Current & supply estimator**: from fleet-typical idle/moving/stall curre
 and the governor caps it derives per-branch worst case, a fuse guide, a bulk-cap
 suggestion (C ≈ I·Δt/ΔV with editable Δt/ΔV), the PSU requirement, and a wire
 voltage-drop calculator.
+<p align="center"><img src="../img/screenshots/wiring-power.png" alt="Wiring & GPIO — Power & safety sub-tab" width="100%"/></p>
 
 **I²C & PCA** — per bus: SDA/SCL pins, every board with its address and **A0–A2
 solder-jumper setting**, and the **pull-up budget**: declare each breakout's on-board
 pull-ups (0 = removed) plus an optional external pair, and the page computes the
 **equivalent per line** (parallel resistors add) and grades it against the target
 window (one equivalent 2.2–4.7 kΩ per bus line — `hardware/I2C_PCA9685.md` §3).
+<p align="center"><img src="../img/screenshots/wiring-i2c.png" alt="Wiring & GPIO — I²C &amp; PCA sub-tab" width="100%"/></p>
 
 **Commissioning** — the staged power-up checklist of `hardware/COMMISSIONING.md`
 (stage gates, E-stop tests, per-branch bring-up) with per-instrument progress kept
-in the browser.
+in the browser. Each stage is a **gate**: it stays greyed out (*blocked by the
+previous gate*) until every box of the stage before it is ticked.
+<p align="center"><img src="../img/screenshots/commissioning.png" alt="Wiring & GPIO — Commissioning sub-tab" width="100%"/></p>
 
 **GPIO pins** — the board GPIO map + per-signal assignment with a **graphical board pinout** that
 highlights the used pins, plus the **Emergency stop input** card: declare the hardware
@@ -184,42 +200,60 @@ assigns pins on it.
 **Network** — network mode, SSIDs, hostname, write-only Wi-Fi credentials and the hotspot switch:
 <p align="center"><img src="../img/screenshots/network.png" alt="Settings — Network" width="70%"/></p>
 
-**Advanced** — GMB identity & computed capabilities + the SysEx tester, and the live MIDI monitor:
+**Advanced** — one scrolling tab holding all the device-side diagnostics. It opens on
+**device security**: the admin-token workflow (set / unlock this browser, with a
+banner when no token protects the device) and the **MIDI network source** posture
+(accept any sender · lock to the first sender · disable network MIDI):
+<p align="center"><img src="../img/screenshots/settings-advanced.png" alt="Settings — Advanced (security &amp; MIDI source)" width="70%"/></p>
+
+Scrolling down: **GMB identity & capabilities**, the read-only computed capabilities,
+the advanced GMB blocks and the **SysEx tester**:
 <p align="center"><img src="../img/screenshots/sysex.png" alt="Settings — Advanced (GMB / SysEx)" width="70%"/></p>
+
+And at the bottom, the live **MIDI monitor** + the **integrated test tool**:
+<p align="center"><img src="../img/screenshots/midi-monitor.png" alt="Settings — Advanced (MIDI monitor &amp; tester)" width="70%"/></p>
 
 Profiles are intentionally not exposed (a hidden, non-user setting).
 
-### 3.1 Dashboard (§19)
+### 3.1 Status surfaced in the UI (§19)
 
-Main page — overall status:
+There is **no separate dashboard page**. The state a player needs is folded into the
+top of the **Instrument** page and into every step that drives hardware:
 
 ```text
-overall state · Wi-Fi connection · MIDI source · active profile ·
-strings-ready count · notes playing · active faults ·
-capabilities revision · STOP button
+STOP (panic) · Re-arm servos · Armed / Not armed badge · play mode
++ a DEMO / MOCK DATA badge and the connection badge in the top bar
 ```
 
-Per string: status (state machine), open note, current note, current fret, finger
-state (**up / down**), plectrum state (**strike / rest**), last fault. There is no
+The Frets / Plucking / Test steps repeat the same **Arm** control and armed badge,
+plus a live status line for the running test sequence.
+
+The **full per-string dashboard of §19** (per-string state machine, current note and
+fret, finger up/down, plectrum strike/rest, last fault, notes playing, active faults)
+is **not** rendered as a page: the data is published by `GET /api/status` and
+`WS /ws/status`, and is read by the UI only to decide *armed / not armed*. There is no
 carriage position, HOME/LIMIT or temperature/voltage readout — the servo-per-fret
 firmware emits none.
 
-### 3.2 MIDI page — string/fret selection (STRING_FRET_SELECTION §14–16)
+### 3.2 String/fret selection (STRING_FRET_SELECTION §14–16)
 
-**Simplified** screen (§14):
+On the **Setup → MIDI** step the simplified-only interface keeps two controls:
 
 ```text
 [✓] Enable string/fret selection
-System used: [ General-Midi-Boop ]
-String CC: [ 20 ]      Fret CC: [ 21 ]
-String numbering: [ 1 to 6 ]
-String order: [ Normal ]
-When CC is absent: [ Choose automatically ]
+[ Apply General-Midi-Boop preset ]
+Hybrid (recommended): use CCs when valid, fall back to automatic allocation otherwise.
 ```
 
-Buttons: Apply preset · Test reception · Send a test · View received values. The
-advanced settings (offsets, tables, policies) stay hidden under "Advanced
-settings" (see [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2).
+The CC-level settings of §14 (**System used**, **String CC** / **Fret CC**, string
+numbering, string order, *When CC is absent*) and the advanced panel (offsets, tables,
+policies) exist in the profile and in `midiselect.js`, but the expert mode that
+rendered them was removed — the preset button writes the General-Midi-Boop values
+(CC20 = string, CC21 = fret, hybrid) and imported JSON can set the rest. See
+[`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §2.
+
+The monitor and the tester below are in the **gear modal → Advanced**, not on this
+step.
 
 **Web MIDI monitor (§15)** — real time:
 
@@ -238,43 +272,52 @@ channel; automatically sends string CC → fret CC → Note On → Note Off afte
 chosen duration, and displays each step (CC received, selection validated, finger
 pressed, string plucked).
 
-### 3.3 MIDI page — GMB identity and capabilities (SysEx §17–18)
+### 3.3 GMB identity and capabilities (SysEx §17–18)
 
-Path: `MIDI > GMB identity and capabilities`.
+Path: **gear modal (⚙) → Advanced**, below the device-security section.
 
-**Simplified mode (§17.1)**: enabling GMB detection, name, type, instrument
-preset, GM program, MIDI channel, "Publish capabilities" and "Test
-communication" buttons, status of the last detection. Computed capabilities,
-read-only:
+**Identity (§17.1)**: enabling GMB detection, instrument name, type, GM program,
+MIDI channel, the **Publish capabilities** and **Test communication** buttons, and
+the status of the last detection. Computed capabilities, read-only:
 
 ```text
-Strings: 4 · Frets: 12 · MIDI range: 40 to 76 · Polyphony: 4
-String CC: 20 · Fret CC: 21 · Tuning: E2 A2 D3 G3 · Revision: 7
+Strings: 4 · Frets: 12 · MIDI range: C4 – G5 (60–79) · Note mode: continuous
+Polyphony: 4 (auto) · CC string: 20 · CC fret: 21 · Tuning: G4 C4 E4 A4 · Revision: 7
 ```
 
-**Advanced mode (§17.2)**: enabling blocks 5/6/7, choice of the block 7 version,
-polyphony override, continuous range or discrete notes, viewing the announced CCs
-and the SysEx bytes, manual sending of each response, sending the notification,
-resetting the identifier, exporting the snapshot.
+**Advanced GMB options (§17.2)**, on the same tab: enabling blocks 5/6/7, the block 7
+version (v1 compatible / v2 extended), the polyphony override, the list of announced
+CCs, plus **View raw SysEx bytes** and **Send change notification (block 0x11)**.
+There is no "regenerate device id": the v2 `instance_id` is derived from the ESP32
+MAC and is stable by design.
 
-**SysEx tester (§18)**: simulate "Request identity / descriptor / capabilities /
-string configuration / Notify a change / Full discovery". For each test: message
-sent, message received, decoding of fields, 7-bit validity, length, possible
-error, response time. Protocol details in
+**SysEx tester (§18)**: **GMB descriptor (v2)** · **Request identity (v2 handshake)**
+· **Notify change** · **Request capabilities (v1)** · **Request string config (v1)** ·
+**Full discovery**. For each test: message sent, message received, decoding of fields,
+7-bit validity, length, possible error, response time. Protocol details in
 [`MIDI_PROTOCOL.md`](MIDI_PROTOCOL.md) §3.
 
 ### 3.4 MIDI settings (§18)
 
-Global channel, Omni mode, per-string channel, general/per-string transposition,
-note range, velocity curve (linear / soft / hard / exponential / custom), Note
-Off behavior, sustain pedal, chord grouping delay (default 3 ms), saturation
-strategy (see `NoteAllocator`, [`ARCHITECTURE.md`](ARCHITECTURE.md)). Velocity can
-act on the plectrum travel/speed, the attack delay, the plucking profile.
+**On screen** (Setup → MIDI): global channel, Omni mode, velocity curve
+(linear / soft / hard / exponential — there is no *custom* option, no custom curve
+table exists yet).
+
+**In the profile only** (no control renders them since the expert mode was removed —
+they keep their defaults or come from an imported JSON): transposition, chord grouping
+window, Note Off behaviour, sustain pedal + its CC number, and the chord **saturation
+strategy** (see `NoteAllocator`, [`ARCHITECTURE.md`](ARCHITECTURE.md)). Velocity acts
+on the plectrum attack depth between `restUs` and `activeUs`.
 
 ### 3.5 Profiles (§20)
 
-Up to **8 profile slots**. Functions: create, copy, rename, delete, export, import,
-restore, set the startup slot. **JSON** exchange format:
+Up to **8 profile slots** — create, copy, rename, delete, export, import, restore, set
+the startup slot. `profiles.js` implements the whole view and the REST routes below
+are live, but **no page mounts it**: profile management is deliberately hidden from
+the UI. The instrument is saved with **Save & publish**, which activates it and
+publishes the capabilities. The slots stay reachable through the API.
+
+**JSON** exchange format:
 
 ```json
 {
@@ -296,10 +339,10 @@ restore, set the startup slot. **JSON** exchange format:
 The Wi-Fi password **never** appears in ordinary exports (unless an explicit
 option is set).
 
-### 3.6 Fretboard — playable neck
+### 3.6 Instrument — playable neck
 
-Once the instrument is defined and calibrated, the **Fretboard** page turns it into
-a clickable **keyboard**. It draws the neck as a stylised instrument (headstock +
+Once the instrument is defined and calibrated, the **Instrument** page (the sidebar's
+first entry, and the landing page) turns it into a clickable **keyboard**. It draws the neck as a stylised instrument (headstock +
 tuning pegs, wood fretboard, body with a soundhole) with the strings and fret wires
 laid out **to scale** — the fret spacing follows equal temperament
 (`d(n) = 1 − 2^(−n/12)`, the *rule of 18*), so the neck compresses toward the body
@@ -321,18 +364,24 @@ open note ─┐        fret 1   2    3     …          soundhole
 * **Play mode** — only the mechanically-feasible options are offered: **Pluck** always,
   **Up-stroke** / **Alternate** for a *strum* servo, **Muted** when a *damper* exists.
   A *strum lift* is lowered for the stroke and raised again.
-* Uses the same `POST /api/test/servo` path as the wizard (works on the device **once
-  armed**, and stand-alone against the mock). Reads the **draft** profile, so an
-  in-progress calibration is playable immediately. Leaving the page lifts any held
-  finger; an **All fingers up** and the **STOP (panic)** button are the safety net.
+* **Chord bar** — pick a root (C … B) and a type (Maj / Min / 5 / 7 / Maj7 / m7): on
+  each string the lowest reachable fret of the chord is pressed and the strings are
+  struck together.
+* Uses the same `POST /api/test/servo` path as the setup flow (works on the device
+  **once armed** — a **Re-arm servos** button and an armed badge sit next to the STOP —
+  and stand-alone against the mock). Reads the **draft** profile, so an in-progress
+  calibration is playable immediately. Leaving the page lifts any held finger, and the
+  **STOP (panic)** button (top bar and sidebar) is the safety net.
 
 ---
 
 ## 4. REST / WebSocket API (`platform/esp32/WebApi.cpp`)
 
-> Implemented by the Web layer (`platform/esp32/WebApi.cpp`; the static UI is served
-> from LittleFS). It exposes the `Profile` / `PinManager` / `SafetyManager` /
-> `GmbSysEx` core described in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Implemented by the Web layer (`platform/esp32/WebApi.cpp`). The static UI is served
+> from the **copy embedded in the firmware binary** (`WebAssets.cpp`); a LittleFS
+> `/www` file, when present, overrides it per file. It exposes the `Profile` /
+> `PinManager` / `SafetyManager` / `GmbSysEx` core described in
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ### 4.1 REST endpoints
 
@@ -360,8 +409,11 @@ open note ─┐        fret 1   2    3     …          soundhole
 | `GET` | `/api/wifi/scan` | latest Wi-Fi survey `{scanning, networks:[{ssid,rssi,secure,channel}]}`; `?start=1` kicks a fresh scan |
 | `POST` | `/api/midi/source` | UDP MIDI source posture: `{policy: "open"\|"lockToFirst"\|"disabled", unlock: bool}` — stored device-side (NVS), applied live |
 | `POST` | `/api/auth` | set the admin token (first-run bootstrap allowed) |
+| `POST` | `/api/auth/check` | test a candidate admin token (200 = right, 401 = wrong); never changes the stored one |
 | `POST` | `/api/storage/format` | deliberate LittleFS reformat |
 | `POST` | `/api/sysex/request` | run a GMB SysEx buffer → decoded response |
+| `GET` | `/api/diagnostics` | runtime telemetry snapshot (§4.3) |
+| `GET` | `/gmb/descriptor.json` | GMB v2 descriptor served to a General-Midi-Boop controller |
 
 There are **no** stepper `jog` / `endstop` routes: servo-per-fret has no carriage
 or HOME/LIMIT sensors. Per-fret finger calibration uses `POST /api/test/servo`.
