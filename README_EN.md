@@ -90,8 +90,9 @@ overloading:
    in-rush current peaks don't stack.
 
 Recommended wiring: **one PCA9685 per string** (its fret fingers + its plucker
-fit within 16 channels), up to **8 PCA** boards (addresses 0x40–0x47). The
-mapping still stays free per servo.
+fit within 16 channels), up to **8 PCA boards per I²C bus** (addresses
+0x40–0x47) and **16 total** across the ESP32-S3's two buses (capacity table:
+`hardware/README.md`). The mapping still stays free per servo.
 
 ## 🎹 MIDI reception
 

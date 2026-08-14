@@ -133,18 +133,26 @@ angle, plus optional descent and damper servos:
 #### Main page 3 — Wiring & GPIO
 
 Two sub-tabs. The adaptive ESP32 + PCA9685 harness map: one or two I²C buses, boards
-at their address, per-pin string·role, live conflict checks, SVG export — plus a
-**Power wiring** card: run a **direct line from the supply to each PCA9685** (star
-wiring, no daisy-chaining), add a **bulk capacitor** at each board's V+/GND sized to
-how many micro-servos start at once (**~4 → 1000–2200 µF**, **~8 → 2200–4700 µF**,
-**~16 → 4700–10000 µF**) with a **100 nF ceramic** in parallel to filter HF noise
-(limits ESP32 crashes on a shared supply). A per-board table sizes it from each
-board's worst-case simultaneous starts (which the Timing step's per-board cap bounds).
+at their address, per-pin string·role, live conflict checks (a missing `/OE` is an
+**error** — the profile cannot arm — and a missing hardware E-stop declaration is
+flagged), SVG export — plus a **Power wiring** card: run a **direct line from the
+supply to each PCA9685** (star wiring, no daisy-chaining, fused per branch), add a
+**bulk capacitor** at each board's V+/GND sized to how many micro-servos start at
+once (**~4 → 1000–2200 µF**, **~8 → 2200–4700 µF**, **~16 → 4700–10000 µF** —
+empirical micro-servo starting values; size from datasheet peaks with C ≈ I·Δt/ΔV
+and confirm at the bench) with a **100 nF ceramic** in parallel to filter HF noise
+(limits ESP32 crashes on a shared supply), and make `/OE` **fail-safe** (pull-up +
+E-stop chain — `hardware/POWER_AND_SAFETY.md`). A per-board table sizes the caps from
+each board's worst-case simultaneous starts (which the Timing step's per-board cap bounds).
 <p align="center"><img src="../img/screenshots/wiring.png" alt="Wiring map (Wiring diagram sub-tab)" width="100%"/></p>
 
 …and the board GPIO map + per-signal assignment with a **graphical board pinout** that
-highlights the used pins. The board itself is chosen on the Setup page (Instrument →
-Board); this reference page shows it read-only and assigns pins on it.
+highlights the used pins, plus the **Emergency stop input** card: declare the hardware
+E-stop, pick its contact wiring (**normally closed recommended** — a press, a cut wire
+or an unplugged connector all read as STOP) and its `ESTOP` GPIO. The board itself is
+chosen on the Setup page (Instrument → Board — DevKitC-1 v1.0 and v1.1 are separate
+boards, their RGB-LED pin differs); this reference page shows it read-only and
+assigns pins on it.
 <p align="center"><img src="../img/screenshots/pins.png" alt="GPIO grid + board pinout (GPIO pins sub-tab)" width="100%"/></p>
 
 #### Gear modal (device only)

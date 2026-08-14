@@ -57,8 +57,15 @@ On distingue **strictement** deux opérations (jamais l'une déguisée en l'autr
   `/OE` PCA coupé et PWM GPIO coupé **tout de suite**, commandes annulées, état
   verrouillé, **sans aucune attente mécanique**. Un vrai E-stop ne dépend jamais de
   l'achèvement d'un mouvement.
-  - **E-stop matériel** (broche `ESTOP`, actif bas) : `hardStop` + état
-    `EmergencyStop`, testé en tête de boucle sur le niveau brut, avant toute commande.
+  - **E-stop matériel** (broche `ESTOP`, entrée `SafetyInput` déclarée dans
+    l'interface, *Wiring & GPIO → Emergency stop input*) : `hardStop` + état
+    `EmergencyStop`, testé en tête de boucle sur le niveau brut, avant toute
+    commande. Deux câblages du contact (`board.estopNormallyClosed`) :
+    - **NC recommandé** : boucle *normalement fermée* vers GND — la boucle fermée
+      autorise la marche ; un appui, un fil coupé ou un connecteur débranché
+      lisent STOP (fail-safe) ;
+    - **NO hérité** (actif bas) : conservé pour les machines déjà câblées — une
+      rupture de fil y désactive silencieusement l'E-stop.
   - **Panique logicielle** : `POST /api/panic` → `hardStop` + état `Panic`. Il faut
     ensuite un **reset** explicite (`POST /api/reset`) pour ré-armer.
 - **`controlledPark` — parking contrôlé** (changement de profil, arrêt normal,
@@ -81,9 +88,16 @@ vraie panique reste une commande distincte (`POST /api/panic` ou la broche `ESTO
   (l'instrument reste armé).
 
 > ⚠️ L'E-stop **logiciel** est une commodité, **pas** un substitut à une coupure
-> **matérielle** de l'alimentation des servos. Câblez le `/OE` des PCA9685 (et/ou
-> l'alimentation 5–6 V) sur un vrai bouton d'arrêt avant de mettre l'instrument sous
-> tension avec les cordes montées.
+> **matérielle**. L'ARU de référence est un **sous-système**
+> ([`../hardware/POWER_AND_SAFETY.md`](../hardware/POWER_AND_SAFETY.md)) : bouton
+> coup-de-poing **NC à verrouillage** dont un contact fait retomber le
+> **contacteur du rail servo 5–6 V** (seule coupure qui protège aussi les servos
+> GPIO directs), un contact informe l'entrée `ESTOP`, et — recommandé — un
+> contact inhibe l'étage d'activation du `/OE`. Le `/OE` lui-même doit être
+> **fail-safe** : pull-up externe vers 3,3 V (le PCA9685 a un pull-down interne :
+> un `/OE` flottant = sorties **actives**), et jamais de forçage direct à 3,3 V
+> contre le GPIO (contention). Câblez ce circuit avant de mettre l'instrument
+> sous tension avec les cordes montées.
 
 ## 3. Neutralisation des servos
 
