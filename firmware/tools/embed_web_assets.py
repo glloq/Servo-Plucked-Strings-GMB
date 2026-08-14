@@ -26,6 +26,9 @@ SRC = HERE.parent.parent / "web-interface"
 OUT = HERE.parent / "src" / "platform" / "esp32" / "WebAssets.cpp"
 
 SKIP = {"README.md"}
+# Directories never shipped to the device (dev-only content, e.g. the Node
+# behavioural tests under web-interface/test/).
+SKIP_DIRS = {"test"}
 
 MIME = {
     ".html": "text/html",
@@ -69,7 +72,9 @@ def main() -> int:
         return 1
 
     files = sorted(
-        p for p in SRC.rglob("*") if p.is_file() and p.name not in SKIP
+        p for p in SRC.rglob("*")
+        if p.is_file() and p.name not in SKIP
+        and not (SKIP_DIRS & set(p.relative_to(SRC).parts[:-1]))
     )
     if not files:
         print(f"error: no files under {SRC}", file=sys.stderr)

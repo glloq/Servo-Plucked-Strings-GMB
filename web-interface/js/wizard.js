@@ -326,9 +326,10 @@
       var idx = servoIndexOf(sv);
       if (idx < 0) continue;
       var key = (isGeared(sv) && sv.fretB === f) ? 'activeBUs' : 'activeUs';
-      out.push({ kind: 'servo', index: idx, active: true, us: sv[key] | 0, after: 450,
-        label: 'S' + (strIdx + 1) + ' fret ' + f });
-      out.push({ kind: 'servo', index: idx, active: false, us: sv.restUs | 0, after: 250 });
+      out.push(Object.assign(servoIdentity(sv), { kind: 'servo', index: idx, active: true,
+        us: sv[key] | 0, after: 450, label: 'S' + (strIdx + 1) + ' fret ' + f }));
+      out.push(Object.assign(servoIdentity(sv), { kind: 'servo', index: idx, active: false,
+        us: sv.restUs | 0, after: 250 }));
     }
     return out;
   }
@@ -346,7 +347,8 @@
       if (sv.function !== 'finger' || !sv.enabled) return;
       var idx = servoIndexOf(sv);
       if (idx < 0) return;
-      out.push({ kind: 'servo', index: idx, active: false, us: sv.restUs | 0, after: 80, label: 'rest' });
+      out.push(Object.assign(servoIdentity(sv), { kind: 'servo', index: idx, active: false,
+        us: sv.restUs | 0, after: 80, label: 'rest' }));
     });
     return out;
   }
@@ -369,9 +371,10 @@
       if (!sk || !sk.enabled) return;
       var idx = servoIndexOf(sk);
       if (idx < 0) return;
-      out.push({ kind: 'servo', index: idx, active: true, us: sk.activeUs | 0, after: 220,
-        label: 'string ' + (i + 1) + ' strike' });
-      out.push({ kind: 'servo', index: idx, active: false, us: sk.restUs | 0, after: 350 });
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: true,
+        us: sk.activeUs | 0, after: 220, label: 'string ' + (i + 1) + ' strike' }));
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: false,
+        us: sk.restUs | 0, after: 350 }));
     });
     return out;
   }
@@ -385,10 +388,14 @@
       var idx = servoIndexOf(sk);
       if (idx < 0) return;
       var up = sk.activeAltUs ? sk.activeAltUs : (2 * sk.restUs - sk.activeUs);
-      out.push({ kind: 'servo', index: idx, active: true, us: sk.activeUs | 0, after: 220, label: 'S' + (i + 1) + ' down' });
-      out.push({ kind: 'servo', index: idx, active: false, us: sk.restUs | 0, after: 180 });
-      out.push({ kind: 'servo', index: idx, active: true, us: up | 0, after: 220, label: 'S' + (i + 1) + ' up' });
-      out.push({ kind: 'servo', index: idx, active: false, us: sk.restUs | 0, after: 300 });
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: true,
+        us: sk.activeUs | 0, after: 220, label: 'S' + (i + 1) + ' down' }));
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: false,
+        us: sk.restUs | 0, after: 180 }));
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: true,
+        us: up | 0, after: 220, label: 'S' + (i + 1) + ' up' }));
+      out.push(Object.assign(servoIdentity(sk), { kind: 'servo', index: idx, active: false,
+        us: sk.restUs | 0, after: 300 }));
     });
     return out;
   }
@@ -400,9 +407,10 @@
       if (!sv || !sv.enabled) return;
       var idx = servoIndexOf(sv);
       if (idx < 0) return;
-      out.push({ kind: 'servo', index: idx, active: true, us: sv.activeUs | 0, after: 300,
-        label: 'string ' + (i + 1) + ' ' + verb });
-      out.push({ kind: 'servo', index: idx, active: false, us: sv.restUs | 0, after: 300 });
+      out.push(Object.assign(servoIdentity(sv), { kind: 'servo', index: idx, active: true,
+        us: sv.activeUs | 0, after: 300, label: 'string ' + (i + 1) + ' ' + verb }));
+      out.push(Object.assign(servoIdentity(sv), { kind: 'servo', index: idx, active: false,
+        us: sv.restUs | 0, after: 300 }));
     });
     return out;
   }
@@ -881,14 +889,30 @@
     ]));
 
     // Strings & tuning. Changing the string count or a max fret re-generates the
-    // wiring automatically.
+    // wiring DIFFERENTIALLY: servos that still exist mechanically keep their full
+    // calibration + wiring; only new positions get defaults (audit 5 P0). The
+    // explicit reset below is the ONLY destructive path.
     body.appendChild(builderSection('Strings & tuning', [
       h('div.row', [
         GMB.field('Number of strings', GMB.input(p.instrument, 'stringCount',
           { type: 'number', min: 1, max: 6,
             onChange: function (v) { setStringCount(v); autoGenerate(); drawStep(); } }))
       ]),
-      h('div.string-rows', strings.map(function (s, i) { return stringRow(s, i); }))
+      h('div.string-rows', strings.map(function (s, i) { return stringRow(s, i); })),
+      h('p.muted', 'Structure changes keep every existing servo’s calibration and ' +
+        'wiring; only newly added positions start from defaults.'),
+      h('div.toolbar', [GMB.button('Reset wiring & calibration to defaults', function () {
+        if (!confirm('Rebuild ALL servos from the chosen mechanics?\n\nEvery ' +
+                     'calibrated angle, direction, timing and PCA/GPIO assignment ' +
+                     'will be replaced by factory defaults.')) return;
+        var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
+        p.servos = GMB.buildInstrument(effectiveSpec, p.strings, []).concat(aux);
+        ensureBusPins();
+        syncSelection();
+        GMB.markDirty();
+        drawStep();
+        GMB.toast('Wiring and calibration reset to defaults.', 'warn');
+      }, 'ghost')])
     ]));
 
     // Board — which ESP32 everything wires to.
@@ -995,6 +1019,15 @@
   // A precise angle control bound to sv[key]: a degree number box flanked by −/+
   // buttons (1° steps). Touch-friendly and exact where a slider is not. Every change
   // drives the servo to that pulse (when armed) so the target angle previews live.
+  // Mechanical identity of a servo for live tests: the firmware resolves it
+  // against the ACTIVE profile instead of trusting the draft's array index,
+  // which drifts as soon as the draft's servo list is edited (audit 5 P0).
+  function servoIdentity(sv) {
+    var id = { function: sv.function, stringIndex: sv.stringIndex };
+    if (sv.function === 'finger' && sv.fret >= 1) id.fret = sv.fret;
+    return id;
+  }
+
   function angleStepper(sv, key, label, hint, onAfter) {
     var input = h('input.angle-num', { type: 'number', min: 0, max: 180, step: 1,
       value: GMB.usToAngle(sv, sv[key]) });
@@ -1005,7 +1038,11 @@
       if (onAfter) onAfter();
       GMB.markDirty();
       var idx = servoIndexOf(sv);
-      if (idx >= 0) GMB.api.testServo({ index: idx, active: true, us: sv[key] | 0 }).catch(function () {});
+      if (idx >= 0) {
+        var payload = servoIdentity(sv);
+        payload.index = idx; payload.active = true; payload.us = sv[key] | 0;
+        GMB.api.testServo(payload).catch(function () {});
+      }
     }
     input.addEventListener('change', apply);
     function bump(delta) { input.value = (Number(input.value) || 0) + delta; apply(); }
@@ -1032,7 +1069,9 @@
       // Send the DRAFT pulse (activeUs/restUs read at click time) so an unsaved
       // calibration angle previews live, instead of the currently-active profile's.
       var us = (active ? sv.activeUs : sv.restUs) | 0;
-      GMB.api.testServo({ index: idx, active: active, us: us }).then(function () {
+      var payload = servoIdentity(sv);
+      payload.index = idx; payload.active = active; payload.us = us;
+      GMB.api.testServo(payload).then(function () {
         GMB.toast('Servo ' + idx + (active ? ' → contact' : ' → rest'), 'ok');
       }).catch(function () { GMB.toast('Servo test refused (arm the instrument first).', 'warn'); });
     }, 'ghost');
@@ -1045,7 +1084,9 @@
     return GMB.button(label, function () {
       var idx = servoIndexOf(sv);
       if (idx < 0) return;
-      GMB.api.testServo({ index: idx, active: true, us: sv[key] | 0 }).then(function () {
+      var payload = servoIdentity(sv);
+      payload.index = idx; payload.active = true; payload.us = sv[key] | 0;
+      GMB.api.testServo(payload).then(function () {
         GMB.toast(toastMsg || ('Servo ' + idx + ' → ' + (sv[key] | 0) + ' µs'), 'ok');
       }).catch(function () { GMB.toast('Servo test refused (arm the instrument first).', 'warn'); });
     }, 'ghost');

@@ -129,6 +129,14 @@
   }
   function later(fn, ms) { var t = setTimeout(fn, ms); timers.push(t); return t; }
 
+  // Mechanical identity for live tests: the firmware resolves it against the
+  // ACTIVE profile instead of trusting the draft's array index (audit 5 P0).
+  function servoIdentity(sv) {
+    var id = { function: sv.function, stringIndex: sv.stringIndex };
+    if (sv.function === 'finger' && sv.fret >= 1) id.fret = sv.fret;
+    return id;
+  }
+
   // Press a fret (or open string) on a string: lift any finger already down on
   // that string, press the target finger, then sound it.
   function press(strIdx, fret) {
@@ -139,8 +147,8 @@
       if (!fsv) return;
       var idx = servoIndexOf(fsv);
       var pulse = (isGeared(fsv) && fsv.fretB === fret) ? (fsv.activeBUs || fsv.activeUs) : fsv.activeUs;
-      if (idx >= 0) drive({ index: idx, active: true, us: pulse | 0 });
-      held[strIdx] = { idx: idx, fret: fret };
+      if (idx >= 0) drive(Object.assign(servoIdentity(fsv), { index: idx, active: true, us: pulse | 0 }));
+      held[strIdx] = { idx: idx, fret: fret, id: servoIdentity(fsv) };
       lead = clamp(fsv.travelMs || 120, 60, 200);
     }
     active[strIdx] = fret;
@@ -159,7 +167,7 @@
     var hv = held[strIdx];
     if (!hv) return;
     delete held[strIdx];
-    if (hv.idx >= 0) drive({ index: hv.idx, active: false });
+    if (hv.idx >= 0) drive(Object.assign({}, hv.id || {}, { index: hv.idx, active: false }));
   }
   function releaseAllActive() { Object.keys(active).slice().forEach(function (k) { release(+k); }); }
 
@@ -182,22 +190,22 @@
     var strokeMs = Math.max(80, sk.strokeMs || 120);
 
     later(function () {
-      if (liftIdx >= 0) drive({ index: liftIdx, active: true, us: lift.activeUs | 0 });
-      drive({ index: idx, active: true, us: strikeUs });
+      if (liftIdx >= 0) drive(Object.assign(servoIdentity(lift), { index: liftIdx, active: true, us: lift.activeUs | 0 }));
+      drive(Object.assign(servoIdentity(sk), { index: idx, active: true, us: strikeUs }));
       flashString(strIdx);
       if (mode === 'mute') {
         var dmp = perStringServo(strIdx, 'damper');
         if (dmp) {
           var di = servoIndexOf(dmp);
           later(function () {
-            drive({ index: di, active: true, us: dmp.activeUs | 0 });
-            later(function () { drive({ index: di, active: false }); }, 170);
+            drive(Object.assign(servoIdentity(dmp), { index: di, active: true, us: dmp.activeUs | 0 }));
+            later(function () { drive(Object.assign(servoIdentity(dmp), { index: di, active: false })); }, 170);
           }, 130);
         }
       }
       later(function () {
-        drive({ index: idx, active: false });
-        if (liftIdx >= 0) drive({ index: liftIdx, active: false });
+        drive(Object.assign(servoIdentity(sk), { index: idx, active: false }));
+        if (liftIdx >= 0) drive(Object.assign(servoIdentity(lift), { index: liftIdx, active: false }));
       }, strokeMs);
     }, lead || 0);
   }

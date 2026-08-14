@@ -55,6 +55,13 @@ public:
     uint32_t nextSlotDelayMs(uint32_t nowMs, uint8_t board = 0xFF) const {
         return governor_.nextSlotDelayMs(nowMs, board);
     }
+    // Full batch forecast (audit 5): ms after nowMs until the LAST of `count`
+    // staggerable starts (on boards[]) could begin, simulated from the governor's
+    // current window state. Pure query.
+    uint32_t forecastBatchDelayMs(uint32_t nowMs, const uint8_t* boards,
+                                  size_t count) const {
+        return governor_.forecastBatchDelayMs(nowMs, boards, count);
+    }
 
     // Diagnostics (P2.19): the movement mix the manager has seen.
     uint32_t deadlineMoves() const { return deadlineMoves_; }       // sound strikes passed

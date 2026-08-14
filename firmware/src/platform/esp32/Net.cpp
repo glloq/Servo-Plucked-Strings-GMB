@@ -149,6 +149,11 @@ bool Net::pollStation(uint32_t nowMs) {
             // this retry it is already serving — just restart the retry clock.
             if (!apActive_) startAccessPoint(true);
             lastStationRetryMs_ = nowMs;
+        } else if (apActive_ && apIsFallback_) {
+            // Recovery from the rescue AP: run the "3 attempts" BACK-TO-BACK
+            // (the AP stays up in AP+STA throughout), then pause for the 60 s
+            // retry clock — so "attempt X/3" means what it says (audit 5).
+            beginStationAttempt(nowMs);
         }
     }
     return false;

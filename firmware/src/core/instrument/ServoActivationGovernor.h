@@ -80,6 +80,40 @@ public:
         return d;
     }
 
+    // FULL batch forecast (audit 5): simulate granting `count` starts on the boards
+    // in `boards[]` (0xFF = no board), in order, starting from the governor's
+    // CURRENT window state, and return how long after nowMs the LAST one begins.
+    // Works on COPIES of the windows — nothing is recorded. This models a
+    // partially-occupied sliding window exactly (historical grants expire at
+    // different instants), which a single next-slot delay plus a closed-form queue
+    // estimate cannot (the audit's cap-3 example: grants at t-7/t-1 make the 6th
+    // start of a new batch wait 19 ms, not 10).
+    uint32_t forecastBatchDelayMs(uint32_t nowMs, const uint8_t* boards,
+                                  size_t count) const {
+        if (staggerMs_ == 0 || count == 0) return 0;
+        Window g = global_;
+        std::array<Window, kBoards> b = board_;
+        uint32_t t = nowMs, last = nowMs;
+        for (size_t i = 0; i < count; ++i) {
+            Window* w = boards[i] < kBoards ? &b[boards[i]] : nullptr;
+            uint32_t start = t;  // starts are issued in order
+            for (;;) {
+                uint32_t d = g.slotDelayMs(start, staggerMs_);
+                if (w) {
+                    uint32_t d2 = w->slotDelayMs(start, staggerMs_);
+                    if (d2 > d) d = d2;
+                }
+                if (d == 0) break;
+                start += d;
+            }
+            g.grant(start);
+            if (w) w->grant(start);
+            if (start > last) last = start;
+            t = start;
+        }
+        return last - nowMs;
+    }
+
 private:
     // A rolling window: at most `cap` grants within any staggerMs window. cap == 0
     // means unlimited (always room, records nothing).

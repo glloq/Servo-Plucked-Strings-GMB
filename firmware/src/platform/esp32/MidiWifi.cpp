@@ -19,10 +19,15 @@ void MidiWifi::poll(uint32_t nowUs) {
     while (packet > 0 && handled < kMaxPacketsPerTick) {
         IPAddress remoteIp = udp_.remoteIP();
         uint16_t remotePort = udp_.remotePort();
+        UdpSource src{static_cast<uint32_t>(remoteIp), remotePort};
         // P1.11 source gate: with a non-Open posture, refuse a datagram from an
-        // unrecognised sender BEFORE parsing it, so stray/rogue UDP never reaches the
-        // note engine. Default Open accepts everything, so this is a no-op until wired.
-        if (!gate_.accept({static_cast<uint32_t>(remoteIp), remotePort})) {
+        // unrecognised sender BEFORE parsing it, so stray/rogue UDP never reaches
+        // the note engine. Under LockToFirst the FIRST sender only becomes the
+        // locked session once its datagram actually parses as MIDI — any random
+        // UDP packet on the port used to claim the lock unparsed (audit 5).
+        bool pendingLock =
+            gate_.policy() == UdpSourcePolicy::LockToFirst && !gate_.locked();
+        if (!pendingLock && !gate_.accept(src)) {
             udp_.clear();  // discard the refused datagram
             ++handled;
             packet = udp_.parsePacket();
@@ -45,6 +50,20 @@ void MidiWifi::poll(uint32_t nowUs) {
             // continue/terminate another sender's message (shared-parser fix).
             parser_.resetStream();
             parser_.feed(buf_, static_cast<size_t>(n), nowUs);
+            // LockToFirst, no session yet: only a datagram that actually decodes
+            // as MIDI (events or SysEx) may adopt this sender as the locked
+            // session; junk is discarded and counted, and the port stays open for
+            // the real controller (audit 5).
+            if (pendingLock) {
+                if (parser_.events().empty() && parser_.sysex().empty()) {
+                    gate_.noteRejected();
+                    parser_.clear();
+                    ++handled;
+                    packet = udp_.parsePacket();
+                    continue;
+                }
+                gate_.lockTo(src);
+            }
             // Move decoded events out (bounded). Count anything dropped so a
             // sustained overflow is visible rather than silent.
             for (auto& e : parser_.events()) {

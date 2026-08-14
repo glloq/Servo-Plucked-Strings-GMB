@@ -634,40 +634,52 @@ void setup() {
     ctx.unlockState = []() { if (g_stateMutex) xSemaphoreGive(g_stateMutex); };
     ctx.lockStorage = []() { if (g_storageMutex) xSemaphoreTake(g_storageMutex, portMAX_DELAY); };
     ctx.unlockStorage = []() { if (g_storageMutex) xSemaphoreGive(g_storageMutex); };
-    ctx.onSetNetwork = [](const WifiSettings& w) {
+    ctx.onSetNetwork = [](const WifiSettings& w) -> bool {
+        bool okAll = true;
         {
             Preferences p;
-            p.begin("gmb", false);
-            if (w.hasMode) p.putString("netmode", w.station ? "station" : "accessPoint");
-            if (w.hasSsid) p.putString("netssid", String(w.ssid.c_str()));
-            if (w.hasApSsid) p.putString("netapssid", String(w.apSsid.c_str()));
-            if (w.hasHostname) p.putString("nethost", String(w.hostname.c_str()));
+            if (!p.begin("gmb", false)) return false;
+            // Every write is CHECKED: a failed NVS put must surface as an HTTP
+            // error, not a phantom "stored" (audit 5). Removing an absent key is
+            // fine (nothing to erase), so remove() is only a failure when the key
+            // exists and still cannot be deleted.
+            auto put = [&](const char* k, const std::string& v) {
+                if (p.putString(k, String(v.c_str())) == 0 && !v.empty()) okAll = false;
+            };
+            auto erase = [&](const char* k) {
+                if (p.isKey(k) && !p.remove(k)) okAll = false;
+            };
+            if (w.hasMode) put("netmode", w.station ? "station" : "accessPoint");
+            if (w.hasSsid) put("netssid", w.ssid);
+            if (w.hasApSsid) put("netapssid", w.apSsid);
+            if (w.hasHostname) put("nethost", w.hostname);
             // Passwords: overwrite when provided, ERASE when explicitly cleared
             // (open network / forget) — an empty field still keeps the old secret.
-            if (w.clearStationPassword) p.remove("wifipass");
-            else if (w.hasStationPassword)
-                p.putString("wifipass", String(w.stationPassword.c_str()));
-            if (w.clearApPassword) p.remove("appass");
-            else if (w.hasApPassword)
-                p.putString("appass", String(w.apPassword.c_str()));
+            if (w.clearStationPassword) erase("wifipass");
+            else if (w.hasStationPassword) put("wifipass", w.stationPassword);
+            if (w.clearApPassword) erase("appass");
+            else if (w.hasApPassword) put("appass", w.apPassword);
             p.end();
         }
-        if (w.apply) g_wifiApplyRequested.store(true);  // reconnect on the main loop
+        if (okAll && w.apply) g_wifiApplyRequested.store(true);  // reconnect on the loop
+        return okAll;
     };
     ctx.onWifiScanStart = []() { g_wifiScanRequested.store(true); };
     ctx.wifiScanJson = []() -> std::string {
         StateGuard lock;
         return g_wifiScanJson;
     };
-    ctx.onSetMidiSource = [](int policy, bool unlock) {
+    ctx.onSetMidiSource = [](int policy, bool unlock) -> bool {
         if (policy >= 0 && policy <= 2) {
             Preferences p;
-            p.begin("gmb", false);
-            p.putInt("midisrc", policy);
+            if (!p.begin("gmb", false)) return false;
+            size_t written = p.putInt("midisrc", policy);
             p.end();
+            if (written == 0) return false;  // NVS write failed: report, don't apply
             g_midiSourceRequested.store(policy);  // applied on the main loop
         }
         if (unlock) g_midiUnlockRequested.store(true);
+        return true;
     };
     ctx.midiSourcePolicy = []() -> std::string {
         return udpSourcePolicyName(g_midi.sourcePolicy());
@@ -679,10 +691,14 @@ void setup() {
         if (stored.length() == 0) return true;
         return provided == std::string(stored.c_str());
     };
-    ctx.onSetAdminToken = [](const std::string& t) {
-        Preferences p; p.begin("gmb", false);
-        p.putString("admintoken", String(t.c_str())); p.end();
+    ctx.onSetAdminToken = [](const std::string& t) -> bool {
+        Preferences p;
+        if (!p.begin("gmb", false)) return false;
+        size_t written = p.putString("admintoken", String(t.c_str()));
+        p.end();
+        if (written == 0 && !t.empty()) return false;  // NVS write failed
         g_authConfiguredCache = !t.empty();
+        return true;
     };
     { Preferences p; p.begin("gmb", true);
       g_authConfiguredCache = p.getString("admintoken", "").length() > 0; p.end(); }

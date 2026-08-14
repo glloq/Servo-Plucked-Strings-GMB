@@ -82,3 +82,22 @@ TEST(udp_gate_policy_names_are_stable) {
     CHECK(std::string(udpSourcePolicyName(UdpSourcePolicy::LockToFirst)) == "lockToFirst");
     CHECK(std::string(udpSourcePolicyName(UdpSourcePolicy::Disabled)) == "disabled");
 }
+
+// Payload-validated locking (audit 5): wouldAccept() probes without locking, and
+// lockTo() adopts the sender only once its datagram proved to be MIDI — a stray
+// UDP packet can no longer claim the LockToFirst session unparsed.
+TEST(udp_gate_would_accept_probes_without_locking) {
+    UdpSourceGate g;
+    g.setPolicy(UdpSourcePolicy::LockToFirst);
+    UdpSource junk{0x0A000001, 4000};
+    UdpSource ctrl{0x0A000002, 5004};
+    CHECK(g.wouldAccept(junk));
+    CHECK(!g.locked());              // probing never locks
+    g.noteRejected();                // caller refused the junk payload
+    CHECK_EQ((int)g.rejectedCount(), 1);
+    CHECK(g.wouldAccept(ctrl));      // the port is still open for the real sender
+    g.lockTo(ctrl);
+    CHECK(g.locked());
+    CHECK(!g.wouldAccept(junk));     // now a different source is refused
+    CHECK(g.wouldAccept(ctrl));
+}
