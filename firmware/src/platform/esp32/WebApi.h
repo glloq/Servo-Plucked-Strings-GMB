@@ -76,12 +76,14 @@ struct WebContext {
     std::function<void()> unlockStorage;
     // Device-side network settings (NVS): only flagged fields are stored, so the
     // SSID/mode/hostname survive a reboot INDEPENDENTLY of any profile slot
-    // (audit: "Save & publish" used to lose them on reboot).
-    std::function<void(const WifiSettings&)> onSetNetwork;
+    // (audit: "Save & publish" used to lose them on reboot). Returns false when an
+    // NVS write failed — the API then answers 500 instead of a phantom OK
+    // (audit 5: config endpoints must be transactional).
+    std::function<bool(const WifiSettings&)> onSetNetwork;
     // UDP MIDI source posture (audit 4 P2.3): policy (0 open / 1 lockToFirst /
     // 2 disabled, -1 = unchanged) stored in NVS + applied on the main loop;
-    // unlock=true forgets the currently locked sender.
-    std::function<void(int, bool)> onSetMidiSource;
+    // unlock=true forgets the currently locked sender. false = NVS write failed.
+    std::function<bool(int, bool)> onSetMidiSource;
     // Live posture for the status DTO (read on the loop by refreshStatus()).
     std::function<std::string()> midiSourcePolicy;
     std::function<bool()> midiSourceLocked;
@@ -92,7 +94,7 @@ struct WebContext {
     // Returns true if the supplied token authorises a write (or if no admin
     // token has been configured yet — first-run bootstrap).
     std::function<bool(const std::string&)> checkToken;
-    std::function<void(const std::string&)> onSetAdminToken;
+    std::function<bool(const std::string&)> onSetAdminToken;  // false = NVS write failed
     // True once an admin token is configured (surfaced so the UI can warn).
     std::function<bool()> authConfigured;
 };

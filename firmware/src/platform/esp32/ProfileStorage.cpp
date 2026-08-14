@@ -765,8 +765,21 @@ bool ProfileStorage::remove(int slot) {
     return LittleFS.remove(slotPath(slot).c_str());
 }
 
+// The startup slot lives in NVS: a Preferences putInt is atomic at the NVS layer,
+// unlike the old "w"-truncated /startup.txt, which a power cut could leave empty
+// (silently booting slot 0 — audit 5). The legacy file is still READ once as a
+// migration fallback for devices that stored it before this change.
 int ProfileStorage::startupSlot() const {
-    File f = LittleFS.open("/startup.txt", "r");
+    Preferences p;
+    if (p.begin("gmb", true)) {
+        if (p.isKey("startslot")) {
+            int slot = p.getInt("startslot", 0);
+            p.end();
+            return (slot < 0 || slot >= kMaxProfiles) ? 0 : slot;
+        }
+        p.end();
+    }
+    File f = LittleFS.open("/startup.txt", "r");  // legacy pre-NVS location
     if (!f) return 0;
     int slot = f.parseInt();
     f.close();
@@ -776,11 +789,13 @@ int ProfileStorage::startupSlot() const {
 
 bool ProfileStorage::setStartupSlot(int slot) {
     if (slot < 0 || slot >= kMaxProfiles) return false;  // never store out of range
-    File f = LittleFS.open("/startup.txt", "w");
-    if (!f) return false;  // surfaced to the API: the startup slot did NOT change
-    size_t written = f.print(slot);
-    f.close();
-    return written > 0;
+    Preferences p;
+    if (!p.begin("gmb", false)) return false;
+    size_t written = p.putInt("startslot", slot);
+    p.end();
+    if (written == 0) return false;  // surfaced to the API: nothing changed
+    LittleFS.remove("/startup.txt");  // retire the legacy file (best effort)
+    return true;
 }
 #else
 // Non-Arduino stubs so the file is analysable off-target.

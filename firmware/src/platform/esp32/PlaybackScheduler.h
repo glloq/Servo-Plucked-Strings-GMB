@@ -153,40 +153,17 @@ public:
         // before the LAST start is the max over every constraint's own queue:
         //   perConstraint = floor((starts_in_that_window - 1) / cap) x staggerMs.
         // The governor is a SLIDING window: starts granted just BEFORE this chord
-        // still occupy it and delay the batch's FIRST slot. Ask the governor for its
-        // current-state forecast instead of assuming an empty window (audit 4 P1.3);
-        // the batch's own queue budget then ADDS on top of that base delay.
-        uint32_t baseDelay = 0;
-        if (actuators_ && !startBoards.empty()) {
-            for (uint8_t bd : startBoards) {
-                uint32_t d = actuators_->nextSlotDelayMs(nowMs, bd);
-                if (d > baseDelay) baseDelay = d;
-            }
-        }
-        uint32_t queueBudget = 0;
-        if (p.power.staggerMs != 0 && startBoards.size() > 1) {
-            if (p.power.maxConcurrentMoves > 0) {
-                uint32_t g = (static_cast<uint32_t>(startBoards.size() - 1) /
-                              p.power.maxConcurrentMoves) * p.power.staggerMs;
-                if (g > queueBudget) queueBudget = g;
-            }
-            if (p.power.maxConcurrentPerBoard > 0) {
-                // Count the batch's starts per physical PCA board (0xFF = direct
-                // GPIO: no per-board window applies).
-                for (size_t a = 0; a < startBoards.size(); ++a) {
-                    if (startBoards[a] == 0xFF) continue;
-                    uint32_t n = 0;
-                    for (uint8_t bd : startBoards)
-                        if (bd == startBoards[a]) ++n;
-                    if (n > 1) {
-                        uint32_t g = ((n - 1) / p.power.maxConcurrentPerBoard) *
-                                     p.power.staggerMs;
-                        if (g > queueBudget) queueBudget = g;
-                    }
-                }
-            }
-        }
-        uint32_t governorBudget = baseDelay + queueBudget;
+        // still occupy it, and historical grants expire at DIFFERENT instants. Let
+        // the governor simulate the whole batch from its current window state
+        // (copies — nothing recorded): the exact time until the LAST start can
+        // begin, under BOTH the global and the per-board caps (audit 5 — the old
+        // next-slot + closed-form-queue estimate under-budgeted a partially
+        // occupied window).
+        uint32_t governorBudget =
+            (actuators_ && !startBoards.empty())
+                ? actuators_->forecastBatchDelayMs(nowMs, startBoards.data(),
+                                                   startBoards.size())
+                : 0;
         uint32_t deadline = 0;
         bool first = true;
         for (const Member& m : members) {
@@ -339,31 +316,26 @@ private:
     // notes in prepareTick() (audit follow-up).
     uint32_t remainingPrepMs(size_t i, int fret, uint32_t nowMs) const {
         const ServoBank& b = *servos_;
-        const Profile& p = *profile_;
         const StringSched& sch = sched_[i];
         uint32_t elapsed = nowMs - sch.phaseStartMs;
         auto left = [&](uint32_t budget) { return budget > elapsed ? budget - elapsed : 0u; };
         int nxt = b.fingerIndexForFret(static_cast<int>(i), fret);
         uint32_t press = nxt >= 0 ? b.travelMs(nxt) : 0;
         uint32_t settle = nxt >= 0 ? b.settleMs(nxt) : 0;
-        // A move still WAITING on a governor permit may sit out up to one full
-        // stagger window behind starts granted before this batch (audit 3).
-        bool governorOn = p.power.staggerMs != 0 &&
-                          (p.power.maxConcurrentMoves > 0 ||
-                           p.power.maxConcurrentPerBoard > 0);
-        uint32_t permitWait = governorOn ? p.power.staggerMs : 0;
+        // Pure MECHANICS only: the wait for a still-pending governor permit is
+        // budgeted by prepareTick()'s batch forecast (the pending starts are in its
+        // start list), so adding it here again would double-count it (audit 5 P2).
         switch (sch.phase) {
             case StringSched::ReleasingFinger:
                 // A release still parked on a denied governor permit has performed
                 // NONE of its motion yet, whatever the elapsed time says (audit 3).
                 if (sch.pendingFingerRelease >= 0)
-                    return permitWait +
-                           static_cast<uint32_t>(b.travelMs(sch.pendingFingerRelease)) +
+                    return static_cast<uint32_t>(b.travelMs(sch.pendingFingerRelease)) +
                            press + settle;
                 return left(sch.releaseWaitMs) + press + settle;
             case StringSched::PressingFinger:
                 if (!sch.fingerPressStarted)
-                    return permitWait + press + settle;  // press awaiting its permit
+                    return press + settle;  // press awaiting its permit
                 return left(sch.fingerMoveMs) + settle;
             case StringSched::Settling:
                 return left(sch.fingerIndex >= 0 ? b.settleMs(sch.fingerIndex) : 0);

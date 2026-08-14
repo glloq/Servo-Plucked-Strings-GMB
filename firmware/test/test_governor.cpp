@@ -144,3 +144,32 @@ TEST(governor_next_slot_delay_per_board) {
     CHECK_EQ((int)g.nextSlotDelayMs(2010, 4), 0);     // another board: free
     CHECK_EQ((int)g.nextSlotDelayMs(2010, 0xFF), 0);  // direct GPIO: global only
 }
+
+// Full batch forecast (audit 5): a PARTIALLY occupied sliding window — historical
+// grants expiring at different instants — is simulated exactly. The audit's
+// example: cap 3 / stagger 10, grants at t-7 and t-1, then 6 new starts: the last
+// one can only begin 19 ms after now (not the ~10 ms a closed-form batch estimate
+// would claim).
+TEST(governor_forecast_batch_with_partial_history) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/3, /*perBoard*/0, /*stagger*/10);
+    CHECK(g.requestStart(93, 0));
+    CHECK(g.requestStart(99, 0));
+    uint8_t boards[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    CHECK_EQ((int)g.forecastBatchDelayMs(100, boards, 6), 19);
+    // The forecast recorded nothing: the real grants still follow the same path.
+    CHECK(g.requestStart(100, 0));    // third slot of the window
+    CHECK(!g.requestStart(100, 0));   // full until 93+10
+}
+
+// The batch forecast honours the per-board windows independently (audit 5).
+TEST(governor_forecast_batch_per_board) {
+    ServoActivationGovernor g;
+    g.configure(/*global*/0, /*perBoard*/1, /*stagger*/50);
+    // Two starts on DIFFERENT boards: no cross-blocking, both immediate.
+    uint8_t spread[2] = {0, 1};
+    CHECK_EQ((int)g.forecastBatchDelayMs(1000, spread, 2), 0);
+    // Two starts on the SAME board: the second waits out the board window.
+    uint8_t same[2] = {2, 2};
+    CHECK_EQ((int)g.forecastBatchDelayMs(1000, same, 2), 50);
+}

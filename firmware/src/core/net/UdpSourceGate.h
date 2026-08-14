@@ -71,6 +71,26 @@ public:
         return false;
     }
 
+    // Non-locking probe + explicit lock, for a caller that must validate the
+    // PAYLOAD before adopting a sender as the locked session: under LockToFirst
+    // any stray UDP packet used to claim the lock before being parsed (audit 5).
+    // wouldAccept() answers like accept() but never locks nor counts a rejection;
+    // lockTo() then adopts the sender once its first datagram proved to be MIDI.
+    bool wouldAccept(const UdpSource& src) const {
+        switch (policy_) {
+            case UdpSourcePolicy::Disabled: return false;
+            case UdpSourcePolicy::Open: return true;
+            case UdpSourcePolicy::LockToFirst: return !locked_ || src == lockedSrc_;
+        }
+        return false;
+    }
+    void lockTo(const UdpSource& src) {
+        if (policy_ == UdpSourcePolicy::LockToFirst) { locked_ = true; lockedSrc_ = src; }
+    }
+    // Count a refusal decided by the CALLER (e.g. a non-MIDI datagram from a
+    // candidate sender) so it stays observable like every gate rejection.
+    void noteRejected() { ++rejected_; }
+
     bool locked() const { return locked_; }
     UdpSource lockedSource() const { return lockedSrc_; }
     // Forget the locked session (e.g. on a session timeout or an explicit unlock) so

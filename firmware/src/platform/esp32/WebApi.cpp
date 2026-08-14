@@ -702,6 +702,29 @@ void WebApi::registerRoutes() {
             int idx = body["index"] | -1;
             bool active = body["active"] | true;
             int us = body["us"] | 0;
+            // Mechanical IDENTITY resolution (audit 5 P0): the UI's draft indices
+            // drift from the ACTIVE profile as soon as a servo is added/removed, so
+            // a bare index can move the WRONG actuator. When the request names the
+            // servo (function + stringIndex [+ fret]), resolve it against the
+            // active ServoBank and refuse when it does not exist there yet.
+            if (!body["function"].isNull() && ctx_.servos) {
+                std::string fn = body["function"] | "";
+                int stringIndex = body["stringIndex"] | -1;
+                int fret = body["fret"] | -1;
+                int resolved;
+                { WebStateLock lk(ctx_);  // the loop may swap the profile/bank
+                  resolved = (fn == "finger" && fret >= 1)
+                      ? ctx_.servos->fingerIndexForFret(stringIndex, fret)
+                      : ctx_.servos->servoIndex(fn, stringIndex); }
+                if (resolved < 0) {
+                    doc["ok"] = false;
+                    doc["error"] = "this actuator is not in the ACTIVE profile — "
+                                   "Save & publish before live-testing it";
+                    sendJson(req, doc, 409);
+                    return;
+                }
+                idx = resolved;
+            }
             uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active, us) : 0;
             bool queued = cmdId != 0;
             doc["ok"] = queued;
@@ -802,7 +825,12 @@ void WebApi::registerRoutes() {
                 sendJson(req, doc, 422);
                 return;
             }
-            ctx_.onSetNetwork(w);
+            if (!ctx_.onSetNetwork(w)) {
+                doc["ok"] = false;
+                doc["error"] = "storing the network settings failed (NVS write error)";
+                sendJson(req, doc, 500);
+                return;
+            }
             doc["ok"] = true;
             doc["note"] = w.apply ? "stored; applying (hotspot fallback on failure)"
                                   : "stored; applies on reboot";
@@ -838,7 +866,12 @@ void WebApi::registerRoutes() {
                 }
             }
             bool unlock = body["unlock"] | false;
-            ctx_.onSetMidiSource(policy, unlock);
+            if (!ctx_.onSetMidiSource(policy, unlock)) {
+                doc["ok"] = false;
+                doc["error"] = "storing the MIDI source policy failed (NVS write error)";
+                sendJson(req, doc, 500);
+                return;
+            }
             doc["ok"] = true;
             sendJson(req, doc);
         });
@@ -879,13 +912,34 @@ void WebApi::registerRoutes() {
                 sendJson(req, doc, 422);
                 return;
             }
-            ctx_.onSetAdminToken(t);
+            if (!ctx_.onSetAdminToken(t)) {
+                doc["ok"] = false;
+                doc["error"] = "storing the admin token failed (NVS write error)";
+                sendJson(req, doc, 500);
+                return;
+            }
             doc["ok"] = true;
             doc["note"] = "admin token stored";
             sendJson(req, doc);
         });
     setAuth->setMethod(HTTP_POST);
     server_->addHandler(setAuth);
+
+    // ---- POST /api/auth/check (verify a token WITHOUT changing it) ----
+    // Lets a NEW browser unlock itself with the EXISTING token: the UI sends the
+    // candidate in X-GMB-Token; 200 = valid (the client then remembers it locally),
+    // 401 = wrong. Changing the token still goes through POST /api/auth (audit 5).
+    server_->on("/api/auth/check", HTTP_POST, [this](AsyncWebServerRequest* req) {
+        JsonDocument doc;
+        if (!authOk(req)) {
+            doc["ok"] = false;
+            doc["error"] = "unauthorized";
+            sendJson(req, doc, 401);
+            return;
+        }
+        doc["ok"] = true;
+        sendJson(req, doc);
+    });
 
     // ---- POST /api/storage/format (deliberate LittleFS reformat) ----
     server_->on("/api/storage/format", HTTP_POST, [this](AsyncWebServerRequest* req) {
