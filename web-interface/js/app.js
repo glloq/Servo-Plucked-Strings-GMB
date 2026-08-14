@@ -215,6 +215,10 @@
         if (st === 'succeeded') return 'succeeded';
         if (st === 'refused') throw Object.assign(new Error('activation refused'),
                                                   { refused: true });
+        // Purged by a panic / E-stop before it ran (audit 6): stop immediately
+        // instead of polling a ghost to the timeout.
+        if (st === 'cancelled') throw Object.assign(new Error('activation cancelled'),
+                                                    { refused: true, cancelled: true });
         if (triesLeft <= 0) return 'timeout';
         return delay(300).then(function () { return pollCommand(triesLeft - 1); });
       });
@@ -229,32 +233,47 @@
     }
     return pollCommand(20).then(function (r) {
       if (r === 'timeout') return 'timeout';
-      return pollReady(30);  // parking can take a mechanical settle
+      // Parking twice (old profile out, new profile in) with generous travel and
+      // settle times can be slow: allow ~30 s before degrading to a warning.
+      return pollReady(60);
     });
   }
 
   GMB.saveProfile = function () {
-    return GMB.api.putProfile(state.profile).then(function (res) {
+    // `dirty` is only cleared once the activation is CONFIRMED (or on the mock /
+    // legacy immediate path): the 202 merely queues it, and the command can still
+    // be refused (safety lock) or cancelled (panic purge) before it runs — the
+    // draft must then keep showing as unsaved (audit 6).
+    function markSaved() {
       state.dirty = false;
       var b = document.getElementById('save-bar');
       if (b) b.classList.remove('visible');
+    }
+    return GMB.api.putProfile(state.profile).then(function (res) {
       if (res && res.capabilitiesRevision) state.profile.capabilitiesRevision = res.capabilitiesRevision;
       updateMockBadge();
       if (res && res.accepted !== undefined) {
         GMB.toast('Profile accepted — activating…', 'ok');
         return waitForActivation(res.commandId).then(function (r) {
-          if (r === 'timeout')
-            GMB.toast('Activation still in progress — check the status bar.', 'warn');
-          else
+          if (r === 'timeout') {
+            GMB.toast('Activation still in progress — the draft stays marked ' +
+                      'unsaved until it is confirmed.', 'warn');
+          } else {
+            markSaved();
             GMB.toast('Profile published and ACTIVE (revision ' +
                       state.profile.capabilitiesRevision + ').', 'ok');
+          }
         });
       }
       // Mock / legacy backend: no queue — the save is the whole story.
+      markSaved();
       GMB.toast('Profile saved (revision ' + (state.profile.capabilitiesRevision) + ').', 'ok');
     }).catch(function (e) {
       var body = e && e.body;
-      if (e && e.refused)
+      if (e && e.cancelled)
+        GMB.toast('Activation cancelled (panic / E-stop before it ran) — the draft ' +
+                  'is still unsaved.', 'error');
+      else if (e && e.refused)
         GMB.toast('Activation refused by the device (safety locked or invalid profile).', 'error');
       else if (!(body && body.issues && GMB.reportIssues('Save rejected', body.issues)))
         GMB.toast('Save failed: ' + ((body && body.error) || e.message), 'error');
@@ -309,7 +328,7 @@
         h('span', 'You have unsaved changes.'),
         h('span.spacer'),
         GMB.button('Discard', function () { GMB.reloadProfile(); }, 'ghost'),
-        GMB.button('Save & publish', function () { GMB.saveProfile(); }, 'primary')
+        GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')
       ])
     ]);
 

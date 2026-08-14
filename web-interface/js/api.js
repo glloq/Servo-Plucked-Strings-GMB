@@ -1184,6 +1184,15 @@
         wire.function = payload.function;
         wire.stringIndex = payload.stringIndex | 0;
         if (payload.fret >= 1) wire.fret = payload.fret | 0;
+        if (payload.source) {
+          wire.source = payload.source;
+          if (payload.source === 'gpio') wire.gpio = payload.gpio | 0;
+          else {
+            wire.i2cBus = payload.i2cBus | 0;
+            wire.pcaBoard = payload.pcaBoard | 0;
+            wire.channel = payload.channel | 0;
+          }
+        }
       }
       return this._call('/api/test/servo', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(wire)

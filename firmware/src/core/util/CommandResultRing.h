@@ -15,7 +15,10 @@ namespace gmb {
 
 class CommandResultRing {
 public:
-    enum State : uint8_t { Queued = 0, Succeeded = 1, Refused = 2 };
+    // Cancelled = the command was purged from the queue WITHOUT running (panic /
+    // E-stop). Distinct from Refused so a client awaiting an activation stops
+    // immediately instead of polling a "queued" ghost to its timeout (audit 6).
+    enum State : uint8_t { Queued = 0, Succeeded = 1, Refused = 2, Cancelled = 3 };
 
     // Record the outcome for `id` (ignored when id == 0). Updates in place if the id
     // is already tracked, otherwise takes the next ring slot (evicting the oldest).
@@ -27,15 +30,17 @@ public:
         next_ = (next_ + 1) % kSize;
     }
 
-    // The outcome string for `id`: "queued" / "succeeded" / "refused", or "unknown"
-    // if the id was never issued or has aged out of the ring. id 0 (the "no command"
-    // sentinel, also the empty-slot value) is always "unknown".
+    // The outcome string for `id`: "queued" / "succeeded" / "refused" /
+    // "cancelled", or "unknown" if the id was never issued or has aged out of the
+    // ring. id 0 (the "no command" sentinel, also the empty-slot value) is always
+    // "unknown".
     const char* stateStr(uint32_t id) const {
         if (id == 0) return "unknown";
         for (const auto& r : ring_)
             if (r.id == id)
                 return r.state == Queued ? "queued"
                      : r.state == Succeeded ? "succeeded"
+                     : r.state == Cancelled ? "cancelled"
                      : "refused";
         return "unknown";
     }

@@ -664,9 +664,20 @@
     applyBuilder(true);
   }
 
-  // Load a type preset: tuning + GM tags + a fresh chromatic+pluck wiring.
+  // Load a type preset: tuning + GM tags + chromatic+pluck wiring. The rebuild is
+  // DIFFERENTIAL (audit 6): every servo whose mechanical identity survives keeps
+  // its full calibration and wiring — re-clicking the current preset on a
+  // calibrated instrument changes NOTHING. Only when actuators would actually
+  // disappear (fewer strings / structural change) does an explicit confirm ask
+  // before dropping them; cancelling restores the profile untouched.
   function applyPreset(type) {
     var p = GMB.state.profile, t = TUNINGS[type];
+    var snap = {
+      type: p.instrument.type, gmProgram: p.instrument.gmProgram,
+      typeId: p.instrument.typeId, hostname: p.network.hostname,
+      strings: p.strings, stringCount: p.instrument.stringCount,
+      builder: builder, builderRef: builderRef
+    };
     p.instrument.type = type;
     if (GM_PROGRAM[type]) p.instrument.gmProgram = GM_PROGRAM[type];
     if (TYPE_ID[type]) p.instrument.typeId = TYPE_ID[type];
@@ -678,13 +689,39 @@
         lift: false, damper: false, wiring: 'perString' }, perString: {} };
       builderRef = p;
       var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
-      p.servos = GMB.buildInstrument(effectiveSpec, p.strings, []).concat(aux);
+      var before = p.servos.filter(function (s) { return s.function !== 'aux'; });
+      var rebuilt = GMB.buildInstrument(effectiveSpec, p.strings, p.servos);
+      // mergeBuilderServos returns the SAME objects for surviving servos, so an
+      // identity count tells exactly how many calibrated actuators would vanish.
+      var kept = 0;
+      rebuilt.forEach(function (s) { if (before.indexOf(s) >= 0) kept++; });
+      var dropped = before.length - kept;
+      if (dropped > 0 &&
+          !confirm('Switching to the ' + cap(type) + ' preset removes ' + dropped +
+                   ' calibrated actuator(s) whose string/position no longer exists.' +
+                   '\n\nContinue?')) {
+        p.instrument.type = snap.type;
+        p.instrument.gmProgram = snap.gmProgram;
+        p.instrument.typeId = snap.typeId;
+        p.network.hostname = snap.hostname;
+        p.strings = snap.strings;
+        p.instrument.stringCount = snap.stringCount;
+        builder = snap.builder;
+        builderRef = snap.builderRef;
+        drawStep();
+        return;
+      }
+      p.servos = rebuilt.concat(aux);
       ensureBusPins();   // a preset is single-bus: drop any stale SDA2/SCL2/OE2 pins
       syncSelection();
       GMB.markDirty();
+      drawStep();
+      GMB.toast('Loaded ' + type + ' — existing calibrations kept, new positions ' +
+                'use defaults.', 'ok');
+      return;
     }
     drawStep();
-    GMB.toast('Loaded ' + type + ' — one servo per fret + a plucker per string.', 'ok');
+    GMB.toast('Loaded ' + type + '.', 'ok');
   }
 
   // ---- how many finger servos a fretting variant produces (live card badge) ---
@@ -1025,6 +1062,11 @@
   function servoIdentity(sv) {
     var id = { function: sv.function, stringIndex: sv.stringIndex };
     if (sv.function === 'finger' && sv.fret >= 1) id.fret = sv.fret;
+    // Output binding: the firmware refuses the test when the draft's wiring
+    // differs from the active servo's (audit 6 — same identity, drifted output).
+    id.source = sv.source === 'gpio' ? 'gpio' : 'pca';
+    if (id.source === 'gpio') id.gpio = sv.gpio | 0;
+    else { id.i2cBus = sv.i2cBus || 0; id.pcaBoard = sv.pcaBoard | 0; id.channel = sv.channel | 0; }
     return id;
   }
 
