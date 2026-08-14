@@ -208,6 +208,11 @@
   // activating" warning without rejecting (the activation continues on-device).
   function waitForActivation(commandId) {
     function delay(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    // The firmware now reports the WHOLE activation on the command itself
+    // (audit 7): "running" while the old profile parks, swaps and the new one
+    // re-parks; "succeeded" only when the new profile really reached ready.
+    // So the command poll carries the ~30 s budget (double park + arming), and
+    // the status poll after it is a short confirmation, not a guess.
     function pollCommand(triesLeft) {
       if (!commandId) return Promise.resolve('succeeded');  // mock / immediate path
       return GMB.api.commandState(commandId).then(function (r) {
@@ -219,8 +224,12 @@
         // instead of polling a ghost to the timeout.
         if (st === 'cancelled') throw Object.assign(new Error('activation cancelled'),
                                                     { refused: true, cancelled: true });
+        // The swap started but could not be completed (park unconfirmed, arming
+        // failed): terminal — the device kept the safest posture (audit 7).
+        if (st === 'failed') throw Object.assign(new Error('activation failed'),
+                                                 { refused: true, failed: true });
         if (triesLeft <= 0) return 'timeout';
-        return delay(300).then(function () { return pollCommand(triesLeft - 1); });
+        return delay(500).then(function () { return pollCommand(triesLeft - 1); });
       });
     }
     function pollReady(triesLeft) {
@@ -231,11 +240,9 @@
         return delay(500).then(function () { return pollReady(triesLeft - 1); });
       });
     }
-    return pollCommand(20).then(function (r) {
+    return pollCommand(60).then(function (r) {
       if (r === 'timeout') return 'timeout';
-      // Parking twice (old profile out, new profile in) with generous travel and
-      // settle times can be slow: allow ~30 s before degrading to a warning.
-      return pollReady(60);
+      return pollReady(10);
     });
   }
 
@@ -271,8 +278,12 @@
     }).catch(function (e) {
       var body = e && e.body;
       if (e && e.cancelled)
-        GMB.toast('Activation cancelled (panic / E-stop before it ran) — the draft ' +
+        GMB.toast('Activation cancelled (panic / E-stop / safety stop) — the draft ' +
                   'is still unsaved.', 'error');
+      else if (e && e.failed)
+        GMB.toast('Activation FAILED on the device (parking could not be confirmed ' +
+                  'or arming failed) — check Diagnostics; the draft is still unsaved.',
+                  'error');
       else if (e && e.refused)
         GMB.toast('Activation refused by the device (safety locked or invalid profile).', 'error');
       else if (!(body && body.issues && GMB.reportIssues('Save rejected', body.issues)))

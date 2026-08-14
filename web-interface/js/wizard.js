@@ -642,10 +642,23 @@
     var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
     // Preserve each PCA board's I²C-bus assignment across regeneration (bus is a
     // property of the physical board, not of the mechanical spec being rebuilt).
-    var busByBoard = {};
-    p.servos.forEach(function (s) { if (s.source === 'pca' && s.i2cBus === 1) busByBoard[s.pcaBoard] = 1; });
+    // A board is a (bus, address) pair (audit 7): kept servos already carry their
+    // own i2cBus verbatim, so the overlay only applies to NEWLY generated servos,
+    // and only when the address maps to ONE bus — an address wired on both buses
+    // (bus0/0x40 + bus1/0x40) must never drag everything onto one of them.
+    var prior = p.servos.slice();
+    var addrBus = {};  // PCA address -> which buses carry it in the committed wiring
+    prior.forEach(function (s) {
+      if (s.source !== 'pca') return;
+      var m = addrBus[s.pcaBoard] || (addrBus[s.pcaBoard] = {});
+      m[s.i2cBus === 1 ? 1 : 0] = true;
+    });
     p.servos = GMB.buildInstrument(effectiveSpec, p.strings, p.servos).concat(aux);
-    p.servos.forEach(function (s) { if (s.source === 'pca' && busByBoard[s.pcaBoard]) s.i2cBus = 1; });
+    p.servos.forEach(function (s) {
+      if (s.source !== 'pca' || prior.indexOf(s) >= 0) return;  // kept: bus untouched
+      var m = addrBus[s.pcaBoard];
+      if (m && m[1] && !m[0]) s.i2cBus = 1;  // address lives ONLY on bus 1
+    });
     ensureBusPins();
     syncSelection();
     GMB.markDirty();
@@ -772,24 +785,44 @@
     return (GMB.recommendedFor && GMB.recommendedFor(id)) || GMB.RECOMMENDED || {};
   }
 
-  function distinctPcaBoards() {
-    var set = {}, out = [];
+  // A physical PCA9685 is identified by (i2cBus, address) — the SAME model the
+  // firmware uses (ServoBank::board() = i2cBus*8 + pcaBoard). Keying the UI on the
+  // address alone collapsed bus0/0x40 and bus1/0x40 into one row and let a bus
+  // change drag both physical boards along (audit 7).
+  function distinctPcaUnits() {
+    var seen = {}, out = [];
     GMB.state.profile.servos.forEach(function (s) {
-      if (s.source === 'pca' && !(s.pcaBoard in set)) { set[s.pcaBoard] = 1; out.push(s.pcaBoard); }
+      if (s.source !== 'pca') return;
+      var bus = s.i2cBus === 1 ? 1 : 0, k = bus + ':' + s.pcaBoard;
+      if (!(k in seen)) { seen[k] = 1; out.push({ bus: bus, board: s.pcaBoard }); }
     });
-    return out.sort(function (a, b) { return a - b; });
+    return out.sort(function (a, b) { return a.bus - b.bus || a.board - b.board; });
   }
   function anyBus1() { return GMB.state.profile.servos.some(function (s) { return s.source === 'pca' && s.i2cBus === 1; }); }
-  function boardBus(board) {
-    var s = GMB.state.profile.servos.filter(function (x) { return x.source === 'pca' && x.pcaBoard === board; })[0];
-    return s && s.i2cBus === 1 ? 1 : 0;
-  }
-  function setBoardBus(board, bus) {
+  // Move ONE physical board (bus, address) to the other bus. Refused when the
+  // destination bus already carries a board at the same address — two boards can
+  // never share an address on one bus.
+  function setUnitBus(unit, bus) {
+    bus = bus ? 1 : 0;
+    if (bus === unit.bus) return true;
+    var clash = GMB.state.profile.servos.some(function (s) {
+      return s.source === 'pca' && s.pcaBoard === unit.board &&
+             (s.i2cBus === 1 ? 1 : 0) === bus;
+    });
+    if (clash) {
+      GMB.toast('Bus ' + bus + ' already has a PCA at 0x' +
+                (0x40 + unit.board).toString(16) +
+                ' — re-address one of the boards first.', 'error');
+      return false;
+    }
     GMB.state.profile.servos.forEach(function (s) {
-      if (s.source === 'pca' && s.pcaBoard === board) s.i2cBus = bus ? 1 : 0;
+      if (s.source === 'pca' && s.pcaBoard === unit.board &&
+          (s.i2cBus === 1 ? 1 : 0) === unit.bus)
+        s.i2cBus = bus;
     });
     ensureBusPins();
     GMB.markDirty();
+    return true;
   }
   // The second-bus signals (SDA2/SCL2) exist in the profile iff a board is on bus 1.
   function ensureBusPins() {
@@ -821,20 +854,35 @@
   }
   // Distribute the boards evenly across the two buses (first half → bus 0).
   function autoSplitBuses() {
-    var boards = distinctPcaBoards(), half = Math.ceil(boards.length / 2);
-    boards.forEach(function (b, i) { setBoardBus(b, i >= half ? 1 : 0); });
+    var units = distinctPcaUnits(), half = Math.ceil(units.length / 2);
+    units.forEach(function (u, i) { setUnitBus(u, i >= half ? 1 : 0); });
   }
   function setSecondBus(on) {
     if (on) { if (!anyBus1()) autoSplitBuses(); }
     else {
+      // Merging everything onto bus 0 is impossible when both buses carry a
+      // board at the SAME address — they would collapse into one phantom board.
+      var units = distinctPcaUnits();
+      var clash = units.some(function (u) {
+        return u.bus === 1 && units.some(function (v) {
+          return v.bus === 0 && v.board === u.board;
+        });
+      });
+      if (clash) {
+        GMB.toast('Cannot merge onto one bus: both buses carry a PCA at the same ' +
+                  'address — re-address one of the boards first.', 'error');
+        return;
+      }
       GMB.state.profile.servos.forEach(function (s) { if (s.source === 'pca') s.i2cBus = 0; });
       ensureBusPins(); GMB.markDirty();
     }
   }
 
   // The Builder's I²C-bus control: a toggle, per-board bus pickers and auto-split.
+  // One row per PHYSICAL board — a (bus, address) pair — so bus0/0x40 and
+  // bus1/0x40 show as the two distinct components they are (audit 7).
   function busTopology() {
-    var boards = distinctPcaBoards();
+    var boards = distinctPcaUnits();
     var two = anyBus1();
     var R = rec();
     var toggle = h('input', { type: 'checkbox', checked: two });
@@ -843,12 +891,12 @@
       h('span', 'Use a second I²C bus — split the PCA9685 boards across the ESP32-S3’s two I²C controllers ' +
         '(Wire + Wire1) to cut bus traffic and refresh the servos faster on large instruments')])];
     if (two) {
-      var n0 = boards.filter(function (b) { return boardBus(b) === 0; }).length;
-      kids.push(h('div.bus-grid', boards.map(function (b) {
-        var sel = GMB.input({ v: boardBus(b) }, 'v', { type: 'select', coerce: Number,
+      var n0 = boards.filter(function (u) { return u.bus === 0; }).length;
+      kids.push(h('div.bus-grid', boards.map(function (u) {
+        var sel = GMB.input({ v: u.bus }, 'v', { type: 'select', coerce: Number,
           options: [{ value: 0, label: 'Bus 0' }, { value: 1, label: 'Bus 1' }],
-          onChange: function (v) { setBoardBus(b, Number(v)); drawStep(); } });
-        return h('div.bus-board', [h('span.bus-board-id', 'PCA #' + b + ' · 0x' + (0x40 + b).toString(16)), sel]);
+          onChange: function (v) { setUnitBus(u, Number(v)); drawStep(); } });
+        return h('div.bus-board', [h('span.bus-board-id', 'PCA #' + u.board + ' · 0x' + (0x40 + u.board).toString(16)), sel]);
       })));
       kids.push(h('div.row', [
         GMB.button('Auto-split evenly', function () { autoSplitBuses(); drawStep(); }, 'ghost'),
@@ -868,14 +916,22 @@
   // PCA9685 channel usage per (bus, board) + direct-GPIO count vs firmware limits.
   function capacityReport() {
     var preview = previewServos().concat(auxServos());
-    // Preview servos are regenerated without a bus, so overlay the committed
-    // board→bus assignment (a board's bus is a property of its physical wiring).
-    var busOfBoard = {};
-    GMB.state.profile.servos.forEach(function (s) { if (s.source === 'pca' && s.i2cBus === 1) busOfBoard[s.pcaBoard] = 1; });
+    // A kept preview servo carries its own i2cBus verbatim; only FRESHLY generated
+    // ones need the committed board→bus overlay, and only when the address maps to
+    // a single bus — an address wired on both buses stays where each servo says
+    // (audit 7: the old address-only table folded bus0/0x40 onto bus1/0x40).
+    var addrBus = {};
+    GMB.state.profile.servos.forEach(function (s) {
+      if (s.source !== 'pca') return;
+      var m = addrBus[s.pcaBoard] || (addrBus[s.pcaBoard] = {});
+      m[s.i2cBus === 1 ? 1 : 0] = true;
+    });
     var byKey = {}, direct = 0;
     preview.forEach(function (s) {
       if (s.source === 'gpio') { direct++; return; }
-      var bus = busOfBoard[s.pcaBoard] ? 1 : 0, k = bus + ':' + s.pcaBoard;
+      var m = addrBus[s.pcaBoard];
+      var bus = s.i2cBus === 1 ? 1 : (m && m[1] && !m[0] ? 1 : 0);
+      var k = bus + ':' + s.pcaBoard;
       byKey[k] = byKey[k] || { bus: bus, board: s.pcaBoard, n: 0 };
       byKey[k].n++;
     });
