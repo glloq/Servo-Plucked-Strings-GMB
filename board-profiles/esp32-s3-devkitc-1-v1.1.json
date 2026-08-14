@@ -1,13 +1,13 @@
 {
-  "identifier": "esp32-s3-devkitc-1",
-  "displayName": "ESP32-S3-DevKitC-1 v1.0 (RGB LED on GPIO48)",
-  "description": "GPIO capability map for the original (v1.0) Espressif ESP32-S3-DevKitC-1, mirroring firmware/src/core/board/BoardProfile.cpp (makeEsp32S3DevKitC1). The v1.0 board drives its on-board RGB LED from GPIO48 (reserved); GPIO38 is free. The v1.1 revision moves the LED to GPIO38 - use esp32-s3-devkitc-1-v1.1.json for it. GPIO22-25 do not exist on the ESP32-S3 and are omitted.",
+  "identifier": "esp32-s3-devkitc-1-v1.1",
+  "displayName": "ESP32-S3-DevKitC-1 v1.1 (RGB LED on GPIO38)",
+  "description": "GPIO capability map for the v1.1 revision of the Espressif ESP32-S3-DevKitC-1, mirroring firmware/src/core/board/BoardProfile.cpp (makeEsp32S3DevKitC1V11). The v1.1 board drives its on-board RGB LED from GPIO38 (reserved); GPIO48 is free. The original (v1.0) board uses GPIO48 instead - see esp32-s3-devkitc-1.json. GPIO22-25 do not exist on the ESP32-S3 and are omitted.",
   "reference": "SPECIFICATION.md sections 11.4 / 11.5",
   "recommendedAssignment": {
     "SDA": 40,
     "SCL": 41,
-    "SDA2": 38,
-    "SCL2": 39,
+    "SDA2": 39,
+    "SCL2": 42,
     "SERVO_OE": 47,
     "SERVO_OE2": 21,
     "ESTOP": 2,
@@ -539,14 +539,14 @@
       "input": true,
       "output": true,
       "interrupt": true,
-      "highSpeedOutput": true,
+      "highSpeedOutput": false,
       "adc": false,
-      "reserved": false,
+      "reserved": true,
       "strapping": false,
       "usb": false,
-      "onboardPeripheral": false,
-      "preference": "recommended",
-      "note": "General-purpose IO (no ADC); recommended SDA2 (second I2C bus)"
+      "onboardPeripheral": true,
+      "preference": "reserved",
+      "note": "On-board RGB LED (v1.1 boards)"
     },
     {
       "gpio": 39,
@@ -561,7 +561,7 @@
       "usb": false,
       "onboardPeripheral": false,
       "preference": "recommended",
-      "note": "General-purpose IO (no ADC); recommended SCL2 (second I2C bus)"
+      "note": "General-purpose IO (no ADC); recommended SDA2 (second I2C bus)"
     },
     {
       "gpio": 40,
@@ -606,7 +606,7 @@
       "usb": false,
       "onboardPeripheral": false,
       "preference": "recommended",
-      "note": "General-purpose IO (no ADC)"
+      "note": "General-purpose IO (no ADC); recommended SCL2 (second I2C bus)"
     },
     {
       "gpio": 43,
@@ -689,14 +689,14 @@
       "input": true,
       "output": true,
       "interrupt": true,
-      "highSpeedOutput": false,
+      "highSpeedOutput": true,
       "adc": false,
-      "reserved": true,
+      "reserved": false,
       "strapping": false,
       "usb": false,
-      "onboardPeripheral": true,
-      "preference": "reserved",
-      "note": "On-board RGB LED (v1.0 boards)"
+      "onboardPeripheral": false,
+      "preference": "recommended",
+      "note": "General-purpose IO (no ADC)"
     }
   ]
 }

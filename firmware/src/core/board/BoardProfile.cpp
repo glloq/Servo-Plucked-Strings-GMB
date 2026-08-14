@@ -20,6 +20,12 @@ static bool pinSupports(const PinCapability& p, SignalKind kind) {
         case SignalKind::I2cScl:
             // I2C is open-drain: needs a pin usable both ways.
             return p.output && p.input;
+        case SignalKind::SafetyInput:
+            // Hardware E-stop (`ESTOP`): a readable, interrupt-capable pin. Never a
+            // strapping pin — the recommended NC loop holds the pin LOW whenever the
+            // machine is allowed to run, including through a reset, which would
+            // corrupt the boot strap.
+            return p.input && p.interrupt && !p.strapping;
     }
     return false;
 }
@@ -101,10 +107,11 @@ PinCapability inputOnlyPin(int8_t gpio, const char* note) {
 
 }  // namespace
 
-BoardProfile makeEsp32S3DevKitC1() {
+// Shared S3-DevKitC-1 builder. The two board revisions differ ONLY in which GPIO
+// carries the on-board RGB LED (WS2812): GPIO48 on the original (v1.0) release,
+// GPIO38 on v1.1 — the LED pin is reserved, the other one is free.
+static BoardProfile makeEsp32S3DevKitC1Rev(bool ledOnGpio38) {
     BoardProfile b;
-    b.identifier = "esp32-s3-devkitc-1";
-    b.displayName = "ESP32-S3-DevKitC-1";
 
     auto add = [&](PinCapability c) { b.pins.push_back(c); };
 
@@ -146,7 +153,10 @@ BoardProfile makeEsp32S3DevKitC1() {
     add(reservedPin(35, "Octal Flash/PSRAM on some variants — verify module"));
     add(reservedPin(36, "Octal Flash/PSRAM on some variants — verify module"));
     add(reservedPin(37, "Octal Flash/PSRAM on some variants — verify module"));
-    add(normalPin(38, PinPreference::Recommended, false));
+    if (ledOnGpio38)
+        add(reservedPin(38, "On-board RGB LED (DevKitC-1 v1.1)", false, false, true));
+    else
+        add(normalPin(38, PinPreference::Recommended, false));
     add(normalPin(39, PinPreference::Recommended, false));
     add(normalPin(40, PinPreference::Recommended, false, "Recommended I2C SDA"));
     add(normalPin(41, PinPreference::Recommended, false, "Recommended I2C SCL"));
@@ -156,8 +166,27 @@ BoardProfile makeEsp32S3DevKitC1() {
     add(reservedPin(45, "Strapping pin", /*strapping=*/true));
     add(reservedPin(46, "Strapping pin", /*strapping=*/true));
     add(normalPin(47, PinPreference::Recommended, false));
-    add(reservedPin(48, "On-board RGB LED", false, false, true));
+    if (ledOnGpio38)
+        add(normalPin(48, PinPreference::Recommended, false));
+    else
+        add(reservedPin(48, "On-board RGB LED (DevKitC-1 v1.0)", false, false, true));
 
+    return b;
+}
+
+BoardProfile makeEsp32S3DevKitC1() {
+    BoardProfile b = makeEsp32S3DevKitC1Rev(/*ledOnGpio38=*/false);
+    // Historical identifier: names the ORIGINAL (v1.0) revision so profiles stored
+    // before the split keep exactly the pin map they were validated against.
+    b.identifier = "esp32-s3-devkitc-1";
+    b.displayName = "ESP32-S3-DevKitC-1 v1.0 (RGB LED on GPIO48)";
+    return b;
+}
+
+BoardProfile makeEsp32S3DevKitC1V11() {
+    BoardProfile b = makeEsp32S3DevKitC1Rev(/*ledOnGpio38=*/true);
+    b.identifier = "esp32-s3-devkitc-1-v1.1";
+    b.displayName = "ESP32-S3-DevKitC-1 v1.1 (RGB LED on GPIO38)";
     return b;
 }
 
@@ -174,6 +203,10 @@ namespace {
 
 void addClassicEsp32Pins(BoardProfile& b, bool includeFlash) {
     auto add = [&](PinCapability c) { b.pins.push_back(c); };
+    // Caution-grade strapping pin: usable in advanced mode, but the strapping flag
+    // must be set so signals that idle a level through boot (the ESTOP safety
+    // input's NC loop) are refused on it.
+    auto addStrap = [&](PinCapability c) { c.strapping = true; b.pins.push_back(c); };
     // GPIO0 is the BOOT button, which the firmware also samples to force the Wi-Fi
     // hotspot (a long press) — main.cpp drives it as an INPUT the whole time. It must
     // therefore NEVER be auto- or hand-assigned to a servo / I2C / /OE line, or the
@@ -182,17 +215,17 @@ void addClassicEsp32Pins(BoardProfile& b, bool includeFlash) {
     add(reservedPin(0, "BOOT button — forces the Wi-Fi hotspot; never a servo/I2C//OE pin",
                     /*strapping=*/true));
     add(reservedPin(1, "UART0 TX (programming / diagnostics)", false, false, true));
-    add(normalPin(2, PinPreference::Caution, true, "Strapping / on-board LED on many boards"));
+    addStrap(normalPin(2, PinPreference::Caution, true, "Strapping / on-board LED on many boards"));
     add(reservedPin(3, "UART0 RX (programming / diagnostics)", false, false, true));
     add(normalPin(4, PinPreference::Recommended, true));
-    add(normalPin(5, PinPreference::Caution, false, "Strapping pin (must be HIGH at boot)"));
+    addStrap(normalPin(5, PinPreference::Caution, false, "Strapping pin (must be HIGH at boot)"));
     if (includeFlash) {
         for (int g = 6; g <= 11; ++g) add(reservedPin(static_cast<int8_t>(g), "Connected to the SPI flash"));
     }
-    add(normalPin(12, PinPreference::Caution, true, "MTDI strapping pin (flash voltage)"));
+    addStrap(normalPin(12, PinPreference::Caution, true, "MTDI strapping pin (flash voltage)"));
     add(normalPin(13, PinPreference::Recommended, true));
     add(normalPin(14, PinPreference::Recommended, true));
-    add(normalPin(15, PinPreference::Caution, true, "MTDO strapping pin"));
+    addStrap(normalPin(15, PinPreference::Caution, true, "MTDO strapping pin"));
     add(normalPin(16, PinPreference::Recommended, false, "Used by PSRAM on WROVER modules — verify yours"));
     add(normalPin(17, PinPreference::Recommended, false, "Used by PSRAM on WROVER modules — verify yours"));
     add(normalPin(18, PinPreference::Recommended, false));
@@ -231,9 +264,11 @@ BoardProfile makeEsp32DevKitV1() {
 
 const BoardProfile* builtinBoardProfile(const std::string& identifier) {
     static const BoardProfile s3 = makeEsp32S3DevKitC1();
+    static const BoardProfile s3v11 = makeEsp32S3DevKitC1V11();
     static const BoardProfile wroom = makeEsp32Wroom32();
     static const BoardProfile devkitv1 = makeEsp32DevKitV1();
     if (identifier == s3.identifier) return &s3;
+    if (identifier == s3v11.identifier) return &s3v11;
     if (identifier == wroom.identifier) return &wroom;
     if (identifier == devkitv1.identifier) return &devkitv1;
     return nullptr;

@@ -91,8 +91,9 @@ Trois mécanismes combinés évitent de saturer l'alimentation 5–6 V / les PCA
    `staggerMs`) pour ne pas cumuler les pics d'appel de courant.
 
 Câblage recommandé : **1 PCA9685 par corde** (ses doigts de frettes + son
-grattage tiennent sur ≤ 16 canaux), jusqu'à **8 PCA** (adresses 0x40–0x47). Le
-mapping reste néanmoins libre par servo.
+grattage tiennent sur ≤ 16 canaux), jusqu'à **8 PCA par bus I2C** (adresses
+0x40–0x47) et **16 au total** sur les deux bus de l'ESP32-S3 (table de
+capacité : `hardware/README.md`). Le mapping reste néanmoins libre par servo.
 
 ## 🎹 Réception MIDI
 

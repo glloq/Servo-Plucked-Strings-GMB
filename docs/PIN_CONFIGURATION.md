@@ -10,24 +10,38 @@
 ## Broches au niveau carte
 
 Seules trois broches « système » sont nécessaires quand au moins un servo passe par
-un PCA9685 :
+un PCA9685, plus l'entrée d'arrêt d'urgence optionnelle :
 
 | Signal | Rôle | Recommandé (ESP32-S3-DevKitC-1) |
 |--------|------|---------------------------------|
-| `SDA` | Bus I2C des PCA9685 | GPIO 40 |
-| `SCL` | Bus I2C des PCA9685 | GPIO 41 |
-| `SERVO_OE` | /OE des PCA9685 (sécurité, actif bas) | GPIO 47 |
+| `SDA` / `SCL` | Bus I2C 0 des PCA9685 | GPIO 40 / 41 |
+| `SDA2` / `SCL2` | Bus I2C 1 (optionnel) | GPIO 38 / 39 (**v1.0**) · GPIO 39 / 42 (**v1.1**, LED sur 38) |
+| `SERVO_OE` (+ `SERVO_OE2`) | /OE des PCA9685 (sécurité, actif bas) | GPIO 47 (GPIO 21 pour OE2) |
+| `ESTOP` | Entrée arrêt d'urgence matériel (`SafetyInput`) | GPIO 2 |
 
-Une broche `ESTOP` (entrée, active bas, `INPUT_PULLUP`) est lue si elle est présente
-dans le profil (arrêt d'urgence matériel).
+`ESTOP` est une **entrée de sécurité** (`SignalKind::SafetyInput`) : broche
+lisible, avec interruption, jamais une broche de strapping. Elle est lue en
+`INPUT_PULLUP` si elle est présente dans le profil, se déclare dans l'interface
+(*Wiring & GPIO → Emergency stop input*) et supporte deux câblages
+(`board.estopNormallyClosed`) : boucle **NC recommandée** (boucle fermée =
+marche ; appui, fil coupé ou connecteur débranché = STOP, fail-safe) ou bouton
+NO hérité (actif bas). Circuit de référence :
+[`../hardware/POWER_AND_SAFETY.md`](../hardware/POWER_AND_SAFETY.md).
+
+> Deux révisions de DevKitC-1 existent : la **v1.0** a sa LED RGB sur GPIO48,
+> la **v1.1** sur GPIO38 — chaque révision a son profil de carte
+> (`esp32-s3-devkitc-1`, `esp32-s3-devkitc-1-v1.1`) et les broches recommandées
+> du second bus suivent.
 
 ## Servos
 
 Chaque servo (`ServoConfig`) choisit sa source indépendamment :
 
-- **PCA9685** — `pcaBoard` 0..7 (adresses **0x40–0x47**, soit jusqu'à **8 cartes /
-  128 canaux**) et `channel` 0..15. Idéal quand le nombre de servos dépasse les
-  sorties PWM libres.
+- **PCA9685** — `pcaBoard` 0..7 (adresses **0x40–0x47** *par bus I2C*) +
+  `i2cBus` 0..1 + `channel` 0..15 — une carte physique est identifiée par
+  **(bus, adresse)**, soit jusqu'à **16 cartes / 256 canaux** sur les deux bus
+  (table de capacité : [`../hardware/README.md`](../hardware/README.md)). Idéal
+  quand le nombre de servos dépasse les sorties PWM libres.
 - **GPIO direct** — le servo est piloté par une broche libre de l'ESP32-S3
   (LEDC 50 Hz, 14 bits). Jusqu'à **8 servos directs** (8 canaux LEDC).
 

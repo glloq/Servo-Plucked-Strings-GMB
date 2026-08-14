@@ -825,14 +825,19 @@
     return true;
   }
   // The second-bus signals (SDA2/SCL2) exist in the profile iff a board is on bus 1.
+  // Their default GPIO comes from the BOARD PROFILE only — never a hard-coded
+  // number: e.g. GPIO38 is free on a DevKitC-1 v1.0 but is the RGB LED on v1.1,
+  // so a wrong revision-blind fallback would silently fight an on-board device.
+  // No recommendation on the profile -> the pin is left unassigned (-1) and the
+  // GPIO sub-tab / wiring checks flag it until the user picks one.
   function ensureBusPins() {
     var p = GMB.state.profile;
     p.pins = p.pins || [];
     var has = function (sig) { return p.pins.some(function (x) { return x.signal === sig; }); };
     if (anyBus1()) {
       var R = rec();
-      if (!has('SDA2')) p.pins.push({ signal: 'SDA2', kind: 'sda', gpio: R.SDA2 != null ? R.SDA2 : 38 });
-      if (!has('SCL2')) p.pins.push({ signal: 'SCL2', kind: 'scl', gpio: R.SCL2 != null ? R.SCL2 : 39 });
+      if (!has('SDA2')) p.pins.push({ signal: 'SDA2', kind: 'sda', gpio: R.SDA2 != null ? R.SDA2 : -1 });
+      if (!has('SCL2')) p.pins.push({ signal: 'SCL2', kind: 'scl', gpio: R.SCL2 != null ? R.SCL2 : -1 });
     } else {
       // No board on bus 1 → drop the second bus's signals (incl. its /OE).
       p.pins = p.pins.filter(function (x) { return x.signal !== 'SDA2' && x.signal !== 'SCL2' && x.signal !== 'SERVO_OE2'; });
@@ -844,8 +849,9 @@
     var p = GMB.state.profile; p.pins = p.pins || [];
     if (on) {
       if (!hasOe2()) {
+        // Board-profile default only (no hard-coded pin) — unassigned when absent.
         var R = rec();
-        p.pins.push({ signal: 'SERVO_OE2', kind: 'servoOe', gpio: R.SERVO_OE2 != null ? R.SERVO_OE2 : 21 });
+        p.pins.push({ signal: 'SERVO_OE2', kind: 'servoOe', gpio: R.SERVO_OE2 != null ? R.SERVO_OE2 : -1 });
       }
     } else {
       p.pins = p.pins.filter(function (x) { return x.signal !== 'SERVO_OE2'; });
@@ -898,17 +904,20 @@
           onChange: function (v) { setUnitBus(u, Number(v)); drawStep(); } });
         return h('div.bus-board', [h('span.bus-board-id', 'PCA #' + u.board + ' · 0x' + (0x40 + u.board).toString(16)), sel]);
       })));
+      // Defaults shown come from the BOARD PROFILE (revision-aware) — a board with
+      // no recommendation leaves the pin unassigned until the GPIO sub-tab sets it.
+      var gpName = function (g) { return g != null ? 'GPIO' + g : 'unassigned'; };
       kids.push(h('div.row', [
         GMB.button('Auto-split evenly', function () { autoSplitBuses(); drawStep(); }, 'ghost'),
         h('span.muted', 'Bus 0: ' + n0 + ' · Bus 1: ' + (boards.length - n0) + ' board(s). ' +
-          'Assign the SDA2 / SCL2 pins in the GPIO sub-tab (Wiring & GPIO) (default GPIO' +
-          (R.SDA2 != null ? R.SDA2 : 38) + ' / GPIO' + (R.SCL2 != null ? R.SCL2 : 39) + ').')
+          'Assign the SDA2 / SCL2 pins in the GPIO sub-tab (Wiring & GPIO) (board default ' +
+          gpName(R.SDA2) + ' / ' + gpName(R.SCL2) + ').')
       ]));
       var oeToggle = h('input', { type: 'checkbox', checked: hasOe2() });
       oeToggle.addEventListener('change', function () { setSplitOe(oeToggle.checked); drawStep(); });
       kids.push(h('label.inline.builder-opt', [oeToggle,
-        h('span', 'Separate the /OE safety line per bus (adds SERVO_OE2, default GPIO' +
-          (R.SERVO_OE2 != null ? R.SERVO_OE2 : 21) + ') — otherwise both buses share the single /OE line')]));
+        h('span', 'Separate the /OE safety line per bus (adds SERVO_OE2, board default ' +
+          gpName(R.SERVO_OE2) + ') — otherwise both buses share the single /OE line')]));
     }
     return h('div.bus-topology', kids);
   }

@@ -856,3 +856,12 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 }
 .fb-chord:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
 .fb-chord:active { transform: translateY(1px); }
+
+/* ---- Power & safety / I²C & PCA / Commissioning sub-tabs ------------------ */
+.ps-row { display: flex; align-items: baseline; gap: 8px; margin: 6px 0; }
+.ps-decl { margin: 8px 0 2px; }
+.ps-hint { font-size: 12px; margin: 0 0 6px 26px; }
+.ps-chain { fill: var(--surface-2); stroke: var(--wire-vplus); stroke-width: 1.6; }
+.ps-missing { stroke-dasharray: 5 4; opacity: .8; }
+.ps-warn { fill: var(--warn); font-weight: 700; }
+.commissioning-blocked { opacity: .55; }

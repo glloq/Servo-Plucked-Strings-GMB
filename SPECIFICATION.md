@@ -233,7 +233,9 @@ The ESP32-S3 GPIO matrix allows routing peripheral signals to different GPIOs, w
 
 A servo's PWM signal comes from a **PCA9685 channel** or a **direct ESP32 GPIO** (LEDC), mixable per servo, so the instrument works with or without a PCA9685.
 
-* Up to **8 PCA9685** on the I²C bus (addresses 0x40–0x47), 16 channels each.
+* Up to **8 PCA9685 per I²C bus** (addresses 0x40–0x47), 16 channels each — the
+  ESP32-S3's two I²C controllers reach **16 boards / 256 channels** total
+  (capacity table: `hardware/README.md`).
 * Up to **8 direct-GPIO** servos (the ESP32-S3 has 8 LEDC channels).
 
 Recommended allocation on a per-string PCA9685:

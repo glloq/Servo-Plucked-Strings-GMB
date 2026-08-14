@@ -1,29 +1,24 @@
-# Schematics — placeholder
+# Schematics
 
-The electronic schematic is a **dedicated-hardware** deliverable. It is not yet
-drawn; this directory is a placeholder.
+Reference schematic set for the servo-per-fret electronics. The sheets are
+**text schematics** for now — precise enough to build and review the machine —
+and are the source the future KiCad capture must match.
 
-Until then, the reference wiring is fully described in text:
+| Sheet | Contents |
+| ----- | -------- |
+| [`01-power-distribution.md`](01-power-distribution.md) | PSU, reverse-polarity protection, main fuse, master switch, E-stop contactor, star distribution, per-branch fuses & bulk capacitors |
+| [`02-estop-and-servo-enable.md`](02-estop-and-servo-enable.md) | latching NC E-stop chain (power + status + enable-gate contacts), fail-safe `/OE` pull-up and gated enable stage, coverage matrix |
+| [`03-esp32-pca9685-one-string.md`](03-esp32-pca9685-one-string.md) | one string's branch: ESP32 ↔ PCA9685 signals, address jumpers, channel map, direct-GPIO servos |
 
-* Electronics overview — `../README.md` (SPECIFICATION.md §7)
-* Connection guide, pinout and power rails — `../wiring/WIRING.md` (§7 / §22)
-* Bill of materials — `../BOM.md`
-* Default GPIO map — `../../board-profiles/esp32-s3-devkitc-1.json` (§11.5)
+The architecture and sizing rules behind these sheets are in
+[`../POWER_AND_SAFETY.md`](../POWER_AND_SAFETY.md); wire-by-wire connections in
+[`../wiring/WIRING.md`](../wiring/WIRING.md); parts and statuses in
+[`../BOM.md`](../BOM.md). Capacity limits (strings, boards per bus, channels)
+are defined once in [`../README.md`](../README.md) §Capacity.
 
-## Planned contents
+## KiCad capture (future)
 
-When produced, the schematic set will capture the **servo-per-fret** electronics:
-
-* **ESP32-S3-DevKitC-1** connections with the GPIO assignment of §11.5 (I²C
-  SDA/SCL, PCA9685 `/OE`, and any direct-GPIO servo pins).
-* **PCA9685** servo expanders (1–8, addresses 0x40…0x47): shared I²C with
-  pull-ups, `V+` servo rail with a bulk capacitor per board, the 16 channel
-  headers, and the chained `/OE` safety line to GPIO47.
-* **Direct-GPIO servo** headers: a few free output pins driven by LEDC (optional,
-  for PCA-less or small builds).
-* **Power tree** (§22): a single 5–6 V servo rail (separate from logic) and 3.3 V
-  logic, with a servo-rail fuse, reverse-polarity protection and PCA9685 reservoir
-  caps.
-* **Safety / E-stop** path: hardware forcing of the PCA9685 `/OE` high (§21.2),
-  ESP32 kept powered.
-* Net labels and connector pinouts matching `../BOM.md` and `../wiring/WIRING.md`.
+When the KiCad set is drawn it must keep the net names of the sheets above
+(`+V_SERVO`, `+V_BR<n>`, `/OE bus`, `ESTOP loop`, …), the connector pinouts of
+`../BOM.md`, and the default GPIO of the board profiles
+(`../../board-profiles/`).

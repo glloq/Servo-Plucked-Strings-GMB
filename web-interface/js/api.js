@@ -44,7 +44,12 @@
     };
   }
 
-  function buildDevKitC1() {
+  // The ESP32-S3-DevKitC-1 exists in TWO revisions that differ in where the
+  // on-board RGB LED (WS2812) sits: GPIO48 on the original (v1.0) release, GPIO38
+  // on v1.1 (Espressif user guide). The LED pin is reserved, the other one free —
+  // so each revision is its own board profile and the second-I²C-bus defaults
+  // (SDA2/SCL2) move accordingly.
+  function buildDevKitC1(ledOn38) {
     var pins = [];
     // Strapping / boot pins — usable but risky, advanced only.
     pins.push(pin(0, { strapping: true, highSpeedOutput: true, preference: 'reserved',
@@ -96,13 +101,17 @@
       pins.push(pin(g, { preference: 'reserved', reserved: true,
         note: 'Flash/PSRAM on octal variants — reserved unless the variant frees it.' }));
     });
-    [38, 39].forEach(function (g) {
-      pins.push(pin(g, { highSpeedOutput: true, preference: 'recommended',
-        note: 'General purpose — recommended for HOME sensor.' }));
-    });
+    if (ledOn38)
+      pins.push(pin(38, { onboardPeripheral: true, preference: 'reserved',
+        note: 'On-board RGB LED (WS2812) on v1.1 boards. Reserved.' }));
+    else
+      pins.push(pin(38, { highSpeedOutput: true, preference: 'recommended',
+        note: 'General purpose — recommended SDA2 (second I2C bus).' }));
+    pins.push(pin(39, { highSpeedOutput: true, preference: 'recommended',
+      note: 'General purpose — recommended for the second I2C bus.' }));
     pins.push(pin(40, { preference: 'recommended', note: 'Recommended I2C SDA (PCA9685).' }));
     pins.push(pin(41, { preference: 'recommended', note: 'Recommended I2C SCL (PCA9685).' }));
-    pins.push(pin(42, { preference: 'recommended', note: 'Recommended global driver ENABLE.' }));
+    pins.push(pin(42, { preference: 'recommended', note: 'General purpose.' }));
     // Main UART — programming / diagnostics.
     pins.push(pin(43, { onboardPeripheral: true, preference: 'reserved',
       note: 'U0TXD — programming & diagnostic UART. Reserved.' }));
@@ -114,13 +123,22 @@
       note: 'Strapping pin — advanced use only.' }));
     pins.push(pin(47, { highSpeedOutput: true, preference: 'recommended',
       note: 'Recommended PCA9685 /OE safety line.' }));
-    pins.push(pin(48, { onboardPeripheral: true, preference: 'reserved',
-      note: 'On-board RGB LED (WS2812). Reserved.' }));
+    if (ledOn38)
+      pins.push(pin(48, { highSpeedOutput: true, preference: 'recommended',
+        note: 'General purpose (free on v1.1 boards).' }));
+    else
+      pins.push(pin(48, { onboardPeripheral: true, preference: 'reserved',
+        note: 'On-board RGB LED (WS2812) on v1.0 boards. Reserved.' }));
     return {
-      identifier: 'esp32-s3-devkitc-1',
-      displayName: 'ESP32-S3-DevKitC-1',
+      // The historical identifier keeps naming the original (v1.0) board so
+      // stored profiles keep the pin map they were validated against.
+      identifier: ledOn38 ? 'esp32-s3-devkitc-1-v1.1' : 'esp32-s3-devkitc-1',
+      displayName: ledOn38 ? 'ESP32-S3-DevKitC-1 v1.1 (RGB LED on GPIO38)'
+                           : 'ESP32-S3-DevKitC-1 v1.0 (RGB LED on GPIO48)',
       pins: pins,
-      recommended: { SDA: 40, SCL: 41, SERVO_OE: 47, SDA2: 38, SCL2: 39, SERVO_OE2: 21,
+      // On v1.1 the LED occupies GPIO38, so the second-bus defaults move to 39/42.
+      recommended: { SDA: 40, SCL: 41, SERVO_OE: 47,
+        SDA2: ledOn38 ? 39 : 38, SCL2: ledOn38 ? 42 : 39, SERVO_OE2: 21, ESTOP: 2,
         SERVO: [4, 5, 6, 7, 15, 16, 17, 18] }
       // No `layout`: the board diagram falls back to a schematic two-column view
       // (the 44-pin S3 header order is drawn by GPIO number, marked "schematic").
@@ -211,7 +229,7 @@
       displayName: 'ESP32-WROOM-32 (DevKitC, 38-pin)',
       pins: wroom32Pins(true),
       recommended: { SDA: 21, SCL: 22, SERVO_OE: 23, SDA2: 32, SCL2: 33, SERVO_OE2: 25,
-        SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
+        ESTOP: 26, SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
       layout: layout
     };
   }
@@ -233,14 +251,15 @@
       displayName: 'ESP32 DevKit v1 (30-pin)',
       pins: wroom32Pins(false),
       recommended: { SDA: 21, SCL: 22, SERVO_OE: 23, SDA2: 32, SCL2: 33, SERVO_OE2: 25,
-        SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
+        ESTOP: 26, SERVO: [4, 13, 14, 16, 17, 18, 19, 27] },
       layout: layout
     };
   }
 
   // Board registry — the boards the UI offers for the pin representation.
   var BOARDS = {};
-  [buildDevKitC1(), buildWroom32DevKitC(), buildEsp32DevKitV1()].forEach(function (b) { BOARDS[b.identifier] = b; });
+  [buildDevKitC1(false), buildDevKitC1(true), buildWroom32DevKitC(), buildEsp32DevKitV1()]
+    .forEach(function (b) { BOARDS[b.identifier] = b; });
   function boardFor(id) { return BOARDS[id] || BOARDS['esp32-s3-devkitc-1']; }
   GMB.boardList = function () {
     return Object.keys(BOARDS).map(function (id) { return { id: id, name: BOARDS[id].displayName }; });
@@ -259,15 +278,37 @@
   var RECOMMENDED = {
     SDA: 40, SCL: 41, SERVO_OE: 47,
     SDA2: 38, SCL2: 39, SERVO_OE2: 21,  // optional second I2C bus (Wire1) + its /OE
+    ESTOP: 2,                           // hardware E-stop input (NC loop recommended)
     SERVO: [4, 5, 6, 7, 15, 16, 17, 18]
   };
   GMB.RECOMMENDED = RECOMMENDED;
 
   // Which capability a signal kind needs (mirrors BoardProfile::candidatesFor).
   var SIGNAL_KIND = {
-    enable: 'enable', sda: 'i2cSda', scl: 'i2cScl', servoOe: 'servoOe', servo: 'servo'
+    enable: 'enable', sda: 'i2cSda', scl: 'i2cScl', servoOe: 'servoOe', servo: 'servo',
+    safetyIn: 'safetyInput'
   };
   GMB.SIGNAL_KIND = SIGNAL_KIND;
+
+  // Fill the physical power/safety declaration block (HardwareNotes) with its
+  // defaults IN PLACE, so a profile saved before the block existed (or loaded
+  // from an older firmware) binds cleanly in the Power & safety / I²C & PCA
+  // views. Returns the block.
+  GMB.ensureHardware = function (p) {
+    var hw = p.hardware || (p.hardware = {});
+    if (hw.oePullup === undefined) hw.oePullup = false;
+    if (hw.oeGate === undefined) hw.oeGate = false;
+    if (hw.estopCutsPower === undefined) hw.estopCutsPower = false;
+    if (hw.mainFuse === undefined) hw.mainFuse = false;
+    if (hw.branchFuses === undefined) hw.branchFuses = false;
+    if (!(hw.servoIdleMa >= 0)) hw.servoIdleMa = 10;
+    if (!(hw.servoMoveMa >= 0)) hw.servoMoveMa = 250;
+    if (!(hw.servoStallMa >= 0)) hw.servoStallMa = 800;
+    if (!(hw.extPullupOhm0 >= 0)) hw.extPullupOhm0 = 0;
+    if (!(hw.extPullupOhm1 >= 0)) hw.extPullupOhm1 = 0;
+    if (!Array.isArray(hw.pcaPullups)) hw.pcaPullups = [];
+    return hw;
+  };
 
   // Can a pin (statically) carry a given signal kind? (spec 11.3)
   GMB.pinSupports = function (p, kind) {
@@ -278,6 +319,10 @@
       case 'servoOe': return p.output;
       case 'i2cSda':
       case 'i2cScl': return p.input && p.output;
+      case 'safetyInput':
+        // Hardware E-stop input: readable + interrupt-capable, never a strapping
+        // pin (the recommended NC loop idles the pin LOW through boot/reset).
+        return p.input && p.interrupt !== false && !p.strapping;
       default: return p.output;
     }
   };
@@ -474,11 +519,20 @@
         stringCount: 4, type: 'ukulele', gmProgram: 24, typeId: 4,
         capo: 0, transpose: 0
       },
-      board: { profile: 'esp32-s3-devkitc-1', reserveUsb: true, automaticPinAssignment: true },
+      board: { profile: 'esp32-s3-devkitc-1', reserveUsb: true, automaticPinAssignment: true,
+        estopNormallyClosed: false },
       pins: [
         { signal: 'SDA', kind: 'sda', gpio: 40 }, { signal: 'SCL', kind: 'scl', gpio: 41 },
         { signal: 'SERVO_OE', kind: 'servoOe', gpio: 47 }
       ],
+      // Physical power/safety declarations (Wiring → Power & safety / I²C & PCA).
+      // Documentation-only: stored with the profile, drives no runtime behaviour.
+      hardware: {
+        oePullup: false, oeGate: false, estopCutsPower: false,
+        mainFuse: false, branchFuses: false,
+        servoIdleMa: 10, servoMoveMa: 250, servoStallMa: 800,
+        extPullupOhm0: 0, extPullupOhm1: 0, pcaPullups: []
+      },
       network: {
         mode: 'accessPoint', ssid: '', hostname: 'gmb-ukulele',
         apSsid: 'Servo-Plucked-Strings-GMB'

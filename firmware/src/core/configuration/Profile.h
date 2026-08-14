@@ -229,6 +229,34 @@ struct PluckConfig {
     LiftEngage liftEngage = LiftEngage::LowerToPlay;
 };
 
+// Documentation of the PHYSICAL power & safety hardware built around the
+// electronics (web interface: Wiring → "Power & safety" and "I²C & PCA" tabs;
+// reference circuit: hardware/POWER_AND_SAFETY.md). The firmware stores and
+// round-trips this block so the builder's declarations follow the profile across
+// devices and exports — it drives NO runtime behaviour: the hardware it
+// describes (contactor, /OE pull-up, fuses) matters precisely when the firmware
+// cannot act.
+struct PcaPullupNote {
+    uint8_t i2cBus = 0;    // 0 | 1
+    uint8_t board = 0;     // address index 0..7 (I2C address = 0x40 + board)
+    uint32_t ohm = 10000;  // on-board SDA/SCL pull-up value; 0 = removed/absent
+};
+struct HardwareNotes {
+    bool oePullup = false;        // external /OE pull-up to 3.3 V fitted (mandatory)
+    bool oeGate = false;          // gated /OE enable stage (E-stop can inhibit enabling)
+    bool estopCutsPower = false;  // E-stop chain drops the servo-rail contactor (K1)
+    bool mainFuse = false;        // main servo-rail fuse (F0) fitted
+    bool branchFuses = false;     // one fuse per PCA/direct branch (F1..Fn) fitted
+    // Fleet-typical per-servo currents (mA) used by the web power estimator.
+    uint16_t servoIdleMa = 10;
+    uint16_t servoMoveMa = 250;
+    uint16_t servoStallMa = 800;
+    // External I2C pull-up pair per bus, in ohms (0 = none fitted).
+    uint32_t extPullupOhm0 = 0;
+    uint32_t extPullupOhm1 = 0;
+    std::vector<PcaPullupNote> pcaPullups;  // per-board on-board pull-up notes
+};
+
 struct Profile {
     std::string project = "Servo-Plucked-Strings-GMB";
     uint16_t profileVersion = kCurrentProfileVersion;
@@ -238,6 +266,14 @@ struct Profile {
     std::string boardIdentifier = "esp32-s3-devkitc-1";
     bool reserveUsb = true;
     bool automaticPinAssignment = true;
+    // How the hardware E-stop contact on the `ESTOP` pin is wired (only meaningful
+    // when an ESTOP pin is assigned). false = legacy normally-open button to GND
+    // (active-low: LOW = stop). true = NORMALLY-CLOSED loop to GND — the RECOMMENDED
+    // wiring (hardware/POWER_AND_SAFETY.md): the closed loop holds the pin LOW to
+    // authorise running, and a press, a broken wire or an unplugged connector all
+    // read HIGH (pull-up) = stop, so losing the E-stop chain fails safe. Defaults to
+    // the legacy polarity so existing wired instruments keep their behaviour.
+    bool estopNormallyClosed = false;
     std::vector<PinAssignment> pins;
 
     NetworkConfig network;
@@ -245,6 +281,7 @@ struct Profile {
     SelectorConfig selector;
     PowerConfig power;
     PluckConfig pluck;
+    HardwareNotes hardware;
 
     std::vector<StringConfig> strings;
     std::vector<ServoConfig> servos;

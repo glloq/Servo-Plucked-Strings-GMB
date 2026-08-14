@@ -87,8 +87,71 @@ TEST(signal_kind_from_name) {
     CHECK(signalKindFromName("SCL") == SignalKind::I2cScl);
     CHECK(signalKindFromName("SERVO_OE") == SignalKind::ServoOe);
     CHECK(signalKindFromName("ENABLE") == SignalKind::Enable);
+    CHECK(signalKindFromName("ESTOP") == SignalKind::SafetyInput);
     CHECK(signalKindFromName("STEP1") == SignalKind::Generic);
     CHECK(signalKindFromName("MYSTERY") == SignalKind::Generic);
+}
+
+// ---- ESP32-S3-DevKitC-1 board revisions ------------------------------------
+// The two revisions differ only in where the on-board RGB LED sits: GPIO48 on the
+// original (v1.0) board, GPIO38 on v1.1 (Espressif user guide). The LED pin must
+// be reserved and the other one free, per revision.
+TEST(s3_devkitc1_revisions_swap_rgb_led_pin) {
+    BoardProfile v10 = makeEsp32S3DevKitC1();
+    CHECK(v10.identifier == "esp32-s3-devkitc-1");
+    CHECK(v10.find(48)->reserved);
+    CHECK(v10.find(48)->onboardPeripheral);
+    CHECK(!v10.find(38)->reserved);
+    CHECK(v10.supports(38, SignalKind::I2cSda));   // free for SDA2 on v1.0
+
+    BoardProfile v11 = makeEsp32S3DevKitC1V11();
+    CHECK(v11.identifier == "esp32-s3-devkitc-1-v1.1");
+    CHECK(v11.find(38)->reserved);
+    CHECK(v11.find(38)->onboardPeripheral);
+    CHECK(!v11.find(48)->reserved);
+    CHECK(v11.supports(48, SignalKind::Generic));
+    CHECK(!v11.supports(38, SignalKind::I2cSda));  // the v1.1 LED pin carries nothing
+
+    // Same header otherwise: every other pin has identical capability flags.
+    CHECK_EQ((int)v10.pins.size(), (int)v11.pins.size());
+    for (const auto& p : v10.pins) {
+        if (p.gpio == 38 || p.gpio == 48) continue;
+        const PinCapability* q = v11.find(p.gpio);
+        CHECK(q != nullptr);
+        CHECK(q->reserved == p.reserved);
+        CHECK(q->preference == p.preference);
+    }
+}
+
+// ---- hardware E-stop input (`ESTOP` -> SignalKind::SafetyInput) -------------
+// A safety input needs a readable, interrupt-capable pin and must never sit on a
+// strapping pin (the recommended NC loop idles the pin LOW through boot/reset).
+TEST(safety_input_candidates_and_validation) {
+    BoardProfile b = makeEsp32S3DevKitC1();
+    // A plain recommended IO carries it.
+    CHECK(b.supports(2, SignalKind::SafetyInput));
+    // Reserved / strapping / USB pins never do.
+    for (int8_t g : {0, 3, 19, 20, 45, 46, 48}) CHECK(!b.supports(g, SignalKind::SafetyInput));
+    for (const PinCapability* c : b.candidatesFor(SignalKind::SafetyInput)) {
+        CHECK(c->input);
+        CHECK(c->interrupt);
+        CHECK(!c->strapping);
+        CHECK(!c->reserved);
+    }
+    // PinManager accepts a valid ESTOP assignment and rejects a reserved pin.
+    PinManager pm(b);
+    pm.assign("ESTOP", SignalKind::SafetyInput, 2);
+    CHECK(pm.validate(true).empty());
+    pm.clear();
+    pm.assign("ESTOP", SignalKind::SafetyInput, 48);  // v1.0 RGB LED pin
+    CHECK(!pm.validate(true).empty());
+
+    // On the classic ESP32, the input-only pins (34/35/36/39) CAN carry the E-stop
+    // input — it is the one signal that never needs to drive the pin. Strapping
+    // pins (e.g. MTDI GPIO12) cannot.
+    BoardProfile w = makeEsp32Wroom32();
+    for (int8_t g : {34, 35, 36, 39}) CHECK(w.supports(g, SignalKind::SafetyInput));
+    CHECK(!w.supports(12, SignalKind::SafetyInput));
 }
 
 // ---- classic ESP32 boards (WROOM-32 / DevKit v1) --------------------------

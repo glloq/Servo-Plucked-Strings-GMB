@@ -178,9 +178,21 @@
       if (m.scl2 < 0) out.push({ sev: 'error', msg: 'I²C bus 1 SCL (SCL2) is unassigned but a board is on bus 1 — assign it in the GPIO sub-tab.' });
     }
     // The shared /OE covers a board unless it is a bus-1 board with a split /OE2.
+    // Missing /OE is an ERROR, matching the firmware ProfileValidator: a profile
+    // with a PCA9685 but no /OE safety line is refused activation, so the page
+    // must not soften that to a mere warning.
     var needSharedOe = useBus0 || (m.useBus1 && !m.splitOe);
-    if (needSharedOe && m.oe < 0) out.push({ sev: 'warning', msg: 'PCA9685 /OE is unassigned — without the safety line the outputs cannot be force-disabled.' });
-    if (m.splitOe && m.oe2 < 0) out.push({ sev: 'warning', msg: 'The second-bus /OE (OE2) is unassigned — bus 1 outputs cannot be force-disabled.' });
+    if (needSharedOe && m.oe < 0) out.push({ sev: 'error', msg: 'PCA9685 /OE is unassigned — the outputs cannot be force-disabled and the profile cannot be armed. Assign SERVO_OE in the GPIO sub-tab.' });
+    if (m.splitOe && m.oe2 < 0) out.push({ sev: 'error', msg: 'The second-bus /OE (OE2) is unassigned — bus 1 outputs cannot be force-disabled and the profile cannot be armed. Assign SERVO_OE2 (or share the single /OE line).' });
+    // Hardware E-stop chain (advisory): /OE and the software stop cover the PCA
+    // outputs, but only a physical E-stop cutting the servo rail also covers
+    // direct-GPIO servos and firmware faults. Declared in the GPIO sub-tab.
+    var estop = (p.pins || []).filter(function (x) { return x.signal === 'ESTOP'; })[0];
+    if (!estop) out.push({ sev: 'warning',
+      msg: 'No hardware E-stop is declared — a software stop is not a safety function. ' +
+        'Declare it in the GPIO sub-tab (Emergency stop input); reference circuit in hardware/POWER_AND_SAFETY.md.' });
+    else if (estop.gpio < 0) out.push({ sev: 'warning',
+      msg: 'The hardware E-stop is declared but its ESTOP input has no GPIO — assign one in the GPIO sub-tab.' });
     // Firmware capacity limits (max 8 addresses per bus).
     [0, 1].forEach(function (bus) {
       var n = m.boards.filter(function (b) { return b.bus === bus; }).length;
@@ -531,6 +543,9 @@
     }
     if (m.splitOe) { cells.push(stat('/OE bus 0', gp(m.oe))); cells.push(stat('/OE bus 1 (OE2)', gp(m.oe2))); }
     else cells.push(stat('/OE safety', gp(m.oe)));
+    var estop = (p.pins || []).filter(function (x) { return x.signal === 'ESTOP'; })[0];
+    cells.push(stat('Hardware E-stop', estop ? gp(estop.gpio) +
+      (p.board && p.board.estopNormallyClosed ? ' · NC' : ' · NO') : 'not declared'));
     var grid = h('div.grid', cells);
     var kids = [h('div.card-head', [h('h2', 'Harness summary'),
       h('span.muted', 'derived live from the current configuration')]), grid];
@@ -551,6 +566,10 @@
   // Bulk-capacitor range for a board, sized to how many micro-servos can start at
   // once on it (each servo's in-rush hits this board's own capacitor):
   //   ~4 → 1000–2200 µF · ~8 → 2200–4700 µF · ~16 → 4700–10000 µF.
+  // EMPIRICAL STARTING VALUES for small micro-servos (SG90 class) — not an
+  // electrical law. Two powerful digital servos can out-draw eight micro-servos:
+  // size from the datasheet stall/peak current with C ≈ I·Δt/ΔV, then confirm at
+  // the bench (hardware/POWER_AND_SAFETY.md §capacitors).
   function capRange(n) {
     if (n <= 4) return '1000–2200 µF';
     if (n <= 8) return '2200–4700 µF';
@@ -584,15 +603,24 @@
       h('ul.advice-list', [
         h('li', ['Run a ', h('strong', 'direct line from the power supply to each PCA9685'),
           '’s V+/GND input (star wiring) — don’t daisy-chain the power from one board to the ' +
-          'next, so one board’s in-rush can’t sag its neighbours.']),
+          'next, so one board’s in-rush can’t sag its neighbours. Fuse the rail at the PSU and, ' +
+          'ideally, ', h('strong', 'each branch'), ' at the distribution point.']),
         h('li', ['Add a ', h('strong', 'bulk capacitor across each PCA9685’s V+/GND'),
           ', sized to how many micro-servos can start at once on that board: ',
           h('strong', '~4 → 1000–2200 µF'), ', ', h('strong', '~8 → 2200–4700 µF'), ', ',
-          h('strong', '~16 → 4700–10000 µF'), '.']),
+          h('strong', '~16 → 4700–10000 µF'), '. These are ', h('strong', 'empirical starting values ' +
+          'for small micro-servos'), ' — powerful digital servos draw far more: size from the ' +
+          'datasheet peak current (C ≈ I·Δt/ΔV) and confirm at the bench. The firmware’s start ' +
+          'governor spreads the peaks but is no substitute for a properly sized supply.']),
         h('li', ['Pair it with a ', h('strong', '100 nF ceramic'),
           ' across the same V+/GND to filter high-frequency noise — this limits ESP32 ' +
           'resets/crashes, especially when the logic shares the servo supply.']),
-        h('li', 'Keep the servo supply separate from the ESP32 3.3 V logic — share only GND.')
+        h('li', 'Keep the servo supply separate from the ESP32 3.3 V logic — share only GND.'),
+        h('li', ['Make ', h('strong', '/OE fail-safe'), ': a pull-up to 3.3 V on the /OE bus so the ' +
+          'outputs stay disabled with the ESP32 absent, resetting or unplugged, driven low through ' +
+          'an open-drain stage rather than pushed by the GPIO alone. A hardware E-stop chain should ' +
+          'also drop the servo rail (contactor) — /OE cannot stop direct-GPIO servos. Reference ' +
+          'circuit: hardware/POWER_AND_SAFETY.md.'])
       ])
     ];
     if (m.boards.length) {
@@ -685,4 +713,7 @@
   }
 
   GMB.views.wiring = { render: render };
+  // The profile → wiring model is shared with the Power & safety and I²C & PCA
+  // sub-tabs (boards per bus, channel occupancy, board-level signal GPIOs).
+  GMB.wiringModel = buildModel;
 })(window);

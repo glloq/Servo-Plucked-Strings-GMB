@@ -52,6 +52,7 @@ public:
         bool* degraded = nullptr;
         std::vector<bool>* stringFaulted = nullptr;
         int8_t* estopPin = nullptr;
+        bool* estopNc = nullptr;  // NC contact: stop when the pin reads HIGH (loop open)
         Profile* profile = nullptr;
         std::function<int()> rebuildCaps;       // -> working string count (rebuildRuntimeCapabilities)
         std::function<void()> notifyCaps;       // notifyCapabilitiesChanged
@@ -62,6 +63,16 @@ public:
     bool locked() const {
         SafetyState s = d_.safety->state();
         return s == SafetyState::Panic || s == SafetyState::EmergencyStop;
+    }
+
+    // Raw E-stop level, honouring the contact wiring: a normally-open button stops
+    // on LOW (legacy active-low); the recommended normally-closed loop stops on
+    // HIGH — a press, a cut wire or an unplugged connector all open the loop.
+    bool estopAsserted() const {
+        int8_t pin = d_.estopPin ? *d_.estopPin : int8_t(-1);
+        if (pin < 0) return false;
+        bool nc = d_.estopNc && *d_.estopNc;
+        return nc ? digitalRead(pin) == HIGH : digitalRead(pin) == LOW;
     }
 
     // Begin the arming sequence (spec §13/§21, P0): validate, then PARK every servo at
@@ -76,11 +87,10 @@ public:
         ActuatorManager& g_actuators = *d_.actuators;
         AppPhase& g_phase = *d_.phase;
         bool& g_degraded = *d_.degraded;
-        int8_t& g_estopPin = *d_.estopPin;
         Profile& g_profile = *d_.profile;
 
         if (locked()) return false;
-        if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) {
+        if (estopAsserted()) {
             g_safety.emergencyStop(nowMs);
             return false;
         }
@@ -155,10 +165,9 @@ public:
         ServoBank& g_servos = *d_.servos;
         InstrumentController& g_instrument = *d_.instrument;
         std::vector<bool>& g_stringFaulted = *d_.stringFaulted;
-        int8_t& g_estopPin = *d_.estopPin;
         Profile& g_profile = *d_.profile;
 
-        if (g_estopPin >= 0 && digitalRead(g_estopPin) == LOW) return false;
+        if (estopAsserted()) return false;
         if (!ProfileValidator::isActivatable(g_profile)) return false;
         if (g_servos.directAttachFault() || g_servos.pcaAttachFault()) return false;
         g_safety.reset();
