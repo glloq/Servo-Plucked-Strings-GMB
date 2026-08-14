@@ -92,6 +92,10 @@ bool g_degraded = false;  // Ready but with one or more strings disabled by a fa
 // destroyed, so a profile that removes/reassigns a finger servo can't leave a finger
 // pressed while the new profile arms.
 ProfileActivation g_activation;
+// The ActivateProfile command whose swap HAS been applied and is now parking the
+// NEW profile (deferred outcome, audit 7): marked Succeeded only when the phase
+// really reaches Ready, Cancelled/Failed otherwise. 0 = none awaiting.
+uint32_t g_activationCmdId = 0;
 
 std::vector<bool> g_stringFaulted;   // runtime fault (servo write error, etc.)
 
@@ -156,28 +160,98 @@ std::atomic<bool> g_midiUnlockRequested{false};
 std::string g_wifiScanJson =                    // guarded by g_stateMutex
     "{\"ok\":true,\"scanning\":false,\"networks\":[]}";
 uint32_t g_seenScanGeneration = 0;
+// Serialized diagnostics snapshot (guarded by g_stateMutex): built by the LOOP and
+// only ever copied by the web task, like the status DTO — GET /api/diagnostics
+// used to serialize live loop-side counters from the async web task (audit 7 P2).
+std::string g_diagJson = "{}";
+
+// The whole device network configuration as ONE NVS entry ("netcfg", a JSON
+// string): a single putString is atomic at the NVS level, so mode / SSID /
+// hostname / passwords can no longer be HALF-stored when one of several
+// successive writes fails (audit 7 — the old per-key layout could commit
+// netmode+netssid and then fail nethost, leaving a mixed configuration behind a
+// 500). The legacy per-key entries are still read as a fallback so an existing
+// device migrates transparently on its next save.
+struct DeviceNetCfg {
+    bool hasMode = false; bool station = false;
+    bool hasSsid = false; std::string ssid;
+    bool hasApSsid = false; std::string apSsid;
+    bool hasHost = false; std::string hostname;
+    std::string staPass, apPass;  // empty = none stored
+};
+
+void loadDeviceNetCfg(DeviceNetCfg& c) {
+    Preferences prefs;
+    if (!prefs.begin("gmb", true)) return;
+    if (prefs.isKey("netcfg")) {
+        String raw = prefs.getString("netcfg", "");
+        prefs.end();
+        JsonDocument doc;
+        if (deserializeJson(doc, raw.c_str()) != DeserializationError::Ok) return;
+        if (doc["mode"].is<const char*>()) {
+            c.hasMode = true;
+            c.station = std::string(doc["mode"].as<const char*>()) == "station";
+        }
+        if (doc["ssid"].is<const char*>()) { c.hasSsid = true; c.ssid = doc["ssid"].as<const char*>(); }
+        if (doc["apSsid"].is<const char*>()) { c.hasApSsid = true; c.apSsid = doc["apSsid"].as<const char*>(); }
+        if (doc["hostname"].is<const char*>()) { c.hasHost = true; c.hostname = doc["hostname"].as<const char*>(); }
+        if (doc["staPass"].is<const char*>()) c.staPass = doc["staPass"].as<const char*>();
+        if (doc["apPass"].is<const char*>()) c.apPass = doc["apPass"].as<const char*>();
+        return;
+    }
+    // Legacy multi-key layout (pre-audit-7 devices).
+    if (prefs.isKey("netmode")) {
+        c.hasMode = true;
+        c.station = prefs.getString("netmode", "") == "station";
+    }
+    if (prefs.isKey("netssid")) { c.hasSsid = true; c.ssid = prefs.getString("netssid", "").c_str(); }
+    if (prefs.isKey("netapssid")) {
+        String s = prefs.getString("netapssid", "");
+        if (s.length() > 0) { c.hasApSsid = true; c.apSsid = s.c_str(); }
+    }
+    if (prefs.isKey("nethost")) {
+        String h = prefs.getString("nethost", "");
+        if (h.length() > 0) { c.hasHost = true; c.hostname = h.c_str(); }
+    }
+    c.staPass = prefs.getString("wifipass", "").c_str();
+    c.apPass = prefs.getString("appass", "").c_str();
+    prefs.end();
+}
+
+bool storeDeviceNetCfg(const DeviceNetCfg& c) {
+    JsonDocument doc;
+    if (c.hasMode) doc["mode"] = c.station ? "station" : "accessPoint";
+    if (c.hasSsid) doc["ssid"] = c.ssid;
+    if (c.hasApSsid) doc["apSsid"] = c.apSsid;
+    if (c.hasHost) doc["hostname"] = c.hostname;
+    if (!c.staPass.empty()) doc["staPass"] = c.staPass;
+    if (!c.apPass.empty()) doc["apPass"] = c.apPass;
+    std::string out;
+    serializeJson(doc, out);
+    Preferences prefs;
+    if (!prefs.begin("gmb", false)) return false;
+    bool ok = prefs.putString("netcfg", String(out.c_str())) != 0;  // the ONE write
+    if (ok) {
+        // Best-effort cleanup of the legacy keys — "netcfg" wins on read either way.
+        for (const char* k : {"netmode", "netssid", "netapssid", "nethost",
+                              "wifipass", "appass"})
+            if (prefs.isKey(k)) prefs.remove(k);
+    }
+    prefs.end();
+    return ok;
+}
 
 // Overlay the NVS device network settings (when present) onto a profile's network
 // block. Called on boot and on every profile activation, so an activated profile
 // can never revert the device's stored network choice.
 void overlayDeviceNetwork(Profile& p) {
-    Preferences prefs;
-    prefs.begin("gmb", true);
-    if (prefs.isKey("netmode")) {
-        String m = prefs.getString("netmode", "");
-        if (m == "station") p.network.mode = NetworkMode::Station;
-        else if (m == "accessPoint") p.network.mode = NetworkMode::AccessPoint;
-    }
-    if (prefs.isKey("netssid")) p.network.ssid = prefs.getString("netssid", "").c_str();
-    if (prefs.isKey("netapssid")) {
-        String s = prefs.getString("netapssid", "");
-        if (s.length() > 0) p.network.apSsid = s.c_str();  // never blank the AP name
-    }
-    if (prefs.isKey("nethost")) {
-        String h = prefs.getString("nethost", "");
-        if (h.length() > 0) p.network.hostname = h.c_str();
-    }
-    prefs.end();
+    DeviceNetCfg c;
+    loadDeviceNetCfg(c);
+    if (c.hasMode)
+        p.network.mode = c.station ? NetworkMode::Station : NetworkMode::AccessPoint;
+    if (c.hasSsid) p.network.ssid = c.ssid;
+    if (c.hasApSsid && !c.apSsid.empty()) p.network.apSsid = c.apSsid;  // never blank the AP name
+    if (c.hasHost && !c.hostname.empty()) p.network.hostname = c.hostname;
 }
 
 // Reallocates the per-string vectors + reinitialises the servo hardware. The
@@ -274,9 +348,21 @@ void doEmergencyStop() { g_supervisor.emergencyStop(); }
 
 // Phase 1 of activation: validate, release the OLD profile's fingers, and defer
 // the teardown until they have physically lifted (servicePendingActivation).
-bool doActivateProfile(const Profile& p, uint32_t nowMs) {
-    if (!ProfileValidator::isActivatable(p)) return false;
-    if (safetyLocked()) return false;
+// Returns Deferred on success (audit 7): the command's real outcome is recorded
+// only when the NEW profile reaches Ready (Succeeded), the swap aborts (Failed)
+// or a hard stop kills it (Cancelled) — never at "the procedure started".
+CmdOutcome doActivateProfile(const Profile& p, uint32_t nowMs, uint32_t cmdId) {
+    if (!ProfileValidator::isActivatable(p)) return CmdOutcome::Refused;
+    if (safetyLocked()) return CmdOutcome::Refused;
+    // A new activation supersedes any still in flight: close the old command's
+    // lifecycle instead of leaving it "running" forever.
+    if (uint32_t old = g_activation.commandId())
+        g_commands.finish(old, CommandResultRing::Cancelled);
+    g_activation.cancel();
+    if (g_activationCmdId) {
+        g_commands.finish(g_activationCmdId, CommandResultRing::Cancelled);
+        g_activationCmdId = 0;
+    }
     g_instrument.panic();
     g_scheduler.reset();  // clear every string's FSM + pressed-finger state
     g_testOffs.clear();
@@ -287,17 +373,57 @@ bool doActivateProfile(const Profile& p, uint32_t nowMs) {
     // with the outputs kept live before the old config is destroyed, and wait for the
     // slowest to travel + settle. The final power cut happens in phase 2, AFTER the
     // mechanical wait — never before (that is hardStop's job, not a profile change).
+    // The park must be TRUSTWORTHY (audit 7 P1): a dead PCA or a refused rest
+    // command means the old fingers may stay down, so the swap is refused with the
+    // OLD profile intact and the outputs cut, instead of proceeding on hope.
+    {
+        uint8_t failedBoard = 0xFF;
+        if (!g_servos.pcaHealthy(failedBoard)) {
+            g_safety.recordFault("activation", "PCA9685 not responding (" +
+                                 ServoBank::boardName(failedBoard) +
+                                 ") — profile swap refused", nowMs);
+            g_servos.hardStop();
+            g_phase = AppPhase::Boot;
+            return CmdOutcome::Refused;
+        }
+    }
     g_servos.outputEnable(true);
-    g_servos.moveAllToRest();
+    ServoBank::ParkResult park = g_servos.moveAllToRest();
+    if (!park.ok) {
+        g_safety.recordFault("activation", "rest command refused by servo " +
+                             std::to_string(park.failedServo) + " [" +
+                             actuatorResultName(park.reason) +
+                             "] — profile swap refused", nowMs);
+        g_servos.hardStop();
+        g_phase = AppPhase::Boot;
+        return CmdOutcome::Refused;
+    }
     uint32_t wait = g_servos.parkDurationMs();
-    g_activation.begin(p, nowMs + wait);  // apply once the controlled park has elapsed
-    return true;
+    g_activation.begin(p, nowMs + wait, cmdId);  // apply once the park has elapsed
+    return CmdOutcome::Deferred;
 }
 
 // Phase 2: once the old fingers have lifted (controlled park complete), cut power,
-// tear down, and swap in the new profile.
+// tear down, and swap in the new profile. The old profile is destroyed ONLY after
+// the park could be re-confirmed (audit 7 P1): if a PCA died during the wait, the
+// old fingers may never have lifted, so the swap aborts (command Failed, hardware
+// cut) rather than arming a new config over an unknown mechanical state.
 void servicePendingActivation(uint32_t nowMs) {
-    g_activation.service(nowMs, [nowMs](const Profile& p) {
+    if (!g_activation.pending()) return;
+    uint32_t cmdId = g_activation.commandId();
+    if (g_activation.due(nowMs)) {
+        uint8_t failedBoard = 0xFF;
+        if (!g_servos.pcaHealthy(failedBoard)) {
+            g_activation.cancel();  // BEFORE the hard stop so its cleanup can't re-cancel
+            if (cmdId) g_commands.finish(cmdId, CommandResultRing::Failed);
+            g_safety.recordFault("activation", "PCA9685 lost during controlled park (" +
+                                 ServoBank::boardName(failedBoard) +
+                                 ") — profile swap aborted", nowMs);
+            g_supervisor.hardStop();
+            return;
+        }
+    }
+    g_activation.service(nowMs, [nowMs, cmdId](const Profile& p) {
         g_servos.hardStop();  // controlled park done: safe to cut before teardown
         {
             StateGuard lock;
@@ -305,7 +431,13 @@ void servicePendingActivation(uint32_t nowMs) {
             g_profile.capabilitiesRevision++;
             applyProfile();
         }
-        if (!armInstrument(nowMs)) g_phase = AppPhase::Boot;
+        if (!armInstrument(nowMs)) {
+            g_phase = AppPhase::Boot;
+            if (cmdId) g_commands.finish(cmdId, CommandResultRing::Failed);
+        } else {
+            // Parking the NEW profile: Succeeded lands at Parking -> Ready (loop).
+            g_activationCmdId = cmdId;
+        }
     });
 }
 
@@ -396,15 +528,12 @@ void serviceWifiRequests(uint32_t nowMs) {
         refreshWifiScanJson();  // fresh results landed
     }
     if (g_wifiApplyRequested.exchange(false)) {
-        Preferences prefs;
-        prefs.begin("gmb", true);
-        String staPass = prefs.getString("wifipass", "");
-        String apPass = prefs.getString("appass", "");
-        prefs.end();
+        DeviceNetCfg cfg;
+        loadDeviceNetCfg(cfg);
         { StateGuard lock; overlayDeviceNetwork(g_profile); }
         // Re-begin reconnects with the new settings; on repeated failure Net falls
         // back to the hotspot exactly like at boot, so the device stays reachable.
-        g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
+        g_net.begin(g_profile.network, cfg.staPass.c_str(), cfg.apPass.c_str());
         Serial.println(F("[net] applying updated device network settings"));
     }
     // UDP MIDI source posture: policy change / unlock requested by the web task,
@@ -417,19 +546,27 @@ void serviceWifiRequests(uint32_t nowMs) {
 
 // Run a bounded batch of queued commands on the main loop. The command HANDLERS live
 // here (they touch instrument/servos/safety); CommandDispatcher owns the plumbing and
-// records each outcome. Handlers return whether the command succeeded.
+// records each outcome. An activation defers its outcome (audit 7): the ring shows
+// "running" until the new profile reaches Ready / fails / is cancelled.
 void drainCommands(uint32_t nowMs) {
-    g_commands.drain(2, [nowMs](const AppCommand& c) -> bool {
+    g_commands.drain(2, [nowMs](const AppCommand& c) -> CmdOutcome {
+        auto asOutcome = [](bool ok) {
+            return ok ? CmdOutcome::Succeeded : CmdOutcome::Refused;
+        };
         switch (c.type) {
-            case CmdType::Panic:          doPanic(); g_commands.purge(); return true;
-            case CmdType::Reset:          return doReset(nowMs);
-            case CmdType::ActivateProfile: return c.profile && doActivateProfile(*c.profile, nowMs);
+            case CmdType::Panic:
+                doPanic(); g_commands.purge(); return CmdOutcome::Succeeded;
+            case CmdType::Reset:          return asOutcome(doReset(nowMs));
+            case CmdType::ActivateProfile:
+                return c.profile ? doActivateProfile(*c.profile, nowMs, c.id)
+                                 : CmdOutcome::Refused;
             case CmdType::TestNote:
-                return doTestNote(c.channel, c.note, c.velocity, c.durationMs, nowMs);
+                return asOutcome(doTestNote(c.channel, c.note, c.velocity,
+                                            c.durationMs, nowMs));
             case CmdType::TestServo:
-                return doTestServo(c.servoIndex, c.servoActive, c.servoUs);
+                return asOutcome(doTestServo(c.servoIndex, c.servoActive, c.servoUs));
         }
-        return true;
+        return CmdOutcome::Succeeded;
     });
 }
 
@@ -505,6 +642,16 @@ std::string buildDiagnosticsJson() {
     return out;
 }
 
+// Rebuild the diagnostics snapshot ON THE LOOP and publish it under the state
+// mutex; GET /api/diagnostics then serves an immutable copy (audit 7 P2 — the
+// counters are plain uint32_t/bool the loop mutates, so the web task must never
+// serialize them live).
+void refreshDiagnosticsJson() {
+    std::string out = buildDiagnosticsJson();  // built outside the lock
+    StateGuard lock;
+    g_diagJson = out;
+}
+
 }  // namespace
 
 void setup() {
@@ -544,7 +691,19 @@ void setup() {
     sd.profile = &g_profile;
     sd.rebuildCaps = []() -> int { return rebuildRuntimeCapabilities(); };
     sd.notifyCaps = []() { notifyCapabilitiesChanged(); };
-    sd.hardStopCleanup = []() { g_testOffs.clear(); g_activation.cancel(); };
+    sd.hardStopCleanup = []() {
+        g_testOffs.clear();
+        // Close the lifecycle of any activation the hard stop kills (audit 7):
+        // both a swap still waiting out its park and one already parking the new
+        // profile read back "cancelled", never a stale "running"/"succeeded".
+        if (uint32_t id = g_activation.commandId())
+            g_commands.finish(id, CommandResultRing::Cancelled);
+        g_activation.cancel();
+        if (g_activationCmdId) {
+            g_commands.finish(g_activationCmdId, CommandResultRing::Cancelled);
+            g_activationCmdId = 0;
+        }
+    };
     g_supervisor.bind(sd);
 
     g_commands.begin(16);  // web->loop command queue + result ring + mutex (P2.17)
@@ -581,12 +740,9 @@ void setup() {
                   haveValidProfile ? g_profile.instrument.name.c_str()
                                    : "none valid -> CONFIG_SAFE (web UI only)");
 
-    Preferences prefs;
-    prefs.begin("gmb", true);
-    String staPass = prefs.getString("wifipass", "");
-    String apPass = prefs.getString("appass", "");
-    prefs.end();
-    g_net.begin(g_profile.network, staPass.c_str(), apPass.c_str());
+    DeviceNetCfg netCfg;
+    loadDeviceNetCfg(netCfg);
+    g_net.begin(g_profile.network, netCfg.staPass.c_str(), netCfg.apPass.c_str());
     g_midi.begin(5006);
     // Restore the stored UDP MIDI source posture (device state, audit 4 P2.3):
     // 0 open (default) / 1 lockToFirst / 2 disabled.
@@ -635,34 +791,24 @@ void setup() {
     ctx.lockStorage = []() { if (g_storageMutex) xSemaphoreTake(g_storageMutex, portMAX_DELAY); };
     ctx.unlockStorage = []() { if (g_storageMutex) xSemaphoreGive(g_storageMutex); };
     ctx.onSetNetwork = [](const WifiSettings& w) -> bool {
-        bool okAll = true;
-        {
-            Preferences p;
-            if (!p.begin("gmb", false)) return false;
-            // Every write is CHECKED: a failed NVS put must surface as an HTTP
-            // error, not a phantom "stored" (audit 5). Removing an absent key is
-            // fine (nothing to erase), so remove() is only a failure when the key
-            // exists and still cannot be deleted.
-            auto put = [&](const char* k, const std::string& v) {
-                if (p.putString(k, String(v.c_str())) == 0 && !v.empty()) okAll = false;
-            };
-            auto erase = [&](const char* k) {
-                if (p.isKey(k) && !p.remove(k)) okAll = false;
-            };
-            if (w.hasMode) put("netmode", w.station ? "station" : "accessPoint");
-            if (w.hasSsid) put("netssid", w.ssid);
-            if (w.hasApSsid) put("netapssid", w.apSsid);
-            if (w.hasHostname) put("nethost", w.hostname);
-            // Passwords: overwrite when provided, ERASE when explicitly cleared
-            // (open network / forget) — an empty field still keeps the old secret.
-            if (w.clearStationPassword) erase("wifipass");
-            else if (w.hasStationPassword) put("wifipass", w.stationPassword);
-            if (w.clearApPassword) erase("appass");
-            else if (w.hasApPassword) put("appass", w.apPassword);
-            p.end();
-        }
-        if (okAll && w.apply) g_wifiApplyRequested.store(true);  // reconnect on the loop
-        return okAll;
+        // Read-modify-write of the SINGLE "netcfg" blob (audit 7): the whole group
+        // commits in one checked NVS write, so a failure can no longer leave a
+        // half-stored mode/SSID/hostname mix behind the HTTP error.
+        DeviceNetCfg c;
+        loadDeviceNetCfg(c);  // start from the stored (or legacy) values
+        if (w.hasMode) { c.hasMode = true; c.station = w.station; }
+        if (w.hasSsid) { c.hasSsid = true; c.ssid = w.ssid; }
+        if (w.hasApSsid) { c.hasApSsid = true; c.apSsid = w.apSsid; }
+        if (w.hasHostname) { c.hasHost = true; c.hostname = w.hostname; }
+        // Passwords: overwrite when provided, ERASE when explicitly cleared
+        // (open network / forget) — an empty field still keeps the old secret.
+        if (w.clearStationPassword) c.staPass.clear();
+        else if (w.hasStationPassword) c.staPass = w.stationPassword;
+        if (w.clearApPassword) c.apPass.clear();
+        else if (w.hasApPassword) c.apPass = w.apPassword;
+        if (!storeDeviceNetCfg(c)) return false;  // nothing partially written
+        if (w.apply) g_wifiApplyRequested.store(true);  // reconnect on the loop
+        return true;
     };
     ctx.onWifiScanStart = []() { g_wifiScanRequested.store(true); };
     ctx.wifiScanJson = []() -> std::string {
@@ -704,7 +850,12 @@ void setup() {
       g_authConfiguredCache = p.getString("admintoken", "").length() > 0; p.end(); }
     ctx.authConfigured = []() -> bool { return g_authConfiguredCache; };
     ctx.appState = []() -> std::string { return appStateStr(); };
-    ctx.diagnosticsJson = []() -> std::string { return buildDiagnosticsJson(); };
+    // The web task only copies the loop-built snapshot (audit 7 P2), same
+    // pattern as the status DTO and the Wi-Fi scan JSON.
+    ctx.diagnosticsJson = []() -> std::string {
+        StateGuard lock;
+        return g_diagJson;
+    };
     ctx.readyStrings = []() -> int {
         if (g_phase != AppPhase::Ready) return 0;
         int n = 0;
@@ -735,6 +886,8 @@ void setup() {
             "no valid profile at boot — CONFIG_SAFE; actuators disabled until a "
             "profile is loaded and armed from the web UI", millis());
     }
+    feedDiagnostics();
+    refreshDiagnosticsJson();  // first diagnostics snapshot before the server answers
     g_web.refreshStatus();
     Serial.printf("[boot] setup complete — state %s\n", appStateStr());
 }
@@ -767,6 +920,23 @@ void loop() {
     if (!panicked) drainCommands(nowMs);
     servicePendingActivation(nowMs);
     serviceParking(nowMs);  // Parking -> Ready once the mechanical settle has elapsed
+
+    // Deferred activation outcome (audit 7): the command goes Succeeded at the REAL
+    // Parking -> Ready transition of the NEW profile — and the status snapshot is
+    // refreshed in the same pass, so a client that sees "succeeded" can never read
+    // a stale cached status from before the swap.
+    if (g_activationCmdId != 0) {
+        if (g_phase == AppPhase::Ready) {
+            g_commands.finish(g_activationCmdId, CommandResultRing::Succeeded);
+            g_activationCmdId = 0;
+            feedDiagnostics();
+            g_web.refreshStatus();
+        } else if (g_phase != AppPhase::Parking) {
+            // Parking aborted without a hard stop closing it (fault path): failed.
+            g_commands.finish(g_activationCmdId, CommandResultRing::Failed);
+            g_activationCmdId = 0;
+        }
+    }
 
     // Wi-Fi loss policy (single deliberate behaviour, audit P1.10 — the removed
     // WifiLossBehavior enum was never wired): cancel pending commands and release
@@ -866,6 +1036,7 @@ void loop() {
     if (nowMs - lastStatusMs >= 100) {
         lastStatusMs = nowMs;
         feedDiagnostics();  // refresh the telemetry snapshot from the loop side (P2.19)
+        refreshDiagnosticsJson();  // publish it for GET /api/diagnostics (audit 7 P2)
         g_web.refreshStatus();
         g_web.broadcastStatus();
     }

@@ -28,6 +28,7 @@
 #include "../../core/configuration/Profile.h"
 #include "../../core/configuration/ProfileValidator.h"
 #include "../../core/instrument/ActuatorManager.h"
+#include "../../core/instrument/ActuatorResult.h"
 #include "../../core/instrument/InstrumentController.h"
 #include "../../core/safety/SafetyManager.h"
 #include "PlaybackScheduler.h"
@@ -88,6 +89,18 @@ public:
             g_safety.recordFault("attach", "a servo/PCA9685 could not attach or respond", nowMs);
             return false;
         }
+        // Live PCA probe BEFORE parking (audit 7 P1): the periodic health check only
+        // runs in Ready, so a board lost while stopped/reconfiguring would otherwise
+        // be discovered only after the park was already trusted.
+        {
+            uint8_t failedBoard = 0xFF;
+            if (!g_servos.pcaHealthy(failedBoard)) {
+                g_safety.recordFault("park", "PCA9685 not responding (" +
+                                     ServoBank::boardName(failedBoard) +
+                                     ") — arming refused", nowMs);
+                return false;
+            }
+        }
         g_safety.reset();  // -> PowerOnSafe (clean slate before parking)
         g_degraded = false;
         g_actuators.reset();
@@ -97,19 +110,43 @@ public:
         }
         g_scheduler.clearCurrentFingers();
         g_servos.outputEnable(true);
-        g_servos.moveAllToRest();
+        // A park is only as good as its commands: a refused rest write means a
+        // finger may still be down, so arming must NOT proceed on hope (audit 7 P1).
+        ServoBank::ParkResult park = g_servos.moveAllToRest();
+        if (!park.ok) {
+            g_safety.recordFault("park", "rest command refused by servo " +
+                                 std::to_string(park.failedServo) + " [" +
+                                 actuatorResultName(park.reason) + "] — arming aborted",
+                                 nowMs);
+            g_servos.hardStop();  // outputs back to the safe cut
+            return false;
+        }
         uint32_t parkMs = g_servos.parkDurationMs();
         if (!g_safety.beginParking(true, true, parkMs, nowMs)) return false;
         g_phase = AppPhase::Parking;
         return true;
     }
 
-    // Finish arming: once the mechanical settle has elapsed, Parking -> Ready.
+    // Finish arming: once the mechanical settle has elapsed, Parking -> Ready —
+    // but only after a FINAL PCA health probe (audit 7 P1): a board that died
+    // during the park means the rest positions cannot be trusted, so the arm
+    // fails safe (hard stop + panic) instead of declaring Ready over servos that
+    // may never have moved.
     void serviceParking(uint32_t nowMs) {
         AppPhase& g_phase = *d_.phase;
         SafetyManager& g_safety = *d_.safety;
         if (g_phase != AppPhase::Parking) return;
-        if (g_safety.tickParking(nowMs)) g_phase = AppPhase::Ready;  // Armed
+        if (!g_safety.tickParking(nowMs)) return;  // mechanical settle still running
+        uint8_t failedBoard = 0xFF;
+        if (!d_.servos->pcaHealthy(failedBoard)) {
+            g_safety.recordFault("park", "PCA9685 lost during parking (" +
+                                 ServoBank::boardName(failedBoard) +
+                                 ") — park unconfirmed", nowMs);
+            hardStop();
+            g_safety.panic("parking could not be confirmed", nowMs);
+            return;
+        }
+        g_phase = AppPhase::Ready;  // Armed
     }
 
     // Explicit recovery after a panic / E-stop. Verbatim from the old doReset().

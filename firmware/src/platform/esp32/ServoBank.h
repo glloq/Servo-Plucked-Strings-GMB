@@ -86,14 +86,29 @@ public:
     // Immediate HARD STOP (E-stop / panic / major hardware fault): PCA /OE OFF and
     // direct-GPIO PWM OFF at once, no mechanical wait, all runtime state cleared.
     // This must never depend on a mechanical movement completing first (spec P0 §21.2).
+    // Pass order is safety-ordered (audit 7 P0): /OE, then every direct-GPIO PWM,
+    // and only THEN any I2C transaction (best-effort REST preload) — a wedged I2C
+    // bus can no longer delay the neutralisation of direct servos.
     void hardStop();
+
+    // Outcome of a controlled park: ok=true when every enabled servo ACCEPTED its
+    // rest command (the mechanical travel still needs parkDurationMs()). On failure
+    // the first refusing servo + its ActuatorResult are reported so the caller can
+    // abort the arming / profile swap instead of assuming the fingers lifted
+    // (audit 7 P1 — a park was previously fire-and-forget).
+    struct ParkResult {
+        bool ok = true;
+        int failedServo = -1;
+        ActuatorResult reason = ActuatorResult::Ok;
+    };
 
     // Controlled park, phase 1: command every servo to its REST position with the
     // outputs kept ENABLED (fingers up, strikers home). Non-blocking — the caller
     // times the travel with parkDurationMs(), then either arms (keep outputs live) or
     // calls hardStop() to cut power once the servos have settled (normal stop /
-    // profile change / reconfiguration).
-    void moveAllToRest();
+    // profile change / reconfiguration). Check the result: a refused rest command
+    // means the park CANNOT be trusted.
+    ParkResult moveAllToRest();
 
     // Longest mechanical settle across all enabled servos: max(travelMs + settleMs).
     // The wait a controlled park / arming must allow after moveAllToRest() before the
@@ -210,6 +225,14 @@ public:
     uint16_t muteUs(int index) const {
         return (index >= 0 && index < (int)servos_.size()) ? servos_[index].muteUs : 0;
     }
+
+#if !defined(ARDUINO)
+    // Host-test fault injection: when set, every otherwise-successful write to
+    // servo `index` reports this hook's result instead — the ONLY way native tests
+    // can exercise failure paths (ParkResult, fault handling), since the host
+    // build has no hardware to refuse a write. Never compiled on the target.
+    std::function<ActuatorResult(int index)> hostWriteResult;
+#endif
 
 private:
     enum class Mode : uint8_t { Rest, Active, Striking };

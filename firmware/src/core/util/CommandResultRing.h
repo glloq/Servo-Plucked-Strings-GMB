@@ -18,7 +18,15 @@ public:
     // Cancelled = the command was purged from the queue WITHOUT running (panic /
     // E-stop). Distinct from Refused so a client awaiting an activation stops
     // immediately instead of polling a "queued" ghost to its timeout (audit 6).
-    enum State : uint8_t { Queued = 0, Succeeded = 1, Refused = 2, Cancelled = 3 };
+    // Running / Failed close the async lifecycle for DEFERRED commands (audit 7):
+    // a profile activation is Running from the moment its handler starts the
+    // controlled park until the new profile really reaches Ready (-> Succeeded);
+    // it becomes Failed when the swap aborts mid-flight (park unconfirmed, arming
+    // failed) and Cancelled when a hard stop killed it. "succeeded" therefore
+    // finally means "the new profile IS active", never "the procedure started".
+    enum State : uint8_t {
+        Queued = 0, Succeeded = 1, Refused = 2, Cancelled = 3, Running = 4, Failed = 5
+    };
 
     // Record the outcome for `id` (ignored when id == 0). Updates in place if the id
     // is already tracked, otherwise takes the next ring slot (evicting the oldest).
@@ -30,10 +38,10 @@ public:
         next_ = (next_ + 1) % kSize;
     }
 
-    // The outcome string for `id`: "queued" / "succeeded" / "refused" /
-    // "cancelled", or "unknown" if the id was never issued or has aged out of the
-    // ring. id 0 (the "no command" sentinel, also the empty-slot value) is always
-    // "unknown".
+    // The outcome string for `id`: "queued" / "running" / "succeeded" / "refused" /
+    // "cancelled" / "failed", or "unknown" if the id was never issued or has aged
+    // out of the ring. id 0 (the "no command" sentinel, also the empty-slot value)
+    // is always "unknown".
     const char* stateStr(uint32_t id) const {
         if (id == 0) return "unknown";
         for (const auto& r : ring_)
@@ -41,6 +49,8 @@ public:
                 return r.state == Queued ? "queued"
                      : r.state == Succeeded ? "succeeded"
                      : r.state == Cancelled ? "cancelled"
+                     : r.state == Running ? "running"
+                     : r.state == Failed ? "failed"
                      : "refused";
         return "unknown";
     }

@@ -38,3 +38,23 @@ TEST(command_ring_cancelled_state) {
     r.set(42, CommandResultRing::Cancelled);
     CHECK_EQ(std::string(r.stateStr(42)), std::string("cancelled"));
 }
+
+// Audit 7: the full deferred-activation lifecycle. "running" while the swap is
+// in flight, then exactly one terminal state — succeeded ONLY at the new
+// profile's real Ready, failed when the swap aborted mid-flight.
+TEST(command_ring_running_and_failed_states) {
+    CommandResultRing r;
+    r.set(9, CommandResultRing::Queued);
+    r.set(9, CommandResultRing::Running);            // handler deferred the outcome
+    CHECK_EQ(std::string(r.stateStr(9)), std::string("running"));
+    r.set(9, CommandResultRing::Succeeded);          // Parking -> Ready
+    CHECK_EQ(std::string(r.stateStr(9)), std::string("succeeded"));
+
+    r.set(10, CommandResultRing::Running);
+    r.set(10, CommandResultRing::Failed);            // park unconfirmed / arm failed
+    CHECK_EQ(std::string(r.stateStr(10)), std::string("failed"));
+
+    r.set(11, CommandResultRing::Running);
+    r.set(11, CommandResultRing::Cancelled);         // hard stop killed the swap
+    CHECK_EQ(std::string(r.stateStr(11)), std::string("cancelled"));
+}
