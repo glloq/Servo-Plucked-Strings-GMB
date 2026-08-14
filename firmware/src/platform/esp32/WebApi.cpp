@@ -333,8 +333,10 @@ void WebApi::registerRoutes() {
         uint32_t id = 0;
         if (req->hasParam("id")) id = req->getParam("id")->value().toInt();
         doc["id"] = id;
-        // queued / succeeded / refused / unknown (unknown = never issued or aged
-        // out of the small result ring).
+        // queued / running / succeeded / refused / cancelled / failed / unknown
+        // (unknown = never issued or aged out of the small result ring). An
+        // activation is "running" until the new profile REALLY reaches ready
+        // (audit 7); "succeeded" means done, never merely started.
         doc["state"] = ctx_.commandState ? ctx_.commandState(id) : "unknown";
         sendJson(req, doc);
     });

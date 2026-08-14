@@ -38,10 +38,16 @@ struct AppCommand {
     uint16_t servoUs = 0;  // >0: drive the test servo to this exact pulse (live cal)
 };
 
+// What a drained command's handler reports (audit 7): Deferred marks a command
+// whose real outcome arrives LATER (profile activation spans park -> swap -> park
+// -> Ready over many loop passes) — the ring shows it as "running" until the owner
+// calls finish() with the final state.
+enum class CmdOutcome : uint8_t { Refused = 0, Succeeded = 1, Deferred = 2 };
+
 class CommandDispatcher {
 public:
-    // Handler runs one command on the main loop and returns whether it succeeded.
-    using Handler = std::function<bool(const AppCommand&)>;
+    // Handler runs one command on the main loop and reports its outcome.
+    using Handler = std::function<CmdOutcome(const AppCommand&)>;
 
     void begin(int queueLen) {
         queue_ = xQueueCreate(queueLen, sizeof(AppCommand*));
@@ -67,20 +73,28 @@ public:
     }
 
     // Drain up to maxPerTick commands (main loop), running `handler` on each and
-    // recording the outcome. Returns the number handled.
+    // recording the outcome. A Deferred command is marked "running": its owner
+    // completes it later through finish() (audit 7 — succeeded must mean DONE,
+    // not merely started). Returns the number handled.
     int drain(int maxPerTick, const Handler& handler) {
         if (!queue_) return 0;
         AppCommand* c = nullptr;
         int n = 0;
         for (; n < maxPerTick && xQueueReceive(queue_, &c, 0) == pdTRUE; ++n) {
             depth_.fetch_sub(1);
-            bool ok = handler(*c);
-            setResult(c->id, ok ? CommandResultRing::Succeeded : CommandResultRing::Refused);
+            CmdOutcome out = handler(*c);
+            setResult(c->id, out == CmdOutcome::Succeeded ? CommandResultRing::Succeeded
+                           : out == CmdOutcome::Deferred  ? CommandResultRing::Running
+                                                          : CommandResultRing::Refused);
             delete c->profile;
             delete c;
         }
         return n;
     }
+
+    // Record the FINAL state of a previously Deferred command (Succeeded / Failed /
+    // Cancelled), from the loop that owns its continuation.
+    void finish(uint32_t id, uint8_t state) { setResult(id, state); }
 
     // Drop every queued command without running it (panic / E-stop path). Each
     // dropped command is marked CANCELLED so a client following its outcome stops

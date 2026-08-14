@@ -49,3 +49,33 @@ TEST(profile_activation_begin_replaces_and_cancel_clears) {
     CHECK(!a.service(9999, [&](const Profile&) { ran = true; }));
     CHECK(!ran);
 }
+
+// Audit 7: a swap carries the id of the web command that requested it, so the
+// owner can record the command's REAL outcome (Ready / failed / cancelled) at
+// the end of the asynchronous activation instead of at "the procedure started".
+TEST(profile_activation_tracks_the_owning_command) {
+    ProfileActivation a;
+    CHECK(a.commandId() == 0u);         // nothing pending -> no command
+    a.begin(named("Uke"), 1000, 42u);
+    CHECK(a.commandId() == 42u);
+
+    // due() marks the pre-apply checkpoint (PCA health gate) exactly at the
+    // mechanical deadline.
+    CHECK(!a.due(999));
+    CHECK(a.due(1000));
+
+    // Applying clears the id with the pending profile.
+    CHECK(a.service(1000, [](const Profile&) {}));
+    CHECK(a.commandId() == 0u);
+    CHECK(!a.due(5000));
+
+    // cancel() clears it too (hard stop / superseded swap).
+    a.begin(named("Uke"), 200, 7u);
+    CHECK(a.commandId() == 7u);
+    a.cancel();
+    CHECK(a.commandId() == 0u);
+
+    // begin() without an id (boot-time arming path) stays at 0.
+    a.begin(named("Uke"), 300);
+    CHECK(a.commandId() == 0u);
+}
