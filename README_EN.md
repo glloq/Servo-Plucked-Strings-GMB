@@ -133,11 +133,18 @@ angles + rotation direction), set its MIDI behaviour and timing, then test and s
 <p align="center"><img src="img/screenshots/wizard.png" alt="Setup page — Instrument step" width="90%"/></p>
 <p align="center"><img src="img/screenshots/calibration.png" alt="Setup page — Frets calibration" width="90%"/></p>
 
-**Wiring & GPIO** — the current instrument's ESP32 + PCA9685 harness (one or two
-I²C buses, addresses, per-pin string·role, live conflict checks), and the
-**graphical pinout** of the chosen ESP32 board (S3 / WROOM-32 / DevKit v1) with the
-used pins highlighted.
+**Wiring & GPIO** — the electrical installation assistant, in **five sub-tabs**:
+
+| Sub-tab | Content |
+|---------|---------|
+| **Harness** | the current instrument's ESP32 + PCA9685 harness (one or two I²C buses, addresses, per-pin string·role, live conflict checks, SVG export) plus the **power-wiring** advice (star wiring, one bulk cap per board, 100 nF ceramic, fail-safe `/OE`) |
+| **Power & safety** | the declared safety chain (`/OE` pull-up, gated enable stage, E-stop contactor, fuses), the **power tree** as SVG (undeclared parts drawn dashed) and the **current estimator**: per-branch worst case, fuse guide, bulk cap, PSU requirement, wire voltage drop |
+| **I²C & PCA** | each board's address and **A0–A2 jumpers**, and the bus **pull-up budget** (one equivalent 2.2–4.7 kΩ per line) |
+| **GPIO pins** | pin assignment and the **graphical pinout** of the chosen ESP32 board (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) with the used pins highlighted, plus the **hardware E-stop** declaration (NC wiring recommended + its `ESTOP` pin) |
+| **Commissioning** | the staged **power-up checklist** (each stage is a gate), progress kept per instrument in the browser |
+
 <p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
+<p align="center"><img src="img/screenshots/wiring-power.png" alt="Power &amp; safety — power tree and current estimator" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="GPIO pins + board pinout" width="90%"/></p>
 
 ## 🔌 Hardware
@@ -245,8 +252,12 @@ Servo-Plucked-Strings-GMB/
 | [SYSEX_CAPABILITIES.md](SYSEX_CAPABILITIES.md) | Capability-discovery SysEx protocol — English |
 | [docs/SAFETY.md](docs/SAFETY.md) | E-stop, /OE, current management — French |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Code organization — English |
-| [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md) | Interface pages — English |
+| [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md) | Interface pages, with screenshots — English |
 | [docs/ARDUINO_IDE_BUILD.md](docs/ARDUINO_IDE_BUILD.md) | Building the ESP32 firmware from the Arduino IDE — English |
+| [hardware/POWER_AND_SAFETY.md](hardware/POWER_AND_SAFETY.md) | Reference circuit: distribution, E-stop chain, fail-safe `/OE` — English |
+| [hardware/I2C_PCA9685.md](hardware/I2C_PCA9685.md) | I²C bus: addresses, A0–A2 jumpers, pull-ups — English |
+| [hardware/COMMISSIONING.md](hardware/COMMISSIONING.md) | Staged power-up before the first note — English |
+| [hardware/schematics/](hardware/schematics/) | Schematics (distribution, E-stop + /OE, ESP32 ↔ PCA9685) — English |
 
 ## 🎛️ The GMB family
 

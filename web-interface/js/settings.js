@@ -351,10 +351,12 @@
   }
 
   function advancedTab(host) {
+    // No "switch to Advanced" hint any more: the expert mode is gone and this tab
+    // IS the detailed view — everything below is on this one scrolling panel.
     host.appendChild(h('div.note-box',
-      'Advanced tools. Device security (admin token, network MIDI policy), GMB ' +
-      'identity & capabilities (SysEx), the live MIDI monitor and the integrated ' +
-      'tester. Switch to “Advanced” below for the detailed options.'));
+      'Advanced tools, in order below: device security (admin token, network MIDI ' +
+      'policy), GMB identity & capabilities (SysEx) with its tester, then the live ' +
+      'MIDI monitor and the integrated note tester.'));
     var sec = h('div', { id: 'security-section' });
     host.appendChild(sec);
     renderSecurity(sec, null);
