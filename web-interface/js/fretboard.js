@@ -134,6 +134,11 @@
   function servoIdentity(sv) {
     var id = { function: sv.function, stringIndex: sv.stringIndex };
     if (sv.function === 'finger' && sv.fret >= 1) id.fret = sv.fret;
+    // Output binding: the firmware refuses the test when the draft's wiring
+    // differs from the active servo's (audit 6 — same identity, drifted output).
+    id.source = sv.source === 'gpio' ? 'gpio' : 'pca';
+    if (id.source === 'gpio') id.gpio = sv.gpio | 0;
+    else { id.i2cBus = sv.i2cBus || 0; id.pcaBoard = sv.pcaBoard | 0; id.channel = sv.channel | 0; }
     return id;
   }
 

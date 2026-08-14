@@ -113,5 +113,31 @@ test('mergeBuilderServos never reuses one existing servo twice', function () {
   check(merged[1].restUs === 1500, 'second falls back to defaults');
 });
 
+test('re-applying the ukulele preset keeps every calibration verbatim (audit 6)', function () {
+  function spec() {
+    return { maxFret: 3, fretting: 'chromatic', sounding: 'pluck', lift: false, damper: false, board: 0 };
+  }
+  // Ukulele GCEA, all strings fretted to 3 — the shape applyPreset() builds.
+  var ukeStrings = [67, 60, 64, 69].map(function (n) {
+    return { enabled: true, openNote: n, maxFret: 3 };
+  });
+  // Stock generation, then a full bench calibration pass over every servo.
+  var before = GMB.buildInstrument(function () { return spec(); }, ukeStrings, []);
+  check(before.length === 16, 'stock ukulele: 4 strings x (3 fingers + pluck)');
+  before.forEach(function (s, i) {
+    s.restUs = 1400 + i; s.activeUs = 1800 + i;
+    s.travelMs = 80 + i; s.settleMs = 20 + i; s.inverted = (i % 2) === 0;
+  });
+  // applyPreset('ukulele') on an already-ukulele draft now rebuilds
+  // differentially, passing the existing servos instead of [].
+  var after = GMB.buildInstrument(function () { return spec(); }, ukeStrings, before);
+  check(after.length === before.length, 'same servo count after re-apply');
+  check(after.every(function (s) { return before.indexOf(s) >= 0; }),
+        'every servo object survives verbatim (identity, hence calibration)');
+  var f = after.filter(function (s) { return s.function === 'finger' && s.stringIndex === 2; })[0];
+  check(f && f.restUs >= 1400 && f.restUs < 1400 + before.length,
+        'spot check: hand-set pulse widths still present');
+});
+
 console.log('\n' + checks + ' checks, ' + failures + ' failures');
 process.exit(failures ? 1 : 0);
