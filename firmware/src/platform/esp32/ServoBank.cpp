@@ -348,12 +348,76 @@ void ServoBank::hardStop() {
     outputEnable(false);  // pass 1: every PCA output dead at once (GPIO /OE line)
     for (int i = 0; i < (int)servos_.size(); ++i)  // pass 2: direct PWM off — no
         if (servos_[i].source == ServoSource::DirectGpio) writeOff(i);  // I2C yet
-    // pass 3 (best effort, everything already neutralised): preload REST into the
-    // PCA registers so a later outputEnable(true) re-lights at rest, not at the
-    // last played position. Harmless if a board is gone — /OE already cut it.
+    // pass 3 (best effort, everything already neutralised): clear every PCA channel
+    // to FULL OFF. The old behaviour preloaded REST here "so /OE re-lights at
+    // rest" — but that meant the next outputEnable(true) released a live pulse on
+    // EVERY channel simultaneously, an ungoverned all-servo start (audit P0). With
+    // the channels off, arming re-enables /OE over silent outputs and then commands
+    // REST progressively through the governed park.
     for (int i = 0; i < (int)servos_.size(); ++i)
-        if (servos_[i].source != ServoSource::DirectGpio) toRest(i);
+        if (servos_[i].source != ServoSource::DirectGpio) writeOff(i);
     for (auto& r : rt_) r = Rt{};  // pass 4: runtime state cleared
+    parkActive_ = false;           // a park in progress is cancelled with it
+    parkQueue_.clear();
+    parkNext_ = 0;
+}
+
+void ServoBank::neutralizePcaOutputs() {
+    // FULL OFF on every enabled PCA channel, so driving /OE low can never release
+    // stale latched pulses on all channels at once (audit P0). Cheap: one I2C
+    // write per PCA servo; boards that are absent are skipped by writeOff().
+    for (int i = 0; i < (int)servos_.size(); ++i)
+        if (servos_[i].enabled && servos_[i].source == ServoSource::Pca) writeOff(i);
+}
+
+uint32_t ServoBank::beginGovernedPark(uint32_t nowMs, uint8_t maxConcurrent,
+                                      uint8_t maxPerBoard, uint16_t staggerMs) {
+    parkGov_.configure(maxConcurrent, maxPerBoard, staggerMs);
+    parkGov_.reset();
+    parkQueue_.clear();
+    parkNext_ = 0;
+    parkResult_ = ParkResult{};
+    parkDoneAtMs_ = nowMs;
+    parkActive_ = true;
+    std::vector<uint8_t> boards;
+    for (int i = 0; i < (int)servos_.size(); ++i) {
+        if (!servos_[i].enabled) continue;  // disabled: never driven, never parked
+        parkQueue_.push_back(i);
+        boards.push_back(board(i));
+    }
+    // Upper bound for the caller's parking timeout: the governor's own batch
+    // forecast (exact simulation of the stagger schedule from clean windows) plus
+    // the slowest servo's travel + settle. With staggerMs == 0 the forecast is 0
+    // and this equals parkDurationMs() — the historical behaviour.
+    return parkGov_.forecastBatchDelayMs(nowMs, boards.data(), boards.size()) +
+           parkDurationMs();
+}
+
+ServoBank::ParkResult ServoBank::serviceGovernedPark(uint32_t nowMs) {
+    if (!parkActive_) return parkResult_;
+    while (parkNext_ < parkQueue_.size()) {
+        int i = parkQueue_[parkNext_];
+        // One start permit per servo, honouring the global + per-board caps and the
+        // stagger window; a servo on no PCA board (direct GPIO, bucket 0xFF) is only
+        // bounded by the global cap — the same rule the play-time governor applies.
+        if (!parkGov_.requestStart(nowMs, board(i))) break;  // retry next tick
+        ActuatorResult r = release(i);
+        if (r != ActuatorResult::Ok && r != ActuatorResult::Disabled &&
+            parkResult_.ok) {
+            parkResult_.ok = false;
+            parkResult_.failedServo = i;
+            parkResult_.reason = r;
+        }
+        uint32_t settle = nowMs + servos_[i].travelMs + servos_[i].settleMs;
+        if (static_cast<int32_t>(settle - parkDoneAtMs_) > 0) parkDoneAtMs_ = settle;
+        ++parkNext_;
+    }
+    return parkResult_;
+}
+
+bool ServoBank::governedParkDone(uint32_t nowMs) const {
+    return parkActive_ && parkNext_ >= parkQueue_.size() &&
+           static_cast<int32_t>(nowMs - parkDoneAtMs_) >= 0;
 }
 
 ServoBank::ParkResult ServoBank::moveAllToRest() {

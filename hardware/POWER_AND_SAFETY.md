@@ -23,9 +23,18 @@ Three schematic sheets accompany this document
 ## 0. Principles
 
 1. **The natural electrical state is OFF.** Every authorisation — servo power,
-   PCA9685 outputs — must be *actively maintained*. An absent ESP32, a cut
-   cable, a firmware crash, an open E-stop chain must each, alone, return the
-   machine to the safe state.
+   PCA9685 outputs — must be *actively maintained*. An absent or resetting
+   ESP32, a cut cable, a power loss, an open E-stop chain must each, alone,
+   return the machine to the safe state. **A firmware HANG is the one failure
+   this circuit does NOT cover by itself**: a wedged CPU can leave `SERVO_OE`
+   actively driven LOW and K1 energised — the pull-up only wins when the pin
+   floats (reset, brown-out, absent board), not when it is still driven. The
+   guaranteed stop for a hang is the **E-stop button** (power + `/OE` gate);
+   the ESP32's internal watchdogs reset a hard hang (pins go high-Z → safe),
+   but a "soft" hang that keeps servicing them is not detected. A future
+   evolution can close this gap in hardware: an ESP32 **heartbeat output into
+   an external watchdog/monostable** whose output gates K1 and the `/OE`
+   enable stage — heartbeat gone → power off, enabling forbidden.
 2. **A software stop is a convenience, not a safety function.** `POST
    /api/panic`, CC120/123 and the web STOP button all depend on a running
    firmware and a live network. The emergency stop is a **hardware chain**.
@@ -102,15 +111,37 @@ I_move    typical moving current
 I_stall   stall / peak current    (worst case, start of motion or blocked)
 ```
 
-* **Branch fuse**: above the branch's realistic worst case — the
-  `power.maxConcurrentPerBoard` governor cap × `I_stall` of the largest servo,
-  plus the idle draw of the rest — below the branch wiring's ampacity.
-* **PSU**: ≥ Σ (per-branch worst case actually reachable under the global
-  `power.maxConcurrentMoves` cap), with 30–50 % headroom. **The firmware's
-  governor spreads start-up peaks but is *not* a substitute for a properly
-  sized supply** — it bounds simultaneity, not physics.
-* **Wire gauge**: per-branch current over the actual run length, sized for
-  < 5 % voltage drop at worst case (at 6 V, every 0.1 Ω costs 0.6 V at 6 A).
+Then compute **two figures per branch** and keep them apart:
+
+```text
+OPERATIONAL peak (governed)   what normal play — and, since the governed-park
+                              change, arming too — should draw:
+                              min(n, caps) × I_stall + rest × I_idle
+ABSOLUTE peak (no governor)   what the copper can physically see:
+                              n × I_stall  (every servo of the branch at once)
+```
+
+The governor caps (`power.maxConcurrentMoves`, `power.maxConcurrentPerBoard`,
+`staggerMs`) are **software**: a firmware bug, a mis-set profile or a stalled
+mechanism can exceed the operational figure. Protection and copper are sized so
+that exceeding it is *detected and survivable*, not catastrophic:
+
+* **Wire gauge**: rated for the **absolute** peak over the actual run length
+  (< 5 % drop at 6 V: every 0.1 Ω costs 0.6 V at 6 A) — copper must never be
+  the fuse.
+* **Branch fuse**: comfortably above the **operational** peak (no nuisance
+  blows), at or below the wiring's ampacity — so an ungoverned event lands in
+  the fuse, not in the harness. When the gap between operational and absolute
+  is small, size on absolute.
+* **PSU**: ≥ the **absolute** whole-instrument peak with 30–50 % headroom
+  when practical; a PSU sized only for the governed figure must at least be
+  one that **current-limits gracefully** (fold-back, not latch-off into a
+  brown-out loop) — that hardware limit, not the governor, is then the real
+  guarantee. **The firmware's governor spreads start-up peaks but is *not* a
+  substitute for a properly sized supply** — it bounds simultaneity in
+  software, not physics.
+* **Bulk capacitors** (§1.2): sized from the **operational** peak — they
+  bridge normal start transients; an ungoverned event is the fuse's job.
 
 ### 1.2 Bulk capacitors — starting values, then measure
 

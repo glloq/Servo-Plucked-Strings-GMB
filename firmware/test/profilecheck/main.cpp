@@ -214,6 +214,7 @@ int main(int argc, char** argv) {
         p.hardware.oePullup = true;
         p.hardware.oeGate = true;
         p.hardware.estopCutsPower = true;
+        p.hardware.mainSwitch = true;
         p.hardware.mainFuse = true;
         p.hardware.branchFuses = true;
         p.hardware.servoStallMa = 1200;
@@ -228,7 +229,7 @@ int main(int argc, char** argv) {
         Profile rt;
         CHECK(parse(reser, rt), "hardware-notes profile re-parses");
         CHECK(rt.hardware.oePullup && rt.hardware.oeGate && rt.hardware.estopCutsPower &&
-                  rt.hardware.mainFuse && rt.hardware.branchFuses,
+                  rt.hardware.mainSwitch && rt.hardware.mainFuse && rt.hardware.branchFuses,
               "declaration flags round-trip");
         CHECK(rt.hardware.servoStallMa == 1200 && rt.hardware.extPullupOhm0 == 4700,
               "estimator numbers round-trip");

@@ -163,27 +163,36 @@ each board's worst-case simultaneous starts (which the Timing step's per-board c
 **Power & safety** — the reference circuit of `hardware/POWER_AND_SAFETY.md` applied
 live to the instrument: a **Safety chain** card mixing derived facts (`/OE` GPIO,
 hardware E-stop + contact wiring) with the **fitted-on-the-machine declarations**
-(`/OE` pull-up, gated enable stage, E-stop contactor, main + branch fuses — stored in
-the profile's `hardware` block, documentation-only); a **power tree** SVG (PSU → main
-fuse → master switch → E-stop contactor → star distribution → fused branch + bulk cap
-per PCA → `/OE` bus and E-stop contacts) where **undeclared elements draw dashed**;
-and a **Current & supply estimator**: from fleet-typical idle/moving/stall currents
-and the governor caps it derives per-branch worst case, a fuse guide, a bulk-cap
-suggestion (C ≈ I·Δt/ΔV with editable Δt/ΔV), the PSU requirement, and a wire
-voltage-drop calculator.
+(`/OE` pull-up, gated enable stage, E-stop contactor, master switch, main + branch
+fuses — stored in the profile's `hardware` block, documentation-only); a **power tree**
+SVG (PSU → main fuse → master switch → E-stop contactor → star distribution → fused
+branch + bulk cap per PCA → `/OE` bus and E-stop contacts) where **undeclared elements
+draw dashed**; and a **Current & supply estimator** built on fleet-typical
+idle/moving/stall currents. It reports **two figures per branch**: the *governed
+peak* (what normal play and the governed arming park draw, under the Timing step's
+caps) and the *absolute peak* (every servo of the branch at stall). The governor is
+software, so the **wiring and the PSU are sized on the absolute figure** and the fuse
+sits comfortably above the governed one and at/below the wiring's ampacity; the
+bulk-cap suggestion (C ≈ I·Δt/ΔV, editable Δt/ΔV) follows the governed starts, and the
+wire voltage-drop check runs on the absolute peak. The direct-GPIO rail is only
+bounded by the global cap, matching the runtime.
 <p align="center"><img src="../img/screenshots/wiring-power.png" alt="Wiring & GPIO — Power & safety sub-tab" width="100%"/></p>
 
 **I²C & PCA** — per bus: SDA/SCL pins, every board with its address and **A0–A2
-solder-jumper setting**, and the **pull-up budget**: declare each breakout's on-board
-pull-ups (0 = removed) plus an optional external pair, and the page computes the
-**equivalent per line** (parallel resistors add) and grades it against the target
-window (one equivalent 2.2–4.7 kΩ per bus line — `hardware/I2C_PCA9685.md` §3).
+solder-jumper setting**, and the **pull-up budget**. Each board starts as **unknown —
+not checked**: the page never assumes what a breakout carries, so the bus reads
+*"equivalent per line: cannot be verified"* until you have looked at each board and
+declared what is fitted (a value, or *none/removed*), plus an optional external pair.
+With everything declared it computes the **equivalent per line** (parallel resistors
+add) and grades it against the target window (one equivalent 2.2–4.7 kΩ per bus line —
+`hardware/I2C_PCA9685.md` §3).
 <p align="center"><img src="../img/screenshots/wiring-i2c.png" alt="Wiring & GPIO — I²C &amp; PCA sub-tab" width="100%"/></p>
 
 **Commissioning** — the staged power-up checklist of `hardware/COMMISSIONING.md`
 (stage gates, E-stop tests, per-branch bring-up) with per-instrument progress kept
-in the browser. Each stage is a **gate**: it stays greyed out (*blocked by the
-previous gate*) until every box of the stage before it is ticked.
+in the browser. Each stage is a real **gate**: its boxes stay **disabled** (*blocked by
+the previous gate*) until every box of the stage before it is ticked — a deliberate
+out-of-order check needs the explicit *Unlock this stage anyway* button.
 <p align="center"><img src="../img/screenshots/commissioning.png" alt="Wiring & GPIO — Commissioning sub-tab" width="100%"/></p>
 
 **GPIO pins** — the board GPIO map + per-signal assignment with a **graphical board pinout** that

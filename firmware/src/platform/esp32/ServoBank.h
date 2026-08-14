@@ -16,6 +16,7 @@
 
 #include "../../core/configuration/Profile.h"
 #include "../../core/instrument/ActuatorResult.h"
+#include "../../core/instrument/ServoActivationGovernor.h"
 
 #if defined(ARDUINO)
 #include <Adafruit_PWMServoDriver.h>
@@ -108,7 +109,42 @@ public:
     // calls hardStop() to cut power once the servos have settled (normal stop /
     // profile change / reconfiguration). Check the result: a refused rest command
     // means the park CANNOT be trusted.
+    //
+    // UNGOVERNED: every rest command is issued back-to-back, so all servos can
+    // start moving together. The runtime arming / profile-swap paths use the
+    // GOVERNED park below instead (audit P0: an /OE release must never fire every
+    // servo at once); this stays for tests and zero-motion parks.
     ParkResult moveAllToRest();
+
+    // GOVERNED park (audit P0 — the electrical worst case of arming must be the
+    // same as normal play): the same rest sweep as moveAllToRest(), but the starts
+    // are spread by a dedicated ServoActivationGovernor with the profile's caps
+    // (global / per-PCA-board, staggerMs window; staggerMs == 0 = governor off →
+    // identical to moveAllToRest). Flow:
+    //   beginGovernedPark(now, caps…)  → schedules every enabled servo, returns an
+    //                                    UPPER-BOUND duration (exact batch forecast
+    //                                    + slowest travel+settle) for the caller's
+    //                                    parking timeout;
+    //   serviceGovernedPark(now)       → issues the rest commands whose slot is
+    //                                    open; call every loop tick. The returned
+    //                                    ParkResult accumulates the FIRST refused
+    //                                    write (the park can then not be trusted —
+    //                                    abort the arm / swap);
+    //   governedParkDone(now)          → every command issued AND the slowest
+    //                                    started servo has travelled + settled.
+    // hardStop() cancels a park in progress.
+    uint32_t beginGovernedPark(uint32_t nowMs, uint8_t maxConcurrent,
+                               uint8_t maxPerBoard, uint16_t staggerMs);
+    ParkResult serviceGovernedPark(uint32_t nowMs);
+    bool governedParkDone(uint32_t nowMs) const;
+    // Accumulated result of the governed park in progress (or the last one).
+    const ParkResult& governedParkResult() const { return parkResult_; }
+
+    // Write FULL OFF to every enabled PCA channel (no pulse latched). Called
+    // before /OE is driven low so enabling the outputs can never release stale
+    // preloaded pulses on every channel at once (audit P0). Direct-GPIO servos
+    // have no latch — hardStop() already detached their PWM.
+    void neutralizePcaOutputs();
 
     // Longest mechanical settle across all enabled servos: max(travelMs + settleMs).
     // The wait a controlled park / arming must allow after moveAllToRest() before the
@@ -246,6 +282,15 @@ private:
     };
     std::vector<Rt> rt_;
     std::function<void(int, ActuatorResult)> updateFault_;  // scheduled-write failures
+
+    // Governed-park state (see beginGovernedPark). The governor instance is
+    // dedicated to parking so it never perturbs the play-time governor's windows.
+    ServoActivationGovernor parkGov_;
+    std::vector<int> parkQueue_;   // enabled servo indices still to start
+    size_t parkNext_ = 0;          // next queue entry to start
+    uint32_t parkDoneAtMs_ = 0;    // when the slowest STARTED servo has settled
+    bool parkActive_ = false;
+    ParkResult parkResult_;
 
     std::vector<ServoConfig> servos_;
     std::vector<int8_t> ledcCh_;  // LEDC channel per direct servo (Arduino 2.x)

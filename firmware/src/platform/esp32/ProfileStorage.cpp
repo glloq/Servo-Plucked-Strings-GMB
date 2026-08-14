@@ -239,6 +239,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     hw["oePullup"] = p.hardware.oePullup;
     hw["oeGate"] = p.hardware.oeGate;
     hw["estopCutsPower"] = p.hardware.estopCutsPower;
+    hw["mainSwitch"] = p.hardware.mainSwitch;
     hw["mainFuse"] = p.hardware.mainFuse;
     hw["branchFuses"] = p.hardware.branchFuses;
     hw["servoIdleMa"] = p.hardware.servoIdleMa;
@@ -484,6 +485,7 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.hardware.oePullup = hw["oePullup"] | false;
     out.hardware.oeGate = hw["oeGate"] | false;
     out.hardware.estopCutsPower = hw["estopCutsPower"] | false;
+    out.hardware.mainSwitch = hw["mainSwitch"] | false;
     out.hardware.mainFuse = hw["mainFuse"] | false;
     out.hardware.branchFuses = hw["branchFuses"] | false;
     out.hardware.servoIdleMa = hw["servoIdleMa"] | 10;

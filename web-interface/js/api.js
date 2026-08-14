@@ -56,8 +56,10 @@
       note: 'BOOT strapping pin — reserved to keep boot reliable.' }));
     pins.push(pin(1, { adc: true, highSpeedOutput: true, preference: 'recommended', note: 'ADC1_CH0.' }));
     pins.push(pin(2, { adc: true, highSpeedOutput: true, preference: 'recommended', note: 'ADC1_CH1.' }));
-    pins.push(pin(3, { adc: true, strapping: true, highSpeedOutput: true, preference: 'caution',
-      note: 'Strapping pin (JTAG source select) — use with care in advanced mode.' }));
+    // Mirrors the firmware profile exactly (BoardProfile.cpp): strapping pins 3/45/46
+    // are RESERVED there, so the offline mock must refuse them identically.
+    pins.push(pin(3, { adc: true, strapping: true, reserved: true, preference: 'reserved',
+      note: 'Strapping pin (JTAG source select). Reserved.' }));
     // Recommended general I/O — the auto-assigner draws STEP/DIR/HOME from here.
     [4, 5, 6, 7].forEach(function (g) {
       pins.push(pin(g, { adc: true, highSpeedOutput: true, preference: 'recommended',
@@ -117,10 +119,10 @@
       note: 'U0TXD — programming & diagnostic UART. Reserved.' }));
     pins.push(pin(44, { onboardPeripheral: true, preference: 'reserved',
       note: 'U0RXD — programming & diagnostic UART. Reserved.' }));
-    pins.push(pin(45, { strapping: true, preference: 'caution',
-      note: 'Strapping pin (VDD_SPI voltage) — advanced use only.' }));
-    pins.push(pin(46, { strapping: true, preference: 'caution',
-      note: 'Strapping pin — advanced use only.' }));
+    pins.push(pin(45, { strapping: true, reserved: true, preference: 'reserved',
+      note: 'Strapping pin (VDD_SPI voltage). Reserved.' }));
+    pins.push(pin(46, { strapping: true, reserved: true, preference: 'reserved',
+      note: 'Strapping pin. Reserved.' }));
     pins.push(pin(47, { highSpeedOutput: true, preference: 'recommended',
       note: 'Recommended PCA9685 /OE safety line.' }));
     if (ledOn38)
@@ -156,8 +158,10 @@
   // ---------------------------------------------------------------------------
   function wroom32Pins(includeFlash) {
     var pins = [];
-    pins.push(pin(0, { strapping: true, output: true, preference: 'caution',
-      note: 'BOOT strapping pin — must be released at boot; advanced use only.' }));
+    // GPIO0 is the BOOT button (also forces the Wi-Fi hotspot): RESERVED in the
+    // firmware profile, so the offline mock refuses it identically.
+    pins.push(pin(0, { strapping: true, reserved: true, preference: 'reserved',
+      note: 'BOOT button / strapping pin — forces the Wi-Fi hotspot. Reserved.' }));
     pins.push(pin(1, { onboardPeripheral: true, preference: 'reserved',
       note: 'U0TXD — programming & diagnostic UART. Reserved.' }));
     pins.push(pin(2, { adc: true, strapping: true, output: true, preference: 'caution',
@@ -299,6 +303,7 @@
     if (hw.oePullup === undefined) hw.oePullup = false;
     if (hw.oeGate === undefined) hw.oeGate = false;
     if (hw.estopCutsPower === undefined) hw.estopCutsPower = false;
+    if (hw.mainSwitch === undefined) hw.mainSwitch = false;
     if (hw.mainFuse === undefined) hw.mainFuse = false;
     if (hw.branchFuses === undefined) hw.branchFuses = false;
     if (!(hw.servoIdleMa >= 0)) hw.servoIdleMa = 10;
@@ -320,9 +325,11 @@
       case 'i2cSda':
       case 'i2cScl': return p.input && p.output;
       case 'safetyInput':
-        // Hardware E-stop input: readable + interrupt-capable, never a strapping
-        // pin (the recommended NC loop idles the pin LOW through boot/reset).
-        return p.input && p.interrupt !== false && !p.strapping;
+        // Hardware E-stop input: readable + interrupt-capable, WITH a usable
+        // internal pull-up (the firmware samples ESTOP as INPUT_PULLUP — classic
+        // ESP32 input-only pins have none and would float), never a strapping pin
+        // (the recommended NC loop idles the pin LOW through boot/reset).
+        return p.input && p.interrupt !== false && p.internalPullUp !== false && !p.strapping;
       default: return p.output;
     }
   };
@@ -529,7 +536,7 @@
       // Documentation-only: stored with the profile, drives no runtime behaviour.
       hardware: {
         oePullup: false, oeGate: false, estopCutsPower: false,
-        mainFuse: false, branchFuses: false,
+        mainSwitch: false, mainFuse: false, branchFuses: false,
         servoIdleMa: 10, servoMoveMa: 250, servoStallMa: 800,
         extPullupOhm0: 0, extPullupOhm1: 0, pcaPullups: []
       },

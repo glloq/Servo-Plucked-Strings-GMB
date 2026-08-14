@@ -245,6 +245,7 @@ struct HardwareNotes {
     bool oePullup = false;        // external /OE pull-up to 3.3 V fitted (mandatory)
     bool oeGate = false;          // gated /OE enable stage (E-stop can inhibit enabling)
     bool estopCutsPower = false;  // E-stop chain drops the servo-rail contactor (K1)
+    bool mainSwitch = false;      // master switch (S1) fitted upstream of K1
     bool mainFuse = false;        // main servo-rail fuse (F0) fitted
     bool branchFuses = false;     // one fuse per PCA/direct branch (F1..Fn) fitted
     // Fleet-typical per-servo currents (mA) used by the web power estimator.

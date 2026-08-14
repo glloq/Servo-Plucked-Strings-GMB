@@ -371,7 +371,8 @@ void WebApi::registerRoutes() {
             o["exposed"] = p.exposed;
             o["input"] = p.input;
             o["output"] = p.output;
-            o["interrupt"] = p.interrupt;  // the ESTOP safety input needs it
+            o["interrupt"] = p.interrupt;          // the ESTOP safety input needs it
+            o["internalPullUp"] = p.internalPullUp;  // ESTOP is read as INPUT_PULLUP
             o["preference"] = prefName(p.preference);
             o["reserved"] = p.reserved;
             o["usb"] = p.usb;

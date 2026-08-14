@@ -74,6 +74,7 @@ Each entry describes one physical GPIO. Fields match
 | `input` | bool | Usable as a digital input. |
 | `output` | bool | Usable as a digital output. |
 | `interrupt` | bool | Can raise a GPIO interrupt. |
+| `internalPullUp` | bool | Has a usable internal pull-up — required for the `ESTOP` safety input (read as `INPUT_PULLUP`; classic-ESP32 input-only pins 34/35/36/39 have none). |
 | `highSpeedOutput` | bool | Suitable for fast digital toggling. |
 | `adc` | bool | Wired to an ADC channel. |
 | `reserved` | bool | Reserved by firmware policy or hardware; never assignable. |
