@@ -234,6 +234,26 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
         o["kind"] = signalKindName(a.kind);
     }
 
+    // Physical power/safety declarations (documentation-only; see HardwareNotes).
+    JsonObject hw = doc["hardware"].to<JsonObject>();
+    hw["oePullup"] = p.hardware.oePullup;
+    hw["oeGate"] = p.hardware.oeGate;
+    hw["estopCutsPower"] = p.hardware.estopCutsPower;
+    hw["mainFuse"] = p.hardware.mainFuse;
+    hw["branchFuses"] = p.hardware.branchFuses;
+    hw["servoIdleMa"] = p.hardware.servoIdleMa;
+    hw["servoMoveMa"] = p.hardware.servoMoveMa;
+    hw["servoStallMa"] = p.hardware.servoStallMa;
+    hw["extPullupOhm0"] = p.hardware.extPullupOhm0;
+    hw["extPullupOhm1"] = p.hardware.extPullupOhm1;
+    JsonArray pu = hw["pcaPullups"].to<JsonArray>();
+    for (const auto& n : p.hardware.pcaPullups) {
+        JsonObject o = pu.add<JsonObject>();
+        o["bus"] = n.i2cBus;
+        o["board"] = n.board;
+        o["ohm"] = n.ohm;
+    }
+
     JsonObject net = doc["network"].to<JsonObject>();
     net["mode"] = p.network.mode == NetworkMode::Station ? "station" : "accessPoint";
     net["ssid"] = p.network.ssid;
@@ -375,6 +395,7 @@ void ProfileStorage::toSlotJson(const Profile& p, JsonDocument& doc) {
     JsonObject dev = doc["device"].to<JsonObject>();
     dev["board"] = flat["board"];
     dev["pins"] = flat["pins"];
+    dev["hardware"] = flat["hardware"];  // physical wiring notes live device-side
     dev["network"] = flat["network"];
     JsonObject ins = doc["instrument"].to<JsonObject>();
     ins["info"] = flat["instrument"];  // InstrumentInfo (name/type/…) — flat key is "instrument"
@@ -405,6 +426,7 @@ bool ProfileStorage::fromSlotJson(JsonVariantConst doc, Profile& out) {
     flat["capabilitiesRevision"] = doc["capabilitiesRevision"];
     flat["board"] = dev["board"];
     flat["pins"] = dev["pins"];
+    flat["hardware"] = dev["hardware"];
     flat["network"] = dev["network"];
     flat["instrument"] = ins["info"];
     flat["midi"] = ins["midi"];
@@ -452,6 +474,29 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
         // to dodge the strict high-speed-output GPIO validation.
         a.kind = signalKindFromName(a.signal);
         out.pins.push_back(a);
+    }
+
+    // Physical power/safety declarations — absent on older profiles: everything
+    // defaults to "not declared" (false / none), which the web pages surface as
+    // still-to-build warnings, never as errors.
+    JsonObjectConst hw = doc["hardware"];
+    out.hardware = HardwareNotes{};
+    out.hardware.oePullup = hw["oePullup"] | false;
+    out.hardware.oeGate = hw["oeGate"] | false;
+    out.hardware.estopCutsPower = hw["estopCutsPower"] | false;
+    out.hardware.mainFuse = hw["mainFuse"] | false;
+    out.hardware.branchFuses = hw["branchFuses"] | false;
+    out.hardware.servoIdleMa = hw["servoIdleMa"] | 10;
+    out.hardware.servoMoveMa = hw["servoMoveMa"] | 250;
+    out.hardware.servoStallMa = hw["servoStallMa"] | 800;
+    out.hardware.extPullupOhm0 = hw["extPullupOhm0"] | 0;
+    out.hardware.extPullupOhm1 = hw["extPullupOhm1"] | 0;
+    for (JsonObjectConst o : hw["pcaPullups"].as<JsonArrayConst>()) {
+        PcaPullupNote n;
+        n.i2cBus = o["bus"] | 0;
+        n.board = o["board"] | 0;
+        n.ohm = o["ohm"] | 10000;
+        out.hardware.pcaPullups.push_back(n);
     }
 
     JsonObjectConst net = doc["network"];

@@ -8,6 +8,11 @@ web interface all describe. Wire-by-wire connections live in
 [`COMMISSIONING.md`](COMMISSIONING.md). The firmware's *behaviour* on stop/panic
 is [`../docs/SAFETY.md`](../docs/SAFETY.md).
 
+The web interface applies this circuit live to your configuration (*Wiring &
+GPIO → Power & safety*): declare what is physically fitted (pull-up, contactor,
+fuses — stored with the profile), see the power tree with undeclared elements
+dashed, and size fuses/PSU/capacitors from your servo currents.
+
 Three schematic sheets accompany this document
 ([`schematics/`](schematics/README.md)):
 

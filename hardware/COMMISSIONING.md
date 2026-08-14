@@ -7,6 +7,10 @@ scope useful at stage 6. Circuit references:
 [`POWER_AND_SAFETY.md`](POWER_AND_SAFETY.md) and
 [`schematics/`](schematics/README.md).
 
+> 💻 The web interface mirrors this procedure as a live checklist (*Wiring &
+> GPIO → Commissioning*), with per-instrument progress kept in the browser.
+> This document stays the reference — it carries the measurements to record.
+
 ## Stage 0 — visual & mechanical (all supplies OFF)
 
 - [ ] Every servo lead, power branch and the I²C harness routed and strain-relieved;

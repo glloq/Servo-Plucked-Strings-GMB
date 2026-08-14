@@ -713,4 +713,7 @@
   }
 
   GMB.views.wiring = { render: render };
+  // The profile → wiring model is shared with the Power & safety and I²C & PCA
+  // sub-tabs (boards per bus, channel occupancy, board-level signal GPIOs).
+  GMB.wiringModel = buildModel;
 })(window);

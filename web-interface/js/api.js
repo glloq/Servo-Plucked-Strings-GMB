@@ -290,6 +290,26 @@
   };
   GMB.SIGNAL_KIND = SIGNAL_KIND;
 
+  // Fill the physical power/safety declaration block (HardwareNotes) with its
+  // defaults IN PLACE, so a profile saved before the block existed (or loaded
+  // from an older firmware) binds cleanly in the Power & safety / I²C & PCA
+  // views. Returns the block.
+  GMB.ensureHardware = function (p) {
+    var hw = p.hardware || (p.hardware = {});
+    if (hw.oePullup === undefined) hw.oePullup = false;
+    if (hw.oeGate === undefined) hw.oeGate = false;
+    if (hw.estopCutsPower === undefined) hw.estopCutsPower = false;
+    if (hw.mainFuse === undefined) hw.mainFuse = false;
+    if (hw.branchFuses === undefined) hw.branchFuses = false;
+    if (!(hw.servoIdleMa >= 0)) hw.servoIdleMa = 10;
+    if (!(hw.servoMoveMa >= 0)) hw.servoMoveMa = 250;
+    if (!(hw.servoStallMa >= 0)) hw.servoStallMa = 800;
+    if (!(hw.extPullupOhm0 >= 0)) hw.extPullupOhm0 = 0;
+    if (!(hw.extPullupOhm1 >= 0)) hw.extPullupOhm1 = 0;
+    if (!Array.isArray(hw.pcaPullups)) hw.pcaPullups = [];
+    return hw;
+  };
+
   // Can a pin (statically) carry a given signal kind? (spec 11.3)
   GMB.pinSupports = function (p, kind) {
     if (!p || !p.exposed || p.reserved || p.preference === 'reserved') return false;
@@ -505,6 +525,14 @@
         { signal: 'SDA', kind: 'sda', gpio: 40 }, { signal: 'SCL', kind: 'scl', gpio: 41 },
         { signal: 'SERVO_OE', kind: 'servoOe', gpio: 47 }
       ],
+      // Physical power/safety declarations (Wiring → Power & safety / I²C & PCA).
+      // Documentation-only: stored with the profile, drives no runtime behaviour.
+      hardware: {
+        oePullup: false, oeGate: false, estopCutsPower: false,
+        mainFuse: false, branchFuses: false,
+        servoIdleMa: 10, servoMoveMa: 250, servoStallMa: 800,
+        extPullupOhm0: 0, extPullupOhm1: 0, pcaPullups: []
+      },
       network: {
         mode: 'accessPoint', ssid: '', hostname: 'gmb-ukulele',
         apSsid: 'Servo-Plucked-Strings-GMB'

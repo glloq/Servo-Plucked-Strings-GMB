@@ -200,6 +200,52 @@ int main(int argc, char** argv) {
               "second bus without SDA2/SCL2 is rejected");
     }
 
+    // Physical power/safety declarations (HardwareNotes): documentation-only, but
+    // they must survive the flat interchange round-trip AND the split slot form,
+    // and default to "not declared" on a profile that predates the block.
+    {
+        std::printf("hardware notes round-trip\n");
+        std::string base = slurp(root + "/instrument-profiles/ukulele-gcea.json");
+        Profile p;
+        CHECK(parse(base, p), "base profile parses");
+        CHECK(!p.hardware.oePullup && !p.hardware.estopCutsPower &&
+                  p.hardware.pcaPullups.empty(),
+              "absent hardware block defaults to not-declared");
+        p.hardware.oePullup = true;
+        p.hardware.oeGate = true;
+        p.hardware.estopCutsPower = true;
+        p.hardware.mainFuse = true;
+        p.hardware.branchFuses = true;
+        p.hardware.servoStallMa = 1200;
+        p.hardware.extPullupOhm0 = 4700;
+        p.hardware.pcaPullups.push_back({0, 0, 10000});
+        p.hardware.pcaPullups.push_back({0, 1, 0});  // pull-ups removed on board 1
+
+        JsonDocument out;
+        ProfileStorage::toJson(p, out);
+        std::string reser;
+        serializeJson(out, reser);
+        Profile rt;
+        CHECK(parse(reser, rt), "hardware-notes profile re-parses");
+        CHECK(rt.hardware.oePullup && rt.hardware.oeGate && rt.hardware.estopCutsPower &&
+                  rt.hardware.mainFuse && rt.hardware.branchFuses,
+              "declaration flags round-trip");
+        CHECK(rt.hardware.servoStallMa == 1200 && rt.hardware.extPullupOhm0 == 4700,
+              "estimator numbers round-trip");
+        CHECK(rt.hardware.pcaPullups.size() == 2 && rt.hardware.pcaPullups[1].ohm == 0,
+              "per-board pull-up notes round-trip");
+
+        JsonDocument slot;  // split on-disk form must carry the block too
+        ProfileStorage::toSlotJson(p, slot);
+        CHECK(slot["device"]["hardware"]["oePullup"].as<bool>(),
+              "hardware notes live in the device section of a slot");
+        Profile sp;
+        CHECK(ProfileStorage::fromSlotJson(slot.as<JsonVariantConst>(), sp),
+              "split slot re-parses");
+        CHECK(sp.hardware.branchFuses && sp.hardware.pcaPullups.size() == 2,
+              "hardware notes survive the slot round-trip");
+    }
+
     // P1.12: an old (v1) profile fixture must import → migrate → validate → export →
     // round-trip cleanly. The v1 fixture carries the legacy network.staticIp key that
     // v2 dropped; migrate() must remove it and stamp the current version, and the
