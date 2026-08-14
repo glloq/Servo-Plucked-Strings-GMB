@@ -396,8 +396,16 @@ CmdOutcome doActivateProfile(const Profile& p, uint32_t nowMs, uint32_t cmdId) {
             return CmdOutcome::Refused;
         }
     }
+    // Same governed order as arming (audit P0): channels forced OFF before /OE goes
+    // low (the outputs may have been cut by a stop — enabling them must release
+    // nothing), then the OLD profile's servos park progressively under its power
+    // caps. loop() services the remaining slots while the activation wait runs.
+    g_servos.neutralizePcaOutputs();
     g_servos.outputEnable(true);
-    ServoBank::ParkResult park = g_servos.moveAllToRest();
+    uint32_t wait = g_servos.beginGovernedPark(nowMs, g_profile.power.maxConcurrentMoves,
+                                               g_profile.power.maxConcurrentPerBoard,
+                                               g_profile.power.staggerMs);
+    ServoBank::ParkResult park = g_servos.serviceGovernedPark(nowMs);
     if (!park.ok) {
         g_safety.recordFault("activation", "rest command refused by servo " +
                              std::to_string(park.failedServo) + " [" +
@@ -407,7 +415,6 @@ CmdOutcome doActivateProfile(const Profile& p, uint32_t nowMs, uint32_t cmdId) {
         g_phase = AppPhase::Boot;
         return CmdOutcome::Refused;
     }
-    uint32_t wait = g_servos.parkDurationMs();
     g_activation.begin(p, nowMs + wait, cmdId);  // apply once the park has elapsed
     return CmdOutcome::Deferred;
 }
@@ -420,6 +427,9 @@ CmdOutcome doActivateProfile(const Profile& p, uint32_t nowMs, uint32_t cmdId) {
 void servicePendingActivation(uint32_t nowMs) {
     if (!g_activation.pending()) return;
     uint32_t cmdId = g_activation.commandId();
+    // The controlled park is governed (audit P0): keep issuing the rest commands
+    // whose stagger slot opened while the activation wait runs.
+    ServoBank::ParkResult park = g_servos.serviceGovernedPark(nowMs);
     if (g_activation.due(nowMs)) {
         uint8_t failedBoard = 0xFF;
         if (!g_servos.pcaHealthy(failedBoard)) {
@@ -428,6 +438,18 @@ void servicePendingActivation(uint32_t nowMs) {
             g_safety.recordFault("activation", "PCA9685 lost during controlled park (" +
                                  ServoBank::boardName(failedBoard) +
                                  ") — profile swap aborted", nowMs);
+            g_supervisor.hardStop();
+            return;
+        }
+        // A rest command refused after the initial burst (audit 7 P1, extended to
+        // the governed slots): the old fingers may still be down — abort the swap.
+        if (!park.ok) {
+            g_activation.cancel();
+            if (cmdId) g_commands.finish(cmdId, CommandResultRing::Failed);
+            g_safety.recordFault("activation", "rest command refused by servo " +
+                                 std::to_string(park.failedServo) + " [" +
+                                 actuatorResultName(park.reason) +
+                                 "] during controlled park — profile swap aborted", nowMs);
             g_supervisor.hardStop();
             return;
         }

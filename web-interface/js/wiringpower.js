@@ -58,19 +58,28 @@
     return out;
   }
 
-  // Worst-case concurrent starters on a branch, honouring the governor caps
-  // (0 = no limit). The global cap bounds the whole instrument, so a single
-  // branch can never see more than it either.
-  function concurrentOn(p, n) {
+  // Worst-case concurrent starters on a branch under the GOVERNOR caps (0 = no
+  // limit). Mirrors the firmware exactly: the per-board cap only applies to PCA
+  // boards — a direct-GPIO servo lives on pseudo-board 0xFF, which the governor
+  // exempts from every per-board window, so the direct rail only answers to the
+  // global cap (audit P1: the old formula under-stated the direct branch).
+  function concurrentOn(p, n, kind) {
     var pw = p.power || {};
     var c = n;
-    if (pw.maxConcurrentPerBoard > 0) c = Math.min(c, pw.maxConcurrentPerBoard);
+    if (kind !== 'direct' && pw.maxConcurrentPerBoard > 0) c = Math.min(c, pw.maxConcurrentPerBoard);
     if (pw.maxConcurrentMoves > 0) c = Math.min(c, pw.maxConcurrentMoves);
     return c;
   }
-  function branchWorstA(p, hw, n) {
-    var c = concurrentOn(p, n);
-    return (c * hw.servoStallMa + (n - c) * hw.servoIdleMa) / 1000;
+  // GOVERNED peak: what normal play (and the governed arming park) should draw.
+  function branchGovernedA(p, hw, b) {
+    var c = concurrentOn(p, b.servos, b.kind);
+    return (c * hw.servoStallMa + (b.servos - c) * hw.servoIdleMa) / 1000;
+  }
+  // ABSOLUTE peak: every servo of the branch at stall — the governor is software
+  // and must never be treated as an electrical limit (audit P0): wiring, fuses
+  // and the PSU are sized against THIS figure.
+  function branchAbsoluteA(hw, b) {
+    return b.servos * hw.servoStallMa / 1000;
   }
 
   // ---- safety chain card ----------------------------------------------------
@@ -126,6 +135,8 @@
     kids.push(declRow(hw, 'estopCutsPower', 'E-stop drops the servo-rail contactor (K1)',
       'The only stop that also covers direct-GPIO servos and works with the firmware dead. ' +
       'The button switches the DC-rated contactor’s coil, never the servo current itself.'));
+    kids.push(declRow(hw, 'mainSwitch', 'Master switch (S1) upstream of the contactor',
+      'Mandatory on a fixed installation (BOM).'));
     kids.push(declRow(hw, 'mainFuse', 'Main fuse (F0) on the servo rail'));
     kids.push(declRow(hw, 'branchFuses', 'One fuse per branch (F1…Fn) at the distribution block',
       'A wiring fault then blows one string group instead of the instrument, and the firmware ' +
@@ -150,7 +161,7 @@
     var CH_X = 60;                      // power chain spine x
     var chain = [
       { key: 'f0', label: 'F0 main fuse', fitted: hw.mainFuse },
-      { key: 's1', label: 'S1 master switch', fitted: true },
+      { key: 's1', label: 'S1 master switch', fitted: hw.mainSwitch },
       { key: 'k1', label: 'K1 E-stop contactor', fitted: hw.estopCutsPower }
     ];
     var CH_TOP = 86, CH_STEP = 46;
@@ -290,32 +301,43 @@
     if (br.length) {
       var pw = p.power || {};
       var rows = br.map(function (b, i) {
-        var c = concurrentOn(p, b.servos);
-        var worst = branchWorstA(p, hw, b.servos);
+        var c = concurrentOn(p, b.servos, b.kind);
+        var gov = branchGovernedA(p, hw, b);
+        var abs = branchAbsoluteA(hw, b);
         var capUf = Math.round((c * hw.servoStallMa / 1000) * (calc.dtMs / 1000) / calc.dv * 1e6);
         return h('tr', [
           h('td', b.label), h('td', String(b.servos)), h('td', '≤ ' + c),
-          h('td', fmtA(worst)),
-          h('td', 'F' + (i + 1) + ' ≥ ' + fmtA(worst * 1.25)),
+          h('td', fmtA(gov)),
+          h('td', fmtA(abs)),
+          h('td', 'F' + (i + 1) + ' > ' + fmtA(gov * 1.25) + ' · wiring ≥ ' + fmtA(abs)),
           h('td.cap-uf', '≈ ' + capUf.toLocaleString() + ' µF')
         ]);
       });
       kids.push(h('table.cap-table', [
-        h('thead', h('tr', [h('th', 'Branch'), h('th', 'Servos'), h('th', 'Start at once'),
-          h('th', 'Worst case'), h('th', 'Fuse guide'), h('th', 'Bulk cap (I·Δt/ΔV)')])),
+        h('thead', h('tr', [h('th', 'Branch'), h('th', 'Servos'), h('th', 'Governed starts'),
+          h('th', 'Governed peak'), h('th', 'Absolute peak'),
+          h('th', 'Fuse / wiring guide'), h('th', 'Bulk cap (I·Δt/ΔV)')])),
         h('tbody', rows)
       ]));
+      kids.push(h('p.muted', ['The ', h('strong', 'governed peak'), ' is what normal play — and the governed ' +
+        'arming park — should draw; the ', h('strong', 'absolute peak'), ' is every servo of the branch at ' +
+        'stall. The governor is SOFTWARE: size the ', h('strong', 'wiring for the absolute peak'),
+        ' (copper must never be the fuse), put the ', h('strong', 'fuse comfortably above the governed peak ' +
+        'and at/below the wiring’s ampacity'), ' so an ungoverned event lands in the fuse, and size the ' +
+        'bulk cap from the governed starts (Δt/ΔV below) — an ungoverned event is the fuse’s job. ' +
+        'The classic micro-servo table (1000–10000 µF) is only a starting point.']));
       var g = totalServos;
       if (pw.maxConcurrentMoves > 0) g = Math.min(g, pw.maxConcurrentMoves);
-      var psuWorst = (g * hw.servoStallMa + (totalServos - g) * hw.servoIdleMa) / 1000;
+      var psuGov = (g * hw.servoStallMa + (totalServos - g) * hw.servoIdleMa) / 1000;
+      var psuAbs = totalServos * hw.servoStallMa / 1000;
       kids.push(h('p', [h('strong', 'PSU: '),
-        'worst case ' + fmtA(psuWorst) + ' (' + g + ' of ' + totalServos +
-        ' servos starting together under the governor) → choose ≥ ',
-        h('strong', fmtA(psuWorst * 1.3)), ' at ' + calc.railV + ' V. ',
-        h('span.muted', 'The governor spreads the peaks but is no substitute for a properly sized supply.')]));
-      kids.push(h('p.muted', 'Fuse guide = 1.25 × branch worst case — pick the next standard rating and stay ' +
-        'below the branch wiring’s ampacity. Cap suggestion uses Δt/ΔV below; the classic micro-servo ' +
-        'table (1000–10000 µF) is only a starting point.'));
+        'governed worst case ' + fmtA(psuGov) + ' (' + g + ' of ' + totalServos +
+        ' servos starting together) · absolute ' + fmtA(psuAbs) + ' (all at stall) → prefer ≥ ',
+        h('strong', fmtA(psuAbs)), ' at ' + calc.railV + ' V, or a supply that ',
+        h('strong', 'current-limits gracefully'), ' (fold-back) if sized nearer ',
+        fmtA(psuGov * 1.3), '. ',
+        h('span.muted', 'The governor spreads the peaks in software but is no substitute for a properly ' +
+          'sized supply — the hardware limit, not the governor, is the real guarantee.')]));
     } else {
       kids.push(h('p.muted', 'No servos configured yet — set the instrument up first.'));
     }
@@ -325,7 +347,9 @@
       return GMB.input(obj, key, { type: 'number', min: 0.01, step: step || 0.1, coerce: Number,
         onChange: function () { GMB.render(); } });
     };
-    var worstBranchA = br.length ? Math.max.apply(null, br.map(function (b) { return branchWorstA(p, hw, b.servos); })) : 0;
+    // Wire drop is checked against the ABSOLUTE branch peak: the harness must
+    // stay usable (and safe) even when the software governor is out of the loop.
+    var worstBranchA = br.length ? Math.max.apply(null, br.map(function (b) { return branchAbsoluteA(hw, b); })) : 0;
     var rOhm = 0.0175 * 2 * calc.lenM / calc.mm2;   // copper, out + return
     var dropV = rOhm * worstBranchA;
     kids.push(h('h3', 'Assumptions & wire drop'));
@@ -339,10 +363,10 @@
     ]));
     if (worstBranchA > 0) {
       var pct = calc.railV > 0 ? dropV / calc.railV * 100 : 0;
-      kids.push(h('p', ['Worst branch ' + fmtA(worstBranchA) + ' over ' + calc.lenM + ' m of ' +
-        calc.mm2 + ' mm² copper → drop ≈ ', h('strong', (Math.round(dropV * 100) / 100) + ' V (' +
+      kids.push(h('p', ['Worst branch at its ABSOLUTE peak: ' + fmtA(worstBranchA) + ' over ' + calc.lenM +
+        ' m of ' + calc.mm2 + ' mm² copper → drop ≈ ', h('strong', (Math.round(dropV * 100) / 100) + ' V (' +
         (Math.round(pct * 10) / 10) + '%)'), pct > 5
-          ? h('span.pill.mini.warn', ' > 5% — thicker/shorter wire or a bigger cap')
+          ? h('span.pill.mini.warn', ' > 5% — thicker/shorter wire')
           : h('span.pill.mini.ok', ' ok (< 5%)')]));
     }
     return h('div.card', kids);

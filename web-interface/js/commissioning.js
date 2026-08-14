@@ -98,21 +98,35 @@
       }, 'ghost')])
     ]));
 
-    var reached = true;   // stages after an incomplete one render dimmed
+    var reached = true;   // stages after an incomplete one are truly gated
     STAGES.forEach(function (st) {
       var stDone = st.items.every(function (_, i) { return !!state[st.id + ':' + i]; });
-      var kids = [h('div.card-head', [h('h3', st.title),
-        stDone ? h('span.pill.mini.ok', 'gate passed')
-               : (reached ? h('span.pill.mini.warn', 'in progress') : h('span.muted', 'blocked by the previous gate'))])];
+      // A gate really gates (audit P2): a blocked stage's boxes are DISABLED, not
+      // just dimmed — out-of-order ticking needs the explicit per-stage override.
+      var overridden = !!state['override:' + st.id];
+      var unlocked = reached || overridden;
+      var status = stDone ? h('span.pill.mini.ok', 'gate passed')
+        : (reached ? h('span.pill.mini.warn', 'in progress')
+           : (overridden ? h('span.pill.mini.warn', 'unlocked out of order')
+                         : h('span.muted', 'blocked by the previous gate')));
+      var kids = [h('div.card-head', [h('h3', st.title), status])];
       st.items.forEach(function (item, i) {
         var key = st.id + ':' + i;
-        var cb = h('input', { type: 'checkbox', checked: !!state[key] });
+        var cb = h('input', { type: 'checkbox', checked: !!state[key], disabled: !unlocked });
         cb.addEventListener('change', function () {
           state[key] = cb.checked; save(state); GMB.render();
         });
         kids.push(h('label.inline.ps-decl', [cb, h('span', item)]));
       });
-      host.appendChild(h('div.card' + (reached ? '' : '.commissioning-blocked'), kids));
+      if (!unlocked) {
+        kids.push(h('div.row', [
+          GMB.button('Unlock this stage anyway', function () {
+            state['override:' + st.id] = true; save(state); GMB.render();
+          }, 'ghost'),
+          h('span.muted', 'Only for a deliberate out-of-order check — the previous gate is not passed.')
+        ]));
+      }
+      host.appendChild(h('div.card' + (unlocked ? '' : '.commissioning-blocked'), kids));
       if (!stDone) reached = false;
     });
   }
