@@ -28,3 +28,13 @@ TEST(command_ring_evicts_oldest_after_capacity) {
     CHECK(std::string(r.stateStr(5)) == "succeeded"); // within the last 16
     CHECK(std::string(r.stateStr(20)) == "succeeded"); // newest retained
 }
+
+// A purged command reads back "cancelled", not a "queued" ghost (audit 6): the
+// client following an activation stops immediately after a panic/E-stop purge.
+TEST(command_ring_cancelled_state) {
+    CommandResultRing r;
+    r.set(42, CommandResultRing::Queued);
+    CHECK_EQ(std::string(r.stateStr(42)), std::string("queued"));
+    r.set(42, CommandResultRing::Cancelled);
+    CHECK_EQ(std::string(r.stateStr(42)), std::string("cancelled"));
+}

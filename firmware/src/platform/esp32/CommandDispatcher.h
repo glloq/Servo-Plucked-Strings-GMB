@@ -82,12 +82,15 @@ public:
         return n;
     }
 
-    // Drop every queued command without running it (panic / E-stop path).
+    // Drop every queued command without running it (panic / E-stop path). Each
+    // dropped command is marked CANCELLED so a client following its outcome stops
+    // immediately instead of waiting on a "queued" ghost forever (audit 6).
     void purge() {
         if (!queue_) return;
         AppCommand* c = nullptr;
         while (xQueueReceive(queue_, &c, 0) == pdTRUE) {
             depth_.fetch_sub(1);
+            setResult(c->id, CommandResultRing::Cancelled);
             delete c->profile;
             delete c;
         }

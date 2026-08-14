@@ -176,6 +176,20 @@ public:
         return index >= 0 && index < (int)rt_.size() &&
                rt_[index].mode == Mode::Striking;
     }
+    // True when the ACTIVE servo at `index` is driven by exactly this output
+    // binding (PCA bus/board/channel, or the given direct GPIO). Lets the web
+    // layer refuse a live test whose DRAFT wiring differs from what actually
+    // runs — same mechanical identity, different output would silently test the
+    // OLD wiring (audit 6).
+    bool bindingMatches(int index, bool isPca, int i2cBus, int pcaBoard,
+                        int channel, int gpio) const {
+        if (index < 0 || index >= (int)servos_.size()) return false;
+        const ServoConfig& s = servos_[index];
+        if (isPca != (s.source == ServoSource::Pca)) return false;
+        return isPca ? (s.i2cBus == i2cBus && s.pcaBoard == pcaBoard &&
+                        s.channel == channel)
+                     : (s.gpio == gpio);
+    }
     // Distinct physical PCA9685 board for a servo, as (i2cBus, pcaBoard) folded into
     // 0..15 — the bucket the activation governor caps per-board. 0xFF for a servo on
     // no board (direct GPIO), which the governor leaves out of any per-board window.

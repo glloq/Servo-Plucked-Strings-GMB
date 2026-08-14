@@ -723,6 +723,26 @@ void WebApi::registerRoutes() {
                     sendJson(req, doc, 409);
                     return;
                 }
+                // Wiring-drift guard (audit 6): the identity matched, but if the
+                // DRAFT's output binding (PCA bus/board/channel or GPIO) differs
+                // from the active servo's, the test would drive the OLD wiring
+                // while claiming to exercise the new one. Refuse until published.
+                if (!body["source"].isNull()) {
+                    bool isPca = std::string(body["source"] | "") == "pca";
+                    bool match;
+                    { WebStateLock lk(ctx_);
+                      match = ctx_.servos->bindingMatches(
+                          resolved, isPca, body["i2cBus"] | 0, body["pcaBoard"] | 0,
+                          body["channel"] | 0, body["gpio"] | -1); }
+                    if (!match) {
+                        doc["ok"] = false;
+                        doc["error"] = "the draft's wiring for this actuator differs "
+                                       "from the ACTIVE profile — Save & publish the "
+                                       "wiring change before live-testing";
+                        sendJson(req, doc, 409);
+                        return;
+                    }
+                }
                 idx = resolved;
             }
             uint32_t cmdId = ctx_.onTestServo ? ctx_.onTestServo(idx, active, us) : 0;
