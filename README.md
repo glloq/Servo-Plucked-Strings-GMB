@@ -141,10 +141,10 @@ le timing, puis on teste et on enregistre.
 | Onglet | Contenu |
 |--------|---------|
 | **Harness** | le faisceau ESP32 + PCA9685 de l'instrument courant (un ou deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit en direct, export SVG) + les conseils de **câblage de puissance** (étoile, condensateur de réservoir par carte, 100 nF, `/OE` fail-safe) |
-| **Power & safety** | la chaîne de sécurité déclarée (pull-up `/OE`, étage d'autorisation, contacteur d'arrêt d'urgence, fusibles), l'**arbre de puissance** en SVG (les éléments non déclarés en pointillés) et l'**estimateur de courant** : pire cas par branche, calibre de fusible, condensateur, alimentation, chute en ligne |
-| **I²C & PCA** | adresse et **cavaliers A0–A2** de chaque carte, et le **budget de pull-ups** du bus (une résistance équivalente de 2,2–4,7 kΩ par ligne) |
+| **Power & safety** | la chaîne de sécurité déclarée (pull-up `/OE`, étage d'autorisation, contacteur d'arrêt d'urgence, interrupteur général, fusibles), l'**arbre de puissance** en SVG (les éléments non déclarés en pointillés) et l'**estimateur de courant** : pic **gouverné** (sous les limites de courant) *et* pic **absolu** (tous les servos calés) par branche, calibre de fusible, condensateur, alimentation, chute en ligne — le câblage et l'alimentation se dimensionnent sur l'absolu, le governor étant logiciel |
+| **I²C & PCA** | adresse et **cavaliers A0–A2** de chaque carte, et le **budget de pull-ups** du bus : rien n'est supposé — une carte reste *inconnue* tant que vous n'avez pas déclaré ce qui est monté, puis la **résistance équivalente par ligne** est évaluée (cible 2,2–4,7 kΩ) |
 | **GPIO pins** | l'assignation des broches et le **brochage graphique** de la carte ESP32 choisie (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) avec les broches utilisées surlignées, plus la déclaration de l'**arrêt d'urgence matériel** (câblage NC recommandé + broche `ESTOP`) |
-| **Commissioning** | la **check-list de mise sous tension** par étapes (chaque étape est une barrière), avec l'avancement mémorisé par instrument dans le navigateur |
+| **Commissioning** | la **check-list de mise sous tension** par étapes (chaque étape est une vraie barrière : les cases de l'étape suivante restent désactivées tant que la précédente n'est pas complète, avec déverrouillage explicite), avec l'avancement mémorisé par instrument dans le navigateur |
 
 <p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Puissance & sécurité — arbre de puissance et estimateur" width="90%"/></p>

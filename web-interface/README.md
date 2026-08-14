@@ -304,12 +304,16 @@ diagram scrolls horizontally on narrow screens.
 
 The three sibling sub-tabs go further: **Power & safety** turns
 `hardware/POWER_AND_SAFETY.md` into a live checklist (what is fitted on the machine),
-a power-tree SVG where undeclared parts draw dashed, and an estimator that sizes
-fuses, bulk caps, the PSU and the wire section from the governor caps; **I²C & PCA**
-shows each board's address, its A0–A2 jumper pattern and the bus **pull-up budget**
-(one equivalent 2.2–4.7 kΩ per line); **Commissioning** walks
-`hardware/COMMISSIONING.md`'s staged power-up gates, progress stored per instrument
-in the browser (bench state — it is not part of the profile).
+a power-tree SVG where undeclared parts draw dashed, and an estimator that reports the
+**governed** peak (under the power caps) next to the **absolute** peak (all servos at
+stall) per branch — wiring and PSU are sized on the absolute one, the fuse sits above
+the governed one, and the bulk cap follows the governed starts; **I²C & PCA** shows
+each board's address, its A0–A2 jumper pattern and the bus **pull-up budget**, where
+a board stays *unknown* (nothing assumed, equivalent "cannot be verified") until you
+declare what is physically fitted; **Commissioning** walks
+`hardware/COMMISSIONING.md`'s staged power-up gates — a blocked stage's boxes are
+disabled until the previous gate passes, with an explicit override — progress stored
+per instrument in the browser (bench state — it is not part of the profile).
 
 ## Testing one servo or a whole group
 

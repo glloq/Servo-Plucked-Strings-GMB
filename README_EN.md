@@ -138,10 +138,10 @@ angles + rotation direction), set its MIDI behaviour and timing, then test and s
 | Sub-tab | Content |
 |---------|---------|
 | **Harness** | the current instrument's ESP32 + PCA9685 harness (one or two I²C buses, addresses, per-pin string·role, live conflict checks, SVG export) plus the **power-wiring** advice (star wiring, one bulk cap per board, 100 nF ceramic, fail-safe `/OE`) |
-| **Power & safety** | the declared safety chain (`/OE` pull-up, gated enable stage, E-stop contactor, fuses), the **power tree** as SVG (undeclared parts drawn dashed) and the **current estimator**: per-branch worst case, fuse guide, bulk cap, PSU requirement, wire voltage drop |
-| **I²C & PCA** | each board's address and **A0–A2 jumpers**, and the bus **pull-up budget** (one equivalent 2.2–4.7 kΩ per line) |
+| **Power & safety** | the declared safety chain (`/OE` pull-up, gated enable stage, E-stop contactor, master switch, fuses), the **power tree** as SVG (undeclared parts drawn dashed) and the **current estimator**: per-branch **governed** peak (under the power caps) *and* **absolute** peak (all servos at stall), fuse guide, bulk cap, PSU requirement, wire voltage drop — wiring and PSU sized on the absolute figure, since the governor is software |
+| **I²C & PCA** | each board's address and **A0–A2 jumpers**, and the bus **pull-up budget**: nothing is assumed — a board stays *unknown* until you declare what is fitted, then the **equivalent per line** is graded (target 2.2–4.7 kΩ) |
 | **GPIO pins** | pin assignment and the **graphical pinout** of the chosen ESP32 board (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) with the used pins highlighted, plus the **hardware E-stop** declaration (NC wiring recommended + its `ESTOP` pin) |
-| **Commissioning** | the staged **power-up checklist** (each stage is a gate), progress kept per instrument in the browser |
+| **Commissioning** | the staged **power-up checklist** (each stage is a real gate — the next stage's boxes stay disabled until the previous one is complete, with an explicit override), progress kept per instrument in the browser |
 
 <p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Power &amp; safety — power tree and current estimator" width="90%"/></p>
