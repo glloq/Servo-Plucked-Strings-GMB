@@ -77,6 +77,9 @@
       h('div#signal-list.signal-list')
     ]));
 
+    // Hardware E-stop declaration (adds/removes the ESTOP safety input).
+    host.appendChild(estopCard(host));
+
     host.appendChild(h('div.card', [h('h2', 'Validation'), h('div#pin-errors', h('div.pill.ok', 'Not checked yet.'))]));
 
     drawGrid();
@@ -140,7 +143,58 @@
     }
     specs.push({ signal: 'SERVO_OE', kind: 'servoOe', label: has('SERVO_OE2') ? 'PCA9685 /OE bus 0 (safety)' : 'PCA9685 /OE (safety)' });
     if (has('SERVO_OE2')) specs.push({ signal: 'SERVO_OE2', kind: 'servoOe', label: 'PCA9685 /OE bus 1 (OE2)' });
+    // The hardware E-stop input appears once declared in the Emergency-stop card
+    // below (opt-in: a rig with no physical button is not nagged about the pin).
+    if (has('ESTOP')) specs.push({ signal: 'ESTOP', kind: 'safetyIn', label: 'Emergency stop input (ESTOP)' });
     return specs;
+  }
+
+  // ---- hardware E-stop card -------------------------------------------------
+  // Declares the physical emergency-stop chain: adds/removes the ESTOP safety
+  // input (a SignalKind::SafetyInput pin — input + interrupt, never strapping)
+  // and records how its contact is wired. The full reference circuit — latching
+  // NC button, servo-rail contactor, /OE pull-up — is hardware/POWER_AND_SAFETY.md.
+  function estopCard(host) {
+    var p = GMB.state.profile;
+    // A draft saved before this field existed: default to the legacy NO polarity
+    // (matches the firmware default) so the select reflects the real behaviour.
+    if (p.board.estopNormallyClosed === undefined) p.board.estopNormallyClosed = false;
+    var installed = (p.pins || []).some(function (x) { return x.signal === 'ESTOP'; });
+    var toggle = h('input', { type: 'checkbox', checked: installed });
+    toggle.addEventListener('change', function () {
+      if (toggle.checked) {
+        // Board-profile recommended pin when it is free, else left unassigned.
+        var R = (GMB.recommendedFor && GMB.recommendedFor(p.board.profile)) || {};
+        var free = (R.ESTOP != null && !usedMap()[R.ESTOP]) ? R.ESTOP : -1;
+        p.pins.push({ signal: 'ESTOP', kind: 'safetyIn', gpio: free });
+      } else {
+        p.pins = p.pins.filter(function (x) { return x.signal !== 'ESTOP'; });
+      }
+      GMB.markDirty();
+      render(host);
+    });
+    var kids = [
+      h('div.card-head', [h('h2', 'Emergency stop input'),
+        h('span.muted', 'hardware E-stop chain — read on the ESTOP safety input')]),
+      h('label.inline', [toggle, h('span', 'Hardware E-stop installed')]),
+      h('p.muted', 'A software stop is a convenience, not a safety function: wire a real ' +
+        'latching E-stop button that drops the servo power rail (contactor) AND feeds this ' +
+        'input, so the firmware knows the chain state. Reference circuit: hardware/POWER_AND_SAFETY.md.')
+    ];
+    if (installed) {
+      kids.push(GMB.field('Contact wiring',
+        GMB.input(p.board, 'estopNormallyClosed', {
+          type: 'select',
+          coerce: function (v) { return v === 'true'; },
+          options: [
+            { value: true, label: 'Normally closed — NC (recommended)' },
+            { value: false, label: 'Normally open — NO (legacy, active-low)' }
+          ]
+        }),
+        'NC loop to GND: the closed loop authorises running; a press, a cut wire or an ' +
+        'unplugged connector all read as STOP (fail-safe). Pick the GPIO in the Signals list above.'));
+    }
+    return h('div.card', kids);
   }
 
   function currentGpio(signal) {
@@ -214,7 +268,16 @@
       } else {
         GMB.toast('Pins assigned automatically.', 'ok');
       }
-      p.pins = res.pins;
+      // Auto-assign only places SDA/SCL/SERVO_OE. Keep the opt-in signals the
+      // profile already declares (second bus, split /OE, hardware E-stop) —
+      // replacing the whole list would silently drop them.
+      var kept = (p.pins || []).filter(function (a) {
+        var replaced = (res.pins || []).some(function (b) { return b.signal === a.signal; });
+        var optIn = a.signal === 'SDA2' || a.signal === 'SCL2' ||
+                    a.signal === 'SERVO_OE2' || a.signal === 'ESTOP';
+        return !replaced && optIn;
+      });
+      p.pins = (res.pins || []).concat(kept);
       GMB.markDirty();
       drawGrid(); drawSignals(); validate();
     });

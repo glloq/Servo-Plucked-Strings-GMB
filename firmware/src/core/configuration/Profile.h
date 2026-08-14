@@ -238,6 +238,14 @@ struct Profile {
     std::string boardIdentifier = "esp32-s3-devkitc-1";
     bool reserveUsb = true;
     bool automaticPinAssignment = true;
+    // How the hardware E-stop contact on the `ESTOP` pin is wired (only meaningful
+    // when an ESTOP pin is assigned). false = legacy normally-open button to GND
+    // (active-low: LOW = stop). true = NORMALLY-CLOSED loop to GND — the RECOMMENDED
+    // wiring (hardware/POWER_AND_SAFETY.md): the closed loop holds the pin LOW to
+    // authorise running, and a press, a broken wire or an unplugged connector all
+    // read HIGH (pull-up) = stop, so losing the E-stop chain fails safe. Defaults to
+    // the legacy polarity so existing wired instruments keep their behaviour.
+    bool estopNormallyClosed = false;
     std::vector<PinAssignment> pins;
 
     NetworkConfig network;

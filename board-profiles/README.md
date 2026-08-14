@@ -13,9 +13,17 @@ sync means the browser UI and the on-device validator agree about every pin.
 
 | File | Board | Source of truth |
 | ---- | ----- | --------------- |
-| `esp32-s3-devkitc-1.json` | Espressif ESP32-S3-DevKitC-1 | `makeEsp32S3DevKitC1()` |
+| `esp32-s3-devkitc-1.json` | Espressif ESP32-S3-DevKitC-1 **v1.0** (RGB LED on GPIO48) | `makeEsp32S3DevKitC1()` |
+| `esp32-s3-devkitc-1-v1.1.json` | Espressif ESP32-S3-DevKitC-1 **v1.1** (RGB LED on GPIO38) | `makeEsp32S3DevKitC1V11()` |
 | `esp32-wroom-32.json` | ESP32-WROOM-32 (DevKitC, 38-pin) | `makeEsp32Wroom32()` |
 | `esp32-devkit-v1.json` | ESP32 DevKit v1 (30-pin) | `makeEsp32DevKitV1()` |
+
+> **DevKitC-1 revisions.** Espressif moved the on-board RGB LED between board
+> revisions: the original (v1.0) drives it from **GPIO48**, the v1.1 from
+> **GPIO38**. The LED pin is `reserved`, the other one free, so each revision
+> is its own profile — check the silkscreen / the Espressif user guide. The
+> historical `esp32-s3-devkitc-1` identifier keeps naming the v1.0 board so
+> stored profiles keep the pin map they were validated against.
 
 ## Top-level format
 
@@ -37,16 +45,22 @@ button proposes (SPECIFICATION.md §11.5). A servo-per-fret instrument only need
 the PCA9685 I²C bus and its `/OE` safety line at board level; individual servos
 are assigned **per servo** (a PCA channel or a direct GPIO) in the setup wizard.
 
-| Key | Meaning | Value |
+| Key | Meaning | Value (S3 v1.0) |
 | --- | ------- | ----- |
-| `SDA` | PCA9685 I²C data | `40` |
-| `SCL` | PCA9685 I²C clock | `41` |
+| `SDA` | PCA9685 I²C bus 0 data | `40` |
+| `SCL` | PCA9685 I²C bus 0 clock | `41` |
+| `SDA2` / `SCL2` | optional second I²C bus (`Wire1`) | `38` / `39` (v1.1: `39` / `42` — GPIO38 is its LED) |
 | `SERVO_OE` | PCA9685 `/OE` safety line | `47` |
+| `SERVO_OE2` | optional second-bus `/OE` | `21` |
+| `ESTOP` | hardware E-stop safety input (`SafetyInput`) | `2` |
 | `SERVO` | recommended free output pins for direct-GPIO servos | `[4, 5, 6, 7, 15, 16, 17, 18]` |
 
 The `SERVO` array lists good pins for **direct-GPIO** servos (used when a servo is
 wired straight to the ESP32 instead of a PCA9685). This is a starting profile, not
-a universal rule — the UI can override every line (SPECIFICATION.md §11.5).
+a universal rule — the UI can override every line (SPECIFICATION.md §11.5). The
+second-bus and `ESTOP` defaults are **board-profile data on purpose**: the UI has
+no hard-coded pin fallbacks, so a board with no recommendation simply leaves the
+signal unassigned until the user picks a pin.
 
 ### `pins[]` — `PinCapability`
 
@@ -89,8 +103,9 @@ The profile encodes the ESP32-S3 restrictions of SPECIFICATION.md §11.4:
 * **Variant memory:** GPIO33/34 are **caution** (tied to memory on some
   modules); GPIO35/36/37 are **reserved** (octal Flash/PSRAM variants).
 * **UART0 (reserved):** GPIO43 (TX), GPIO44 (RX) — programming / diagnostics.
-* **On-board RGB LED (reserved):** GPIO48.
-* **Recommended:** GPIO1, 2, 4–18, 21, 38, 39, 40, 41, 42, 47.
+* **On-board RGB LED (reserved):** GPIO48 on v1.0 boards, GPIO38 on v1.1.
+* **Recommended:** GPIO1, 2, 4–18, 21, 39, 40, 41, 42, 47 — plus GPIO38 (v1.0)
+  or GPIO48 (v1.1), whichever the LED does not occupy.
 
 **GPIO22–25 do not exist on the ESP32-S3** and are intentionally absent from the
 `pins` array.

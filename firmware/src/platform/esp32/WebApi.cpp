@@ -371,6 +371,7 @@ void WebApi::registerRoutes() {
             o["exposed"] = p.exposed;
             o["input"] = p.input;
             o["output"] = p.output;
+            o["interrupt"] = p.interrupt;  // the ESTOP safety input needs it
             o["preference"] = prefName(p.preference);
             o["reserved"] = p.reserved;
             o["usb"] = p.usb;
@@ -382,7 +383,8 @@ void WebApi::registerRoutes() {
         sendJson(req, doc);
     };
     static const char* const kBoardIds[] = {
-        "esp32-s3-devkitc-1", "esp32-wroom-32", "esp32-devkit-v1"};
+        "esp32-s3-devkitc-1", "esp32-s3-devkitc-1-v1.1", "esp32-wroom-32",
+        "esp32-devkit-v1"};
     for (const char* id : kBoardIds) {
         server_->on((std::string("/api/board/") + id).c_str(), HTTP_GET,
                    [emitBoard, id](AsyncWebServerRequest* req) { emitBoard(req, id); });

@@ -42,11 +42,13 @@ struct PinCapability {
 // (spec 11.3). Servo-per-fret needs no stepper STEP/DIR/HOME/LIMIT/DIAG signals:
 // fingers and pluckers are driven over I2C (PCA9685) or on a direct GPIO.
 enum class SignalKind : uint8_t {
-    Enable,   // optional global enable — plain output
-    I2cSda,   // PCA9685 SDA
-    I2cScl,   // PCA9685 SCL
-    ServoOe,  // PCA9685 output-enable / safety
-    Generic,  // any usable output (direct-GPIO servos)
+    Enable,       // optional global enable — plain output
+    I2cSda,       // PCA9685 SDA
+    I2cScl,       // PCA9685 SCL
+    ServoOe,      // PCA9685 output-enable / safety
+    Generic,      // any usable output (direct-GPIO servos)
+    SafetyInput,  // hardware E-stop input (`ESTOP`): input + interrupt, never a
+                  // strapping pin (an NC loop idles the pin LOW through boot)
 };
 
 struct BoardProfile {
@@ -67,7 +69,15 @@ struct BoardProfile {
 // the classic ESP32-WROOM-32 (38-pin DevKitC) and ESP32 DevKit v1 (30-pin) are
 // the common cheaper boards — same die, so they share a GPIO capability model and
 // differ only in which pins are broken out.
-BoardProfile makeEsp32S3DevKitC1();
+//
+// Espressif shipped TWO revisions of the ESP32-S3-DevKitC-1 that differ in where
+// the on-board RGB LED (WS2812) sits: the initial release drives it from GPIO48,
+// the v1.1 revision from GPIO38. The pin the LED occupies must stay reserved, so
+// each revision is its own profile — check the silkscreen / Espressif user guide
+// to pick the right one. `esp32-s3-devkitc-1` keeps naming the original (v1.0)
+// board so existing stored profiles keep their meaning.
+BoardProfile makeEsp32S3DevKitC1();     // v1.0 — RGB LED on GPIO48, GPIO38 free
+BoardProfile makeEsp32S3DevKitC1V11();  // v1.1 — RGB LED on GPIO38, GPIO48 free
 BoardProfile makeEsp32Wroom32();
 BoardProfile makeEsp32DevKitV1();
 

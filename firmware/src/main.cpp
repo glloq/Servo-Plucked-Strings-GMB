@@ -100,6 +100,12 @@ uint32_t g_activationCmdId = 0;
 std::vector<bool> g_stringFaulted;   // runtime fault (servo write error, etc.)
 
 int8_t g_estopPin = -1;
+// Contact wiring of the E-stop input (profile board.estopNormallyClosed):
+//   false = legacy normally-open button to GND  -> stop when the pin reads LOW;
+//   true  = normally-closed loop to GND (recommended, hardware/POWER_AND_SAFETY.md)
+//           -> the closed loop holds the pin LOW to authorise running; a press, a
+//           cut wire or an unplugged connector reads HIGH (pull-up) = stop.
+bool g_estopNc = false;
 Debouncer g_estopDeb;  // debounced E-stop input (avoids a spurious trip)
 
 // BOOT button (GPIO0) forces the Wi-Fi hotspot (AP + captive portal) on a long
@@ -291,10 +297,13 @@ void applyProfile() {
     g_actuators.configure(g_profile.power.maxConcurrentMoves,
                           g_profile.power.maxConcurrentPerBoard, g_profile.power.staggerMs);
 
-    // The E-stop pin belongs to the (possibly new) profile.
+    // The E-stop pin (and its contact wiring) belong to the (possibly new) profile.
     g_estopPin = pinOf("ESTOP");
+    g_estopNc = g_profile.estopNormallyClosed;
     if (g_estopPin >= 0) pinMode(g_estopPin, INPUT_PULLUP);
-    g_estopDeb.configure(3, true);  // idle = HIGH (not pressed, active-low input)
+    // Idle raw level of the pin when the machine may run: NO button open = HIGH;
+    // NC loop closed = LOW. The debouncer tracks the raw level (true = HIGH).
+    g_estopDeb.configure(3, !g_estopNc);
 }
 
 // Rebuild the capability snapshot from a runtime copy of the profile that
@@ -688,6 +697,7 @@ void setup() {
     sd.degraded = &g_degraded;
     sd.stringFaulted = &g_stringFaulted;
     sd.estopPin = &g_estopPin;
+    sd.estopNc = &g_estopNc;
     sd.profile = &g_profile;
     sd.rebuildCaps = []() -> int { return rebuildRuntimeCapabilities(); };
     sd.notifyCaps = []() { notifyCapabilitiesChanged(); };
@@ -903,10 +913,14 @@ void loop() {
 
     g_net.tick(nowMs);
 
-    // SAFETY FIRST: hardware E-stop (active-low), then the web/CC STOP flag.
+    // SAFETY FIRST: hardware E-stop, then the web/CC STOP flag. Stop level depends
+    // on the contact wiring: NO button = stop on LOW (legacy active-low); NC loop =
+    // stop on HIGH (press, cut wire or unplugged connector all release the loop).
     if (g_estopPin >= 0) {
-        bool rawPressed = digitalRead(g_estopPin) == LOW;
-        bool debouncedPressed = !g_estopDeb.update(nowMs, digitalRead(g_estopPin) == HIGH);
+        bool rawHigh = digitalRead(g_estopPin) == HIGH;
+        bool stableHigh = g_estopDeb.update(nowMs, rawHigh);
+        bool rawPressed = g_estopNc ? rawHigh : !rawHigh;
+        bool debouncedPressed = g_estopNc ? stableHigh : !stableHigh;
         if ((rawPressed || debouncedPressed) &&
             g_safety.state() != SafetyState::EmergencyStop) {
             doEmergencyStop();

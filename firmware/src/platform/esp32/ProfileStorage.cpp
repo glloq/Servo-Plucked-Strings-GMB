@@ -63,6 +63,7 @@ const char* signalKindName(SignalKind k) {
         case SignalKind::I2cSda: return "i2cSda";
         case SignalKind::I2cScl: return "i2cScl";
         case SignalKind::ServoOe: return "servoOe";
+        case SignalKind::SafetyInput: return "safetyInput";
         default: return "generic";
     }
 }
@@ -223,6 +224,7 @@ void ProfileStorage::toJson(const Profile& p, JsonDocument& doc) {
     bo["profile"] = p.boardIdentifier;
     bo["reserveUsb"] = p.reserveUsb;
     bo["automaticPinAssignment"] = p.automaticPinAssignment;
+    bo["estopNormallyClosed"] = p.estopNormallyClosed;
 
     JsonArray pins = doc["pins"].to<JsonArray>();
     for (const auto& a : p.pins) {
@@ -436,6 +438,9 @@ bool ProfileStorage::fromJson(JsonVariantConst doc, Profile& out) {
     out.boardIdentifier = bo["profile"] | "esp32-s3-devkitc-1";
     out.reserveUsb = bo["reserveUsb"] | true;
     out.automaticPinAssignment = bo["automaticPinAssignment"] | true;
+    // Absent on pre-existing profiles: keep the legacy normally-open (active-low)
+    // E-stop polarity they were wired for. New profiles should use NC (fail-safe).
+    out.estopNormallyClosed = bo["estopNormallyClosed"] | false;
 
     out.pins.clear();
     for (JsonObjectConst o : doc["pins"].as<JsonArrayConst>()) {

@@ -15,6 +15,7 @@ SignalKind signalKindFromName(const std::string& signal) {
     if (signal == "SDA" || signal == "SDA2") return SignalKind::I2cSda;   // SDA2 = 2nd I2C bus
     if (signal == "SCL" || signal == "SCL2") return SignalKind::I2cScl;   // SCL2 = 2nd I2C bus
     if (startsWith(signal, "SERVO_OE") || signal == "OE") return SignalKind::ServoOe;
+    if (startsWith(signal, "ESTOP")) return SignalKind::SafetyInput;  // hardware E-stop input
     return SignalKind::Generic;
 }
 
