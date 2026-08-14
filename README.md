@@ -136,11 +136,18 @@ le timing, puis on teste et on enregistre.
 <p align="center"><img src="img/screenshots/wizard.png" alt="Page Setup — étape Instrument" width="90%"/></p>
 <p align="center"><img src="img/screenshots/calibration.png" alt="Page Setup — calibration des frettes" width="90%"/></p>
 
-**Câblage & GPIO** — le faisceau ESP32 + PCA9685 de l'instrument courant (un ou
-deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit), et le
-**brochage graphique** de la carte ESP32 choisie (S3 / WROOM-32 / DevKit v1) avec
-les broches utilisées surlignées.
+**Câblage & GPIO** — l'assistant d'installation électrique, en **cinq onglets** :
+
+| Onglet | Contenu |
+|--------|---------|
+| **Harness** | le faisceau ESP32 + PCA9685 de l'instrument courant (un ou deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit en direct, export SVG) + les conseils de **câblage de puissance** (étoile, condensateur de réservoir par carte, 100 nF, `/OE` fail-safe) |
+| **Power & safety** | la chaîne de sécurité déclarée (pull-up `/OE`, étage d'autorisation, contacteur d'arrêt d'urgence, fusibles), l'**arbre de puissance** en SVG (les éléments non déclarés en pointillés) et l'**estimateur de courant** : pire cas par branche, calibre de fusible, condensateur, alimentation, chute en ligne |
+| **I²C & PCA** | adresse et **cavaliers A0–A2** de chaque carte, et le **budget de pull-ups** du bus (une résistance équivalente de 2,2–4,7 kΩ par ligne) |
+| **GPIO pins** | l'assignation des broches et le **brochage graphique** de la carte ESP32 choisie (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) avec les broches utilisées surlignées, plus la déclaration de l'**arrêt d'urgence matériel** (câblage NC recommandé + broche `ESTOP`) |
+| **Commissioning** | la **check-list de mise sous tension** par étapes (chaque étape est une barrière), avec l'avancement mémorisé par instrument dans le navigateur |
+
 <p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
+<p align="center"><img src="img/screenshots/wiring-power.png" alt="Puissance & sécurité — arbre de puissance et estimateur" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="Broches GPIO + brochage de la carte" width="90%"/></p>
 
 ## 🔌 Matériel
@@ -248,8 +255,12 @@ Servo-Plucked-Strings-GMB/
 | [SYSEX_CAPABILITIES.md](SYSEX_CAPABILITIES.md) | Protocole SysEx de découverte des capacités |
 | [docs/SAFETY.md](docs/SAFETY.md) | E-stop, /OE, gestion du courant |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Organisation du code |
-| [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md) | Pages de l'interface |
+| [docs/WEB_INTERFACE.md](docs/WEB_INTERFACE.md) | Pages de l'interface (avec captures) |
 | [docs/ARDUINO_IDE_BUILD.md](docs/ARDUINO_IDE_BUILD.md) | Compiler le firmware ESP32 depuis l'IDE Arduino |
+| [hardware/POWER_AND_SAFETY.md](hardware/POWER_AND_SAFETY.md) | Circuit de référence : distribution, chaîne d'arrêt d'urgence, `/OE` fail-safe |
+| [hardware/I2C_PCA9685.md](hardware/I2C_PCA9685.md) | Bus I²C : adresses, cavaliers A0–A2, pull-ups |
+| [hardware/COMMISSIONING.md](hardware/COMMISSIONING.md) | Mise sous tension par étapes avant la première note |
+| [hardware/schematics/](hardware/schematics/) | Schémas (distribution, E-stop + /OE, ESP32 ↔ PCA9685) |
 
 ## 🎛️ La famille GMB
 

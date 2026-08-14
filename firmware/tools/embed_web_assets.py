@@ -26,9 +26,10 @@ SRC = HERE.parent.parent / "web-interface"
 OUT = HERE.parent / "src" / "platform" / "esp32" / "WebAssets.cpp"
 
 SKIP = {"README.md"}
-# Directories never shipped to the device (dev-only content, e.g. the Node
-# behavioural tests under web-interface/test/).
-SKIP_DIRS = {"test"}
+# Directories never shipped to the device (dev-only content: the Node behavioural
+# tests under web-interface/test/ and the maintenance scripts under
+# web-interface/tools/, e.g. the screenshot capture).
+SKIP_DIRS = {"test", "tools"}
 
 MIME = {
     ".html": "text/html",

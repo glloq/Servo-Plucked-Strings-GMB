@@ -3,8 +3,8 @@
 > Cette version ESP32 n'a **ni moteur pas-à-pas ni homing** : chaque position de
 > frette possède son propre servo-doigt. La calibration consiste donc à régler,
 > pour chaque doigt, sa **position de contact** et son **sens de rotation**, puis
-> le geste de **grattage**. Tout se fait depuis l'interface web (onglet *Setup
-> Wizard*), y compris un **assistant d'installation** guidé.
+> le geste de **grattage**. Tout se fait depuis l'interface web, sur la page
+> **Setup** — étapes **Frets** (doigts) puis **Grattage / Plucking**.
 >
 > Documents liés : [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) ·
 > [`SAFETY.md`](SAFETY.md) · [`WEB_INTERFACE.md`](WEB_INTERFACE.md) ·
@@ -56,36 +56,46 @@ Pour le grattage (`pluck`/`strum`), des champs supplémentaires façonnent le ge
 
 ## 3. Calibration d'un doigt de frette (réglage manuel)
 
-Pour chaque frette équipée :
+Sur l'étape **Frets**, taper une frette de la bande de couverture ouvre son éditeur
+de servo. Pour chaque frette équipée :
 
-1. **Repos** : régler `restUs` pour que le doigt soit franchement décollé de la corde
-   (bouton *Test rest*).
-2. **Contact** : régler `activeUs` pour que le doigt plaque nettement la corde sur la
-   frette, sans forcer (bouton *Test contact*). C'est la **position de contact
-   corde/frette**.
-3. **Sens** : si le servo est monté à l'envers, cocher `inverted`.
-4. **Vérifier la note** : jouer la note (`openNote + fret`) et écouter la justesse.
-5. **Sauvegarder**.
+1. **Repos** : régler l'**angle de repos** (`restUs`) avec les boutons **− / +** pour
+   que le doigt soit franchement décollé de la corde (bouton **→ rest**).
+2. **Contact** : régler l'**angle de contact** (`activeUs`) pour que le doigt plaque
+   nettement la corde sur la frette, sans forcer (bouton **→ contact**). C'est la
+   **position de contact corde/frette**.
+3. **Sens** : si le servo est monté à l'envers, cocher **Reverse rotation direction**
+   (`inverted`).
+4. **Vérifier la note** : bouton **▶ Play** — joue la note (`openNote + fret`) et on
+   écoute la justesse.
+5. **Sauvegarder** (*Save & publish*).
+
+Chaque appui sur **−** / **+** envoie le servo à l'angle exact affiché : le réglage
+est visible en direct sur la mécanique (instrument **armé**).
 
 ### 3.1 Doigt à engrenage (un servo, deux frettes)
 
 Un servo à **engrenage** entraîne **deux doigts antagonistes** et couvre **deux
-frettes** d'une même corde (voir [`GEARED_FINGERS.md`](GEARED_FINGERS.md)). Il se
-règle en **trois** positions au lieu de deux :
+frettes** d'une même corde (voir [`GEARED_FINGERS.md`](GEARED_FINGERS.md)). Le modèle
+de données garde **trois** positions, mais l'interface n'en demande que **deux** :
 
-1. **Neutre** (`restUs`) : les **deux** doigts franchement décollés — c'est le repos.
-2. **Press A** (`activeUs`) : le doigt A plaque nettement la frette `fret`.
-3. **Press B** (`activeBUs`) : le doigt B plaque nettement la frette `fretB`.
+1. **Appui A** (`activeUs`) : le doigt A plaque nettement la frette `fret`.
+2. **Appui B** (`activeBUs`) : le doigt B plaque nettement la frette `fretB`.
+3. **Neutre** (`restUs`) : les **deux** doigts décollés — **calculé automatiquement**
+   comme le **milieu** des deux angles d'appui, et remis à jour à chaque − / +.
 
-Dans l'interface : cocher **« Geared »** sur la carte de la frette côté A, régler la
-2e frette puis les angles **Press A / Press B / Neutral**. Les frettes trop étroites
-(haut du manche) gardent le doigt simple ; les deux mécanismes se mélangent.
+Dans l'interface : cocher **« One servo drives 2 frets (geared) »** dans l'éditeur de
+la frette côté A ; l'éditeur affiche alors **Angle · fret N** et **Angle · fret N+1**
+(plus les boutons **→ fret 1** / **→ fret 2** / **→ rest** et **▶ Play 1** /
+**▶ Play 2**). La frette jumelée affiche « *paired with fret N on one geared servo* »
+et se règle depuis la frette propriétaire. Les frettes trop étroites (haut du manche)
+gardent le doigt simple ; les deux mécanismes se mélangent.
 
 ## 4. Calibration guidée (étape Frets)
 
-L'étape *Setup Wizard → Frets* intègre la calibration guidée, **frette par
-frette**, pour une corde choisie : cliquer une frette sur la bande de couverture
-ouvre son éditeur inline. Chaque frette enchaîne :
+L'étape *Setup → Frets* intègre la calibration guidée, **frette par frette**, pour
+une corde choisie (bandeau **String 1 … String N**) : cliquer une frette sur la bande
+de couverture ouvre son éditeur inline. Chaque frette enchaîne :
 
 ```
 choisir la corde
@@ -97,9 +107,12 @@ sauvegarder → frette N+1 …
 ```
 
 Il s'appuie sur `POST /api/test/servo` (presser/relâcher un servo précis) et
-`POST /api/test/note` (jouer une note) — l'instrument doit être **armé**
-(bouton *Reset & re-arm* du tableau de bord, ou *Arm for calibration* dans
-l'assistant) pour que les tests pilotent le matériel.
+`POST /api/test/note` (jouer une note) — l'instrument doit être **armé** pour que les
+tests pilotent le matériel : bouton **Arm for testing** (présent en haut des étapes
+Frets / Grattage / Test, avec son badge *ARMED / NOT ARMED*) ou **Re-arm servos** sur
+la page Instrument. Chaque étape porte aussi un **banc de test** (*Sweep this string*,
+*Sweep all strings*, *All fingers to rest*) avec une ligne d'état et un bouton
+**Stop**.
 
 > ⚠️ **Ne pas envoyer de notes MIDI pendant qu'un doigt est maintenu par
 > l'assistant.** Un test qui maintient un doigt (aperçu d'appui) n'est pas suivi par
@@ -121,7 +134,9 @@ l'assistant) pour que les tests pilotent le matériel.
 ## 6. Grattage commun & délais (global, `PluckConfig` + `MidiConfig`)
 
 Le **geste de grattage et son timing sont communs à toutes les cordes** : on les règle
-une seule fois (étape *Grattage* de l'assistant), au lieu de refaire chaque plectre.
+une seule fois — la carte **Gesture (all strings)** de l'étape *Grattage* pour le geste
+(`strokeMs`, `minStrikePct`), l'étape **Timing** pour les délais (`noteExecutionDelayMs`,
+`fretToPluckMs`, `strumLeadMs`) — au lieu de refaire chaque plectre.
 
 **`PluckConfig`** (`profile.pluck`) :
 
@@ -159,6 +174,12 @@ une seule fois (étape *Grattage* de l'assistant), au lieu de refaire chaque ple
 
 - `disableAtRest` (par servo) : les doigts au repos ne consomment ~rien.
 - Un seul doigt actif par corde (relâche avant appui).
-- `power.maxConcurrentMoves` / `power.staggerMs` : étalent les démarrages de servos
-  sur un accord pour ne pas cumuler les pics d'appel de courant.
+- `power.maxConcurrentMoves` (tout l'instrument) / `power.maxConcurrentPerBoard` (par
+  carte PCA9685) / `power.staggerMs` : étalent les démarrages de servos sur un accord
+  pour ne pas cumuler les pics d'appel de courant. Le governor est **optionnel** —
+  l'étape *Timing* porte une case *Limit how many servos start moving at once* qui le
+  désactive entièrement ; chaque plafond à `0` = pas de limite.
 - Convention : **1 PCA9685 par corde** pour répartir la charge sur plusieurs cartes.
+- Le dimensionnement électrique (condensateurs de réservoir, fusibles, section de
+  fil, alimentation) se calcule dans *Câblage & GPIO → Power & safety*, à partir de
+  ces plafonds — voir [`../hardware/POWER_AND_SAFETY.md`](../hardware/POWER_AND_SAFETY.md).
