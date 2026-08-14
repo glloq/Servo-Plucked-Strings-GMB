@@ -29,15 +29,16 @@
       return;
     }
 
-    // Controls. The board itself (and native-USB reservation) is chosen on the Setup
-    // page — this reference page just assigns pins on it, so it shows the board
-    // read-only and keeps the assignment tools.
+    // Controls. The board itself (and native-USB reservation) is chosen just above
+    // in ⚙ → Advanced hardware → Controller board; this grid only assigns pins on
+    // it. Pins are normally assigned automatically — this page exists for rigs
+    // that do not match the recommended pinout (UX audit 10).
     host.appendChild(h('div.card', [
       h('div.card-head', [h('h2', 'Pin assignment — ' + board.displayName),
-        h('span.muted', GMB.isAdvanced() ? 'Advanced: manual assignment + caution pins' : 'Simplified: recommended pins only')]),
+        h('span.muted', 'manual assignment + caution pins')]),
       h('p.muted', ['Board ', h('strong', board.displayName || p.board.profile),
         (p.board.reserveUsb ? ' · native USB reserved' : ''),
-        ' — change the board and USB reservation on the Setup page (Instrument › Board).']),
+        ' — change the board and USB reservation in Controller board, above.']),
       h('div.toolbar', [
         h('label.inline', [GMB.input(p.board, 'automaticPinAssignment', { type: 'checkbox' }), h('span', 'Automatic pin assignment')]),
         h('span.spacer'),
@@ -212,7 +213,8 @@
   }
 
   // Candidate GPIOs for a signal (spec 11.3): compatible, not
-  // reserved, not used elsewhere. Caution pins only surface in advanced mode.
+  // reserved, not used elsewhere. Caution pins are offered here (this grid lives
+  // in the advanced-hardware settings) but stay marked as such.
   function candidates(kind, signal) {
     var reserveUsb = GMB.state.profile.board.reserveUsb;
     var used = usedMap(signal);
@@ -221,7 +223,6 @@
       if (used[cap.gpio]) return false;
       if (cap.reserved || cap.preference === 'reserved') return false;
       if (cap.usb && reserveUsb) return false;
-      if (cap.preference === 'caution' && !GMB.isAdvanced()) return false;
       return GMB.pinSupports(cap, wantKind);
     });
   }

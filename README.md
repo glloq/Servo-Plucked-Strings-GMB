@@ -116,37 +116,53 @@ capacité : `hardware/README.md`). Le mapping reste néanmoins libre par servo.
 ## 🖥️ Interface web
 
 Toute la configuration se fait dans le navigateur (servie par l'ESP32, ou en
-ouvrant `web-interface/index.html` en **mode démo**). L'interface se réduit à
-**trois pages principales** — Instrument, Setup, Câblage & GPIO. **Toute la création
-d'un instrument tient dans un seul parcours ordonné sur la page Setup** ; seuls le
-Wi-Fi de l'appareil et les outils de diagnostic restent dans le modal engrenage.
-Aperçu détaillé de chaque partie :
-[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
+ouvrant `web-interface/index.html` en **mode démo**). L'interface suit une règle
+simple : **un écran de création ne montre que les décisions que le logiciel ne peut
+pas prendre lui-même**. Vous décrivez la mécanique de votre machine, le logiciel en
+déduit les servos, les cartes PCA9685, les canaux, les GPIO, le timing et le MIDI.
+Tout reste modifiable, mais derrière un *Modifier…* ou un *Avancé*.
+
+Trois pages principales — **Instrument**, **Configurer**, **Câblage** — plus le menu
+engrenage (appareil & Wi-Fi, MIDI, matériel avancé, sécurité, diagnostics,
+développeur). Aperçu détaillé :
+[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md).
+
+**Premier démarrage** — tant que rien n'a été configuré, l'interface ouvre sur un
+écran d'accueil qui mène directement à la création (modèle ou instrument sur mesure).
+Une fois la configuration appliquée, **Instrument** redevient la page d'accueil.
 
 **Instrument** — manche jouable façon GMB : un cercle de note par frette utilisée
 et par corde à vide, gros arrêt d'urgence + ré-armement, sélecteur de mode de jeu,
 et une barre d'accords qui gratte l'accord sur plusieurs cordes.
 <p align="center"><img src="img/screenshots/fretboard.png" alt="Page Instrument" width="90%"/></p>
 
-**Setup** — la création complète de l'instrument en un seul parcours :
-**Instrument → Frettes → Grattage → MIDI → Timing → Test → Validation**. On définit
-l'instrument (identité, mécanique, carte ESP32, câblage), on calibre à la main ce
-qu'on a défini (angles de contact / grattage + sens de rotation), on règle le MIDI et
-le timing, puis on teste et on enregistre.
-<p align="center"><img src="img/screenshots/wizard.png" alt="Page Setup — étape Instrument" width="90%"/></p>
-<p align="center"><img src="img/screenshots/calibration.png" alt="Page Setup — calibration des frettes" width="90%"/></p>
+**Configurer** — cinq étapes : **Instrument → Frettes → Cordes → Test → Terminer**.
+L'étape 1 est un véritable *concepteur d'instrument* : accordage, puis trois
+questions mécaniques — *comment les frettes sont-elles actionnées ?* (une action par
+frette · un servo pour deux frettes · cordes à vide · personnalisé), *comment la
+corde est-elle jouée ?* (médiator simple · aller/retour · grattage), *comment la
+corde est-elle arrêtée ?* (laisser résonner · médiator · étouffoir · servo de
+descente). Chaque carte affiche le nombre de servos qu'elle implique, et le logiciel
+répond par le récapitulatif de ce qu'il vient de générer.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Configurer — étape Instrument" width="90%"/></p>
 
-**Câblage & GPIO** — l'assistant d'installation électrique, en **cinq onglets** :
+Les étapes de calibration ne montrent plus que les positions à trouver à l'œil —
+repos et appui — avec un test, la note, et *Frette suivante →*. Le câblage tient en
+une ligne (`PCA #2 · CH7 ✓  Modifier…`).
+<p align="center"><img src="img/screenshots/calibration.png" alt="Configurer — calibration des frettes" width="90%"/></p>
 
-| Onglet | Contenu |
-|--------|---------|
-| **Harness** | le faisceau ESP32 + PCA9685 de l'instrument courant (un ou deux bus I²C, adresses, corde·rôle par broche, contrôles de conflit en direct, export SVG) + les conseils de **câblage de puissance** (étoile, condensateur de réservoir par carte, 100 nF, `/OE` fail-safe) |
-| **Power & safety** | la chaîne de sécurité déclarée (pull-up `/OE`, étage d'autorisation, contacteur d'arrêt d'urgence, fusibles), l'**arbre de puissance** en SVG (les éléments non déclarés en pointillés) et l'**estimateur de courant** : pire cas par branche, calibre de fusible, condensateur, alimentation, chute en ligne |
-| **I²C & PCA** | adresse et **cavaliers A0–A2** de chaque carte, et le **budget de pull-ups** du bus (une résistance équivalente de 2,2–4,7 kΩ par ligne) |
-| **GPIO pins** | l'assignation des broches et le **brochage graphique** de la carte ESP32 choisie (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) avec les broches utilisées surlignées, plus la déclaration de l'**arrêt d'urgence matériel** (câblage NC recommandé + broche `ESTOP`) |
-| **Commissioning** | la **check-list de mise sous tension** par étapes (chaque étape est une barrière), avec l'avancement mémorisé par instrument dans le navigateur |
-
+**Câblage** — le faisceau est **généré**, pas configuré : le schéma ESP32 + PCA9685
+de l'instrument courant (un ou deux bus I²C, adresses, corde·rôle par broche,
+contrôles de conflit en direct, export SVG) avec les conseils de **câblage de
+puissance** (étoile, condensateur de réservoir par carte, 100 nF, `/OE` fail-safe),
+puis la **check-list de mise en service** par étapes barrières.
 <p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
+
+**⚙ Matériel avancé** — tout ce que le générateur décide normalement reste accessible
+en un clic : carte ESP32, capacité et bus des PCA9685, réactivité (rapide /
+équilibrée / alimentation limitée, avec chaque valeur exacte), grille GPIO et arrêt
+d'urgence matériel, adressage I²C et budget de pull-ups, dossier puissance & sécurité
+avec l'estimateur de courant.
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Puissance & sécurité — arbre de puissance et estimateur" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="Broches GPIO + brochage de la carte" width="90%"/></p>
 
@@ -226,8 +242,9 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ Adaptateurs ESP32 (Wi-Fi, serveur web, ServoBank, stockage)
 │   ├── src/main.cpp        Intégration matérielle + scheduler servo-par-frette
 │   └── test/               Tests natifs (g++) + hostcheck + profilecheck
-├── web-interface/          Interface web (3 pages : Instrument, Setup,
-│                           Câblage & GPIO + modal engrenage appareil/diagnostic)
+├── web-interface/          Interface web (3 pages : Instrument, Configurer,
+│                           Câblage + modal engrenage : appareil, MIDI,
+│                           matériel avancé, sécurité, diagnostics, développeur)
 ├── instrument-profiles/    Profils prêts (ukulélé + variante à engrenage, guitare,
 │                           basse, mandoline, banjo)
 ├── board-profiles/         Profils de carte ESP32 (S3, WROOM-32, DevKit v1)

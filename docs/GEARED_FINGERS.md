@@ -124,16 +124,19 @@ Un doigt à engrenage se règle en **trois** points au lieu de deux :
 2. **Press A** (`activeUs`) : le doigt A plaque nettement la frette `fret`.
 3. **Press B** (`activeBUs`) : le doigt B plaque nettement la frette `fretB`.
 
-Depuis l'interface web (**Setup Wizard**) :
+Depuis l'interface web (page **Configurer**) :
 
-- **Étape Frets** : sur la ligne de la frette côté A, cocher **« gear »** ; ouvrir
-  **Calibrate** pour choisir la **2e frette** et régler **Press A / Press B /
-  Neutral** en degrés. La frette côté B affiche « *side B of the geared servo on
-  fret N* » (une seule surface d'édition, pas de doublon).
-- **Calibration inline (étape Frets)** : pour une frette portée par un servo à
-  engrenage, les curseurs règlent les trois positions (Press A / Press B /
-  Neutral), avec les boutons **Neutral / Press A / Press B** qui pilotent le servo à
-  l'**angle exact du brouillon** (aperçu live), plus **Play A / Play B**.
+- **À la conception (étape 1)** : la carte **« Un servo pour deux frettes »** de la
+  question *Comment les frettes sont-elles actionnées ?* engrène tout l'instrument
+  d'un coup, avec un seuil *Apparier les frettes jusqu'à* ; la carte affiche le
+  nombre de servos que le choix implique.
+- **Au cas par cas (étape Frettes)** : ouvrir la frette côté A, déplier **Advanced**
+  et cocher **« This servo drives 2 frets (geared) »**. L'éditeur montre alors une
+  **position d'appui par frette** (Press A / Press B) ; le **neutre** est calculé
+  automatiquement à leur milieu. La frette côté B affiche « *paired with fret N on
+  one geared servo* » (une seule surface d'édition, pas de doublon).
+- Les boutons **Test fret A / Test fret B / → rest** pilotent le servo à l'**angle
+  exact du brouillon** (aperçu live), plus **Play A / Play B**.
 
 > L'aperçu live utilise l'extension `POST /api/test/servo` avec un champ optionnel
 > `us` : quand il est présent, le firmware amène le servo à **cette impulsion exacte**

@@ -22,7 +22,7 @@ un PCA9685, plus l'entrée d'arrêt d'urgence optionnelle :
 `ESTOP` est une **entrée de sécurité** (`SignalKind::SafetyInput`) : broche
 lisible, avec interruption, jamais une broche de strapping. Elle est lue en
 `INPUT_PULLUP` si elle est présente dans le profil, se déclare dans l'interface
-(*Wiring & GPIO → Emergency stop input*) et supporte deux câblages
+(*⚙ → Matériel avancé → GPIO pins → Emergency stop input*) et supporte deux câblages
 (`board.estopNormallyClosed`) : boucle **NC recommandée** (boucle fermée =
 marche ; appui, fil coupé ou connecteur débranché = STOP, fail-safe) ou bouton
 NO hérité (actif bas). Circuit de référence :

@@ -58,7 +58,7 @@ On distingue **strictement** deux opérations (jamais l'une déguisée en l'autr
   verrouillé, **sans aucune attente mécanique**. Un vrai E-stop ne dépend jamais de
   l'achèvement d'un mouvement.
   - **E-stop matériel** (broche `ESTOP`, entrée `SafetyInput` déclarée dans
-    l'interface, *Wiring & GPIO → Emergency stop input*) : `hardStop` + état
+    l'interface, *⚙ → Matériel avancé → GPIO pins → Emergency stop input*) : `hardStop` + état
     `EmergencyStop`, testé en tête de boucle sur le niveau brut, avant toute
     commande. Deux câblages du contact (`board.estopNormallyClosed`) :
     - **NC recommandé** : boucle *normalement fermée* vers GND — la boucle fermée

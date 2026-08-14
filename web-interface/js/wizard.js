@@ -1,64 +1,59 @@
 /*
- * wizard.js — first-configuration assistant for a SERVO-PER-FRET instrument.
+ * wizard.js — the instrument DESIGNER and its guided calibration.
  *
- * The physical machine has two independent halves per string, and the wizard now
- * mirrors that split so each can be configured, calibrated and tested on its own:
+ * Design rule (UX audit): a creation screen only shows the decisions the software
+ * cannot take by itself. The user describes the MECHANICS of their machine — how
+ * the frets are actuated, how the string is played, how it is stopped — and the
+ * software derives everything else: which servos exist, which PCA9685 board and
+ * channel each one lands on, the I²C topology, the timing and the MIDI mapping.
+ * Anything derivable stays hidden until the user explicitly asks to change it.
  *
- *   • FRETS — one dedicated finger servo per fret position; it presses the string
- *            against the fret. Step "Frets".
- *   • PLUCK — the plectrum / strum servo that sounds the string, plus the optional
- *            strum-lift and damper. Step "Plucking".
+ * The physical machine has two independent halves per string, and the flow
+ * mirrors that split so each can be calibrated and tested on its own:
  *
- * ONE complete SETUP flow (GMB.views.setup — a main page) walks the whole
- * creation of an instrument in order, so nothing is split across pages/modals:
+ *   • FRETS   — one finger servo per fret position; it presses the string against
+ *               the fret. Step "Frets".
+ *   • STRINGS — the plectrum / strum servo that sounds the string, plus the
+ *               optional descent servo and damper. Step "Strings".
  *
- *     Instrument (Builder) -> Frets -> Plucking -> MIDI -> Timing -> Test -> Validation
+ * ONE ordered flow (GMB.views.setup — a main page):
  *
- * i.e. define the instrument (identity, strings, mechanics, board, wiring), then
- * calibrate what you defined (finger servos, then strikers), then its MIDI
- * behaviour and timing, then test it and save. Only device connectivity (Wi-Fi)
- * and the diagnostic tools (SysEx / MIDI monitor) stay in the gear modal — they
- * are not part of the instrument.
+ *     Instrument -> Frets -> Strings -> Test -> Finish
+ *
+ * i.e. DESIGN the instrument, calibrate what was generated, test it, then check
+ * and apply. MIDI, timing, the servo-start governor, GPIO, I²C and SysEx are not
+ * steps: they have recommended values the firmware uses on its own and live in
+ * the gear menu for the day someone needs them.
  *
  * Every actuator step carries an Arm control and a "test bench" that drives ONE
  * servo or a whole GROUP (sweep every fret of a string, pluck every string, test
  * everything…) through the shared GMB.testRunner sequencer, with a live status
- * line and a Stop button. The Simplified / Advanced toggle hides the wiring
- * (source, board, channel) and fine timing in simplified mode.
+ * line and a Stop button.
  */
 (function (global) {
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
-  // One unified SETUP flow over the step functions (UI redesign): the complete,
-  // ordered creation of an instrument on a single main page — define, calibrate,
-  // MIDI, timing, test, save — so no instrument setting is split across a page and
-  // a modal. The gear modal keeps only device Wi-Fi and the diagnostic tools.
+  // The creation flow: five steps, each of them a question about the instrument
+  // rather than about the firmware.
   var STEP_DEFS = {
-    builder:    { label: 'Instrument', fn: stepBuilder },
-    midi:       { label: 'MIDI',       fn: stepMidiSettings },
-    power:      { label: 'Timing',     fn: stepPower },
-    validation: { label: 'Validation', fn: stepValidation },
-    frets:      { label: 'Frets',      fn: stepFrets },
-    plucking:   { label: 'Plucking',   fn: stepPluck },
-    test:       { label: 'Test',       fn: stepTest }
+    builder:  { label: 'Instrument', fn: stepBuilder },
+    frets:    { label: 'Frets',      fn: stepFrets },
+    strings:  { label: 'Strings',    fn: stepStrings },
+    test:     { label: 'Test',       fn: stepTest },
+    finish:   { label: 'Finish',     fn: stepFinish }
   };
   var FLOWS = {
-    setup: ['builder', 'frets', 'plucking', 'midi', 'power', 'test', 'validation']
+    setup: ['builder', 'frets', 'strings', 'test', 'finish']
   };
+  // Old step ids kept working (deep links, docs, the screenshot tool).
+  var STEP_ALIASES = { plucking: 'strings', validation: 'finish', midi: 'builder', power: 'builder' };
   var flowStep = { setup: 0 };        // current step index
   var flowHost = { setup: null };     // mount element
   var currentFlow = 'setup';          // which flow a bare drawStep() targets
 
   var activeStr = 0;        // per-string steps show one string at a time
   var expandedFrets = {};   // Frets step: which fret rows show their servo editor
-
-  // Full MIDI settings (params + string/fret selection) as a config-wizard step;
-  // the live monitor + integrated tester stay in the Settings > Advanced tab.
-  function stepMidiSettings(body) {
-    if (GMB.midiSettings && GMB.midiSettings.settings) GMB.midiSettings.settings(body);
-    else body.appendChild(h('div.note-box', 'MIDI settings module not loaded.'));
-  }
 
   // Instrument Builder: a transient mechanical spec. The profile stores no
   // mechanical-choice field, so this is DERIVED from the servo list when the
@@ -452,8 +447,28 @@
 
   function bodyId(flowKey) { return flowKey + '-wizard-body'; }
 
-  // Render a flow's stepper + body + nav into `host`. Same UI for both flows; only
-  // the step list, the current index and the mount element differ.
+  // A live configuration health line, visible on EVERY step rather than only on
+  // the last one (UX audit 14): the user always knows whether what they are
+  // building is currently valid, and one click takes them to the details.
+  function healthBar(flowKey) {
+    var issues = GMB.validateProfile(GMB.state.profile);
+    var errors = issues.filter(function (i) { return i.level === 'error'; }).length;
+    var warns = issues.length - errors;
+    var cls = errors ? 'bad' : (warns ? 'warn' : 'good');
+    return h('button.healthbar.' + cls, {
+      type: 'button',
+      title: 'Go to the final check',
+      onclick: function () { goto(flowKey, FLOWS[flowKey].indexOf('finish')); }
+    }, [
+      h('span.hb-dot', { 'aria-hidden': 'true' }, errors ? '🔴' : (warns ? '🟡' : '🟢')),
+      h('span', errors ? (errors + ' error' + (errors > 1 ? 's' : '')) : 'No error'),
+      warns ? h('span.muted', '· ' + warns + ' recommendation' + (warns > 1 ? 's' : '')) : null,
+      h('span.spacer'),
+      h('span.muted', 'see the check →')
+    ]);
+  }
+
+  // Render a flow's stepper + body + nav into `host`.
   function renderFlow(host, flowKey) {
     if (!host) return;
     GMB.testRunner.stop();   // never leave a sequence running across a full re-render
@@ -463,22 +478,26 @@
     if (flowStep[flowKey] >= steps.length) flowStep[flowKey] = 0;
     var step = flowStep[flowKey];
     host.innerHTML = '';
+    host.appendChild(healthBar(flowKey));
     host.appendChild(h('div.card.wizard-card', [
-      h('div.stepper', steps.map(function (id, i) {
-        var d = STEP_DEFS[id];
-        return h('button.step' + (i === step ? '.active' : '') + (i < step ? '.done' : ''),
-          { onclick: function () { goto(flowKey, i); } },
-          [h('span.step-num', String(i + 1)), h('span.step-label', d.label)]);
-      })),
+      h('div.stepper', { role: 'tablist', 'aria-label': 'Configuration steps' },
+        steps.map(function (id, i) {
+          var d = STEP_DEFS[id];
+          return h('button.step' + (i === step ? '.active' : '') + (i < step ? '.done' : ''),
+            { role: 'tab', 'aria-selected': i === step ? 'true' : 'false',
+              onclick: function () { goto(flowKey, i); } },
+            [h('span.step-num', String(i + 1)), h('span.step-label', d.label)]);
+        })),
       h('div.wizard-body', { id: bodyId(flowKey) }),
       h('div.wizard-nav', [
-        GMB.button('Back', function () { goto(flowKey, step - 1); }, 'ghost'),
+        step > 0 ? GMB.button('Back', function () { goto(flowKey, step - 1); }, 'ghost') : null,
         h('span.spacer'),
         h('span.muted', 'Step ' + (step + 1) + ' / ' + steps.length),
         h('span.spacer'),
         step < steps.length - 1
-          ? GMB.button('Next', function () { goto(flowKey, step + 1); }, 'primary')
-          : GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')
+          ? GMB.button('Next: ' + STEP_DEFS[steps[step + 1]].label,
+              function () { goto(flowKey, step + 1); }, 'primary')
+          : null
       ])
     ]));
     drawStep(flowKey);
@@ -497,9 +516,14 @@
     var body = document.getElementById(bodyId(flowKey));
     if (!body) return;
     currentFlow = flowKey;
+    // Disclosures inside a step redraw the STEP, not the whole page, so opening
+    // "Advanced" never scrolls the user back to the top.
+    GMB.setRedraw(function () { drawStep(flowKey); });
     body.innerHTML = '';
     var id = FLOWS[flowKey][flowStep[flowKey]];
     STEP_DEFS[id].fn(body);
+    var bar = flowHost[flowKey] && flowHost[flowKey].querySelector('.healthbar');
+    if (bar) flowHost[flowKey].replaceChild(healthBar(flowKey), bar);
   }
 
   // ---- Step 1: Instrument Builder -------------------------------------------
@@ -547,10 +571,18 @@
     if (fretting === 'geared') { gt = 0; fingers.forEach(function (f) {
       if (f.fretB >= 1) gt = Math.max(gt, f.fret, f.fretB); }); }
     var striker = strikerFor(i);
+    var damper = !!perStringServo(i, 'damper'), lift = !!perStringServo(i, 'strumLift');
+    // How the string is STOPPED at Note Off, read back from the mechanics that
+    // are actually wired (the designer's third question).
+    var stop = 'ring';
+    if (damper) stop = 'damper';
+    else if (lift && p.pluck && p.pluck.liftMuteOnNoteOff) stop = 'lift';
+    else if (striker && (striker.muteUs | 0) > 0) stop = 'plectrum';
     return {
       fretting: fretting, gearThreshold: gt,
       sounding: striker && striker.function === 'strum' ? 'strum' : 'pluck',
-      lift: !!perStringServo(i, 'strumLift'), damper: !!perStringServo(i, 'damper')
+      alternate: !!(striker && striker.alternateDirection),
+      stop: stop, lift: lift, damper: damper
     };
   }
   function modeOf(arr, fallback) {
@@ -572,6 +604,8 @@
       fretting: modeOf(specs.map(function (s) { return s.fretting; }), 'chromatic'),
       gearThreshold: gearedGts.length ? Math.max.apply(null, gearedGts) : 6,
       sounding: modeOf(specs.map(function (s) { return s.sounding; }), 'pluck'),
+      alternate: modeOf(specs.map(function (s) { return s.alternate; }), true),
+      stop: modeOf(specs.map(function (s) { return s.stop; }), 'ring'),
       lift: specs.filter(function (s) { return s.lift; }).length * 2 >= specs.length && specs.some(function (s) { return s.lift; }),
       damper: specs.filter(function (s) { return s.damper; }).length * 2 >= specs.length && specs.some(function (s) { return s.damper; }),
       wiring: 'perString'
@@ -586,19 +620,109 @@
     });
     return { global: global, perString: per };
   }
+  // True when the strings do not all share the same value for a derived field —
+  // the designer then shows "mixed" instead of pretending one card is selected.
+  function stringsDisagree(field) {
+    var vals = GMB.state.profile.strings.map(function (_, i) { return deriveStringSpec(i)[field]; });
+    return vals.some(function (v) { return v !== vals[0]; });
+  }
   // Set the global fretting mechanism. Fretting is an instrument-wide choice (there
   // is no per-string fretting control — only per-string *sounding*), so choosing it
   // clears any per-string fretting override derived from a loaded profile, keeping
   // the global card authoritative.
+  // The mechanical spec is DERIVED from the servo list, and any entry point may
+  // be the first one to need it — the Advanced-hardware panels are reachable
+  // without ever opening the designer.
+  function ensureBuilder() {
+    var p = GMB.state.profile;
+    if (builder === null || builderRef !== p) { builder = deriveSpec(); builderRef = p; }
+    return builder;
+  }
+
   function setGlobalFretting(v) {
     builder.global.fretting = v;
-    Object.keys(builder.perString).forEach(function (i) {
-      if (builder.perString[i].fretting !== undefined) delete builder.perString[i].fretting;
-      if (!Object.keys(builder.perString[i]).length) delete builder.perString[i];
-    });
+    clearOverrides(['fretting']);
     autoGenerate();
     drawStep();
   }
+  // Drop per-string overrides for the given fields: an instrument-wide mechanical
+  // choice must be authoritative, otherwise a card looks selected while some
+  // strings quietly keep the old mechanism.
+  function clearOverrides(fields) {
+    Object.keys(builder.perString).forEach(function (i) {
+      fields.forEach(function (f) { delete builder.perString[i][f]; });
+      if (!Object.keys(builder.perString[i]).length) delete builder.perString[i];
+    });
+  }
+
+  // ---- the three designer questions ------------------------------------------
+  // "How is the string played?" — one card per mechanism, mapped onto the servo
+  // role (pluck / strum) and the stroke style (single or alternating).
+  function setGlobalMotion(motion) {
+    var g = builder.global;
+    g.sounding = motion === 'strum' ? 'strum' : 'pluck';
+    g.alternate = motion !== 'single';
+    clearOverrides(['sounding']);
+    autoGenerate();
+    applyStrokeStyle();
+    drawStep();
+  }
+  function currentMotion() {
+    var g = builder.global;
+    return g.sounding === 'strum' ? 'strum' : (g.alternate ? 'alternate' : 'single');
+  }
+  // "How is the string stopped?" — this is the only place the mute policy is
+  // chosen; the per-string calibration then just adjusts the angles.
+  function setGlobalStop(v) {
+    var g = builder.global, p = GMB.state.profile;
+    g.stop = v;
+    g.damper = (v === 'damper');
+    g.lift = (v === 'lift');
+    clearOverrides(['lift', 'damper']);
+    ensurePluckConfig(p);
+    p.pluck.muteSource = ({ ring: 'none', plectrum: 'plectrum', damper: 'damper', lift: 'lift' })[v] || 'auto';
+    p.pluck.liftMuteOnNoteOff = (v === 'lift');
+    autoGenerate();
+    applyStopPositions();
+    drawStep();
+  }
+  // Seed / clear the plectrum's own mute position so the chosen stop mechanism is
+  // immediately usable (the user only fine-tunes the angle afterwards).
+  function applyStopPositions() {
+    var p = GMB.state.profile;
+    p.strings.forEach(function (_, i) {
+      var sk = strikerFor(i);
+      if (!sk) return;
+      var wantPlectrumMute = effectiveStop(i) === 'plectrum';
+      if (wantPlectrumMute && !((sk.muteUs | 0) > 0)) sk.muteUs = sk.restUs;
+      if (!wantPlectrumMute) sk.muteUs = 0;
+    });
+    GMB.markDirty();
+  }
+  // Push the chosen stroke style onto every striker. buildStringServos only seeds
+  // NEW servos, so an existing calibrated plectrum needs this explicit pass —
+  // and an up-stroke is only ever seeded INSIDE the pulse window (the firmware
+  // refuses an implicit out-of-window mirror).
+  function applyStrokeStyle() {
+    GMB.state.profile.strings.forEach(function (_, i) {
+      var sk = strikerFor(i);
+      if (!sk) return;
+      var alt = effectiveSpec(i).alternate;
+      sk.alternateDirection = !!alt;
+      if (alt && !(sk.activeAltUs > 0)) {
+        var mirror = 2 * sk.restUs - sk.activeUs;
+        sk.activeAltUs = Math.max(sk.pulseMinUs || 500, Math.min(sk.pulseMaxUs || 2500, mirror));
+      }
+    });
+    GMB.markDirty();
+  }
+  function effectiveStop(i) {
+    var o = builder.perString[i] || {};
+    if (o.damper) return 'damper';
+    if (o.damper === false && builder.global.stop === 'damper') return 'ring';
+    return builder.global.stop;
+  }
+
   // The effective spec for string i (global merged with its overrides).
   function effectiveSpec(i) {
     var p = GMB.state.profile, g = builder.global, o = builder.perString[i] || {};
@@ -607,13 +731,15 @@
       fretting: o.fretting || g.fretting,
       gearThreshold: g.gearThreshold,
       sounding: o.sounding || g.sounding,
-      lift: o.lift !== undefined ? o.lift : g.lift,
-      damper: o.damper !== undefined ? o.damper : g.damper,
+      alternate: o.alternate !== undefined ? o.alternate : g.alternate,
+      lift: o.lift !== undefined ? o.lift : (g.lift || g.stop === 'lift'),
+      damper: o.damper !== undefined ? o.damper : (g.damper || g.stop === 'damper'),
       board: i
     };
   }
   function previewServos() {
     var p = GMB.state.profile;
+    ensureBuilder();
     return GMB.buildInstrument(effectiveSpec, p.strings, p.servos);
   }
   // Structural signature (ignores calibration µs / channel) so we can tell whether
@@ -683,7 +809,7 @@
   // calibrated instrument changes NOTHING. Only when actuators would actually
   // disappear (fewer strings / structural change) does an explicit confirm ask
   // before dropping them; cancelling restores the profile untouched.
-  function applyPreset(type) {
+  function applyPreset(type, force) {
     var p = GMB.state.profile, t = TUNINGS[type];
     var snap = {
       type: p.instrument.type, gmProgram: p.instrument.gmProgram,
@@ -692,6 +818,9 @@
       builder: builder, builderRef: builderRef
     };
     p.instrument.type = type;
+    // Starting from the welcome screen there is nothing to preserve: give the
+    // instrument the template's name rather than leaving the demo one on it.
+    if (force) p.instrument.name = cap(type);
     if (GM_PROGRAM[type]) p.instrument.gmProgram = GM_PROGRAM[type];
     if (TYPE_ID[type]) p.instrument.typeId = TYPE_ID[type];
     p.network.hostname = 'gmb-' + type;
@@ -699,7 +828,8 @@
       p.strings = t.notes.map(function (n) { return { enabled: true, openNote: n, maxFret: t.maxFret }; });
       p.instrument.stringCount = t.notes.length;
       builder = { global: { fretting: 'chromatic', gearThreshold: 6, sounding: 'pluck',
-        lift: false, damper: false, wiring: 'perString' }, perString: {} };
+        alternate: true, stop: 'ring', lift: false, damper: false, wiring: 'perString' },
+        perString: {} };
       builderRef = p;
       var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
       var before = p.servos.filter(function (s) { return s.function !== 'aux'; });
@@ -709,7 +839,7 @@
       var kept = 0;
       rebuilt.forEach(function (s) { if (before.indexOf(s) >= 0) kept++; });
       var dropped = before.length - kept;
-      if (dropped > 0 &&
+      if (dropped > 0 && !force &&
           !confirm('Switching to the ' + cap(type) + ' preset removes ' + dropped +
                    ' calibrated actuator(s) whose string/position no longer exists.' +
                    '\n\nContinue?')) {
@@ -967,14 +1097,35 @@
     return h('div.capacity-meter', rows.concat(warn.map(function (w) { return h('div.pill.warn', w); })));
   }
 
+  // ---- what the chosen mechanics will produce (the designer's live answer) ----
+  // The user describes the machine; this tells them, in their own vocabulary,
+  // what the software just generated for them.
+  function mechanicsSummary() {
+    var p = GMB.state.profile;
+    var preview = previewServos();
+    var count = function (fn) { return preview.filter(function (s) { return s.function === fn; }).length; };
+    var boards = {};
+    preview.forEach(function (s) { if (s.source === 'pca') boards[(s.i2cBus === 1 ? 1 : 0) + ':' + s.pcaBoard] = 1; });
+    var nBoards = Object.keys(boards).length;
+    var items = [
+      [p.strings.length, p.strings.length > 1 ? 'strings' : 'string'],
+      [count('finger'), count('finger') === 1 ? 'finger servo' : 'finger servos'],
+      [count('pluck') + count('strum'), 'plectrum' + (count('pluck') + count('strum') === 1 ? '' : 's')]
+    ];
+    if (count('strumLift')) items.push([count('strumLift'), 'descent servo' + (count('strumLift') === 1 ? '' : 's')]);
+    if (count('damper')) items.push([count('damper'), 'damper' + (count('damper') === 1 ? '' : 's')]);
+    items.push([nBoards, 'PCA9685 board' + (nBoards === 1 ? '' : 's') + ' needed']);
+    return h('div.mech-summary', items.map(function (it) {
+      return h('div.ms-item', [h('strong', String(it[0])), h('span', it[1])]);
+    }));
+  }
+
   function stepBuilder(body) {
     var p = GMB.state.profile;
-    if (builder === null || builderRef !== p) { builder = deriveSpec(); builderRef = p; }
+    var g = ensureBuilder().global;
     var strings = p.strings;
 
-    // Instrument identity + presets. A preset produces a working instrument and the
-    // wiring is (re)generated automatically — the mechanics live per-servo on the
-    // Frets / Plucking steps.
+    // ---- 1. identity: a starting point and a name ---------------------------
     var TYPES = ['ukulele', 'guitar', 'bass', 'mandolin', 'banjo'];
     var presets = TYPES.map(function (t) {
       return h('button.preset-card' + (p.instrument.type === t ? '.selected' : ''),
@@ -990,10 +1141,10 @@
       h('div.grid2', [GMB.field('Instrument name', GMB.input(p.instrument, 'name'))])
     ]));
 
-    // Strings & tuning. Changing the string count or a max fret re-generates the
-    // wiring DIFFERENTIALLY: servos that still exist mechanically keep their full
-    // calibration + wiring; only new positions get defaults (audit 5 P0). The
-    // explicit reset below is the ONLY destructive path.
+    // ---- 2. strings & tuning -------------------------------------------------
+    // Changing the string count or a max fret re-generates the wiring
+    // DIFFERENTIALLY: servos that still exist mechanically keep their full
+    // calibration + wiring; only new positions get defaults.
     body.appendChild(builderSection('Strings & tuning', [
       h('div.row', [
         GMB.field('Number of strings', GMB.input(p.instrument, 'stringCount',
@@ -1002,34 +1153,125 @@
       ]),
       h('div.string-rows', strings.map(function (s, i) { return stringRow(s, i); })),
       h('p.muted', 'Structure changes keep every existing servo’s calibration and ' +
-        'wiring; only newly added positions start from defaults.'),
-      h('div.toolbar', [GMB.button('Reset wiring & calibration to defaults', function () {
-        if (!confirm('Rebuild ALL servos from the chosen mechanics?\n\nEvery ' +
-                     'calibrated angle, direction, timing and PCA/GPIO assignment ' +
-                     'will be replaced by factory defaults.')) return;
-        var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
-        p.servos = GMB.buildInstrument(effectiveSpec, p.strings, []).concat(aux);
-        ensureBusPins();
-        syncSelection();
-        GMB.markDirty();
-        drawStep();
-        GMB.toast('Wiring and calibration reset to defaults.', 'warn');
-      }, 'ghost')])
+        'wiring; only newly added positions start from defaults.')
     ]));
 
-    // Board — which ESP32 everything wires to.
-    var boardOpts = (GMB.boardList ? GMB.boardList() : []).map(function (b) {
-      return { value: b.id, label: b.name };
-    });
-    body.appendChild(builderSection('Board', [
-      h('div.grid2', [
-        GMB.field('ESP32 board', GMB.input(p.board, 'profile', {
-          type: 'select', options: boardOpts,
-          onChange: function () { GMB.markDirty(); drawStep(); } }),
-          'the pinout everything wires to — the full map is on the Wiring & GPIO page'),
-        GMB.field('Reserve native USB (GPIO19/20)', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' }))
-      ]),
-      h('p.muted', 'Wi-Fi / hostname live in the gear menu (⚙ Network) — they belong to the device, not the instrument.')
+    // ---- 3. the mechanics: the three questions only the builder can answer ---
+    var maxF = Math.max.apply(null, strings.map(function (s) { return s.maxFret; }).concat([0]));
+    var nFret = function (kind) { return fingerCountForFretting(kind, g.gearThreshold, strings); };
+    var frettingCards = [
+      radioCard(g.fretting === 'chromatic', 'One servo per fret',
+        'Every fret of every string gets its own finger. The most direct build, and ' +
+        'the one that plays anything.', nFret('chromatic') + ' servos',
+        function () { setGlobalFretting('chromatic'); }),
+      radioCard(g.fretting === 'geared', 'One servo for two frets',
+        'A geared finger presses one of two neighbouring frets depending on which ' +
+        'way it turns. Halves the servo count on the low frets.',
+        nFret('geared') + ' servos', function () { setGlobalFretting('geared'); }),
+      radioCard(g.fretting === 'open', 'Open strings only',
+        'No fingers at all — each string only plays its open note.', '0 servos',
+        function () { setGlobalFretting('open'); }),
+      radioCard(g.fretting === 'custom', 'Custom',
+        'Keep the fret wiring exactly as it is; nothing is regenerated. Pick this ' +
+        'when you laid the fingers out by hand.', null,
+        function () { setGlobalFretting('custom'); })
+    ];
+    var frettingKids = [h('div.radio-row', frettingCards)];
+    if (g.fretting === 'geared') {
+      frettingKids.push(h('div.row', [
+        GMB.field('Pair the frets up to', GMB.input(g, 'gearThreshold', {
+          type: 'number', min: 2, max: Math.max(2, maxF),
+          onChange: function () { autoGenerate(); drawStep(); } }),
+          'frets above this stay on their own servo')
+      ]));
+    }
+    if (stringsDisagree('fretting'))
+      frettingKids.push(h('div.pill.warn', 'Your strings currently use different fret mechanisms — ' +
+        'picking one above applies it to all of them.'));
+    body.appendChild(builderSection('How are the frets actuated?', frettingKids,
+      'the servos are generated from this answer'));
+
+    var motion = currentMotion();
+    var soundKids = [h('div.radio-row', [
+      radioCard(motion === 'single', 'Single pick',
+        'One plectrum per string, striking in one direction and coming back to rest.',
+        null, function () { setGlobalMotion('single'); }),
+      radioCard(motion === 'alternate', 'Back-and-forth pick',
+        'The plectrum strikes down, then up on the next note — faster repeats, no ' +
+        'return travel between them.', 'recommended',
+        function () { setGlobalMotion('alternate'); }),
+      radioCard(motion === 'strum', 'Strum, up and down',
+        'A strumming arm sweeping across the string in both directions, with an ' +
+        'optional descent servo to lift it clear.', null,
+        function () { setGlobalMotion('strum'); })
+    ])];
+    if (stringsDisagree('sounding') || stringsDisagree('alternate'))
+      soundKids.push(h('div.pill.warn', 'Your strings currently play differently from one another — ' +
+        'picking one above applies it to all of them.'));
+    body.appendChild(builderSection('How is the string played?', soundKids));
+
+    var stopKids = [h('div.radio-row', [
+      radioCard(g.stop === 'ring', 'Let it ring',
+        'Nothing stops the string; it decays on its own. Nothing extra to build.',
+        null, function () { setGlobalStop('ring'); }),
+      radioCard(g.stop === 'plectrum', 'The plectrum itself',
+        'At Note Off the plectrum leans back onto the string and damps it. No extra ' +
+        'servo needed.', null, function () { setGlobalStop('plectrum'); }),
+      radioCard(g.stop === 'damper', 'A damper',
+        'A dedicated felt/foam servo per string presses the string to stop it.',
+        '+' + strings.length + ' servos', function () { setGlobalStop('damper'); }),
+      radioCard(g.stop === 'lift', 'A descent servo',
+        'The servo that lowers the plectrum stays leaning on the string to mute it.',
+        '+' + strings.length + ' servos', function () { setGlobalStop('lift'); })
+    ])];
+    if (stringsDisagree('stop'))
+      stopKids.push(h('div.pill.warn', 'Your strings currently stop differently from one another — ' +
+        'picking one above applies it to all of them.'));
+    body.appendChild(builderSection('How is the string stopped?', stopKids));
+
+    // ---- 4. what the software decided for you --------------------------------
+    var boardName = ((GMB.boardList ? GMB.boardList() : [])
+      .filter(function (b) { return b.id === (p.board && p.board.profile); })[0] || {}).name ||
+      (p.board && p.board.profile) || 'unknown';
+    body.appendChild(builderSection('Your instrument', [
+      mechanicsSummary(),
+      GMB.summaryLine('Controller', boardName, 'Change',
+        function () { GMB.openSettings && GMB.openSettings('hardware'); }),
+      GMB.summaryLine('Wiring', 'generated automatically', 'View',
+        function () { GMB.navigate('hardware'); }),
+      GMB.summaryLine('MIDI', 'automatic', 'Configure MIDI…',
+        function () { GMB.openSettings && GMB.openSettings('midi'); }),
+      GMB.summaryLine('Timing & power', 'recommended values', 'Adjust…',
+        function () { GMB.openSettings && GMB.openSettings('hardware'); }),
+      GMB.disclosure('builder-advanced', 'Advanced options', function () {
+        return [
+          h('p.muted', 'Everything here has a working default. You only need it when ' +
+            'the hardware does not match the recommended build.'),
+          h('div.toolbar', [
+            GMB.button('Advanced hardware (board, GPIO, I²C, power)…', function () {
+              GMB.openSettings && GMB.openSettings('hardware');
+            }, 'ghost')
+          ]),
+          h('div.danger-zone', [
+            h('h4', 'Danger zone'),
+            h('p.muted', 'Rebuilds every servo from the chosen mechanics: all calibrated ' +
+              'angles, directions, timings and PCA/GPIO assignments go back to factory ' +
+              'defaults. There is no undo.'),
+            GMB.button('Reset wiring & calibration to defaults', function () {
+              if (!confirm('Rebuild ALL servos from the chosen mechanics?\n\nEvery ' +
+                           'calibrated angle, direction, timing and PCA/GPIO assignment ' +
+                           'will be replaced by factory defaults.')) return;
+              var aux = p.servos.filter(function (s) { return s.function === 'aux'; });
+              p.servos = GMB.buildInstrument(effectiveSpec, p.strings, []).concat(aux);
+              ensureBusPins();
+              syncSelection();
+              GMB.markDirty();
+              drawStep();
+              GMB.toast('Wiring and calibration reset to defaults.', 'warn');
+            }, 'danger')
+          ])
+        ];
+      })
     ]));
   }
 
@@ -1082,7 +1324,8 @@
       if (used[cap.gpio]) return;
       if (cap.reserved || cap.preference === 'reserved') return;
       if (cap.usb && reserveUsb) return;
-      if (cap.preference === 'caution' && !GMB.isAdvanced()) return;
+      // Caution pins are offered (the user explicitly opened the manual wiring
+      // editor) but stay labelled as such below.
       if (!GMB.pinSupports(cap, 'servo')) return;
       seen[cap.gpio] = true;
       sel.appendChild(h('option', { value: cap.gpio, selected: cap.gpio === sv.gpio },
@@ -1161,12 +1404,48 @@
     return label ? GMB.field(label, row, hint) : row;
   }
 
-  // Per-servo wiring block: the full source editor (PCA9685 board + I²C bus +
-  // channel, OR a direct ESP32 GPIO). NEVER mutates the servo's source — the old
-  // pcaPinRow silently converted a direct-GPIO servo to PCA just by OPENING its
-  // editor (audit 4 P1.1); mixing PCA and direct GPIO is a supported feature.
+  // Where a servo is plugged in, in one line: "PCA #2 · CH7" or "GPIO18".
+  function wiringText(sv) {
+    if (sv.source === 'gpio') return sv.gpio >= 0 ? ('GPIO' + sv.gpio) : 'no GPIO assigned';
+    var bus = anyBus1() ? ('bus ' + (sv.i2cBus === 1 ? 1 : 0) + ' · ') : '';
+    return bus + 'PCA #' + (sv.pcaBoard | 0) + ' · CH' + (sv.channel | 0);
+  }
+  // Per-servo wiring: a one-line SUMMARY of what the software already assigned,
+  // and the full editor only when the user asks for it (UX audit 3). Board, bus
+  // and channel are decisions the generator makes; a calibration screen should
+  // not open with them (they used to be the first thing on every fret).
+  //
+  // NEVER mutates the servo's source — the old pcaPinRow silently converted a
+  // direct-GPIO servo to PCA just by OPENING its editor (audit 4 P1.1); mixing
+  // PCA and direct GPIO is a supported feature.
+  var wiringKeys = [];              // stable disclosure keys, one per servo object
+  function wiringKey(sv) {
+    var i = wiringKeys.indexOf(sv);
+    if (i < 0) { i = wiringKeys.length; wiringKeys.push(sv); }
+    return 'wiring:' + i;
+  }
   function wiringRow(sv) {
-    return h('div.grid2', servoSourceEditor(sv));
+    var ok = sv.source === 'gpio' ? sv.gpio >= 0 : (sv.channel >= 0 && sv.channel <= 15);
+    var key = wiringKey(sv);
+    var open = GMB.isDisclosed(key);
+    return h('div.wiring-block', [
+      GMB.summaryLine('Wiring', wiringText(sv), open ? 'Done' : 'Change…',
+        function () { GMB.setDisclosed(key, !open); drawStep(); }, ok),
+      open ? h('div.disclosure-body', h('div.grid2', servoSourceEditor(sv))) : null
+    ]);
+  }
+
+  // "The servo turns the wrong way? [Invert]" — a verb the builder understands,
+  // instead of a checkbox called "Reverse rotation direction" (UX audit 3).
+  function invertRow(sv, what) {
+    return h('div.invert-row', [
+      h('span.muted', 'The ' + (what || 'servo') + ' moves the wrong way?'),
+      GMB.button(sv.inverted ? 'Inverted ✓ — undo' : 'Invert', function () {
+        sv.inverted = !sv.inverted;
+        GMB.markDirty();
+        drawStep();
+      }, sv.inverted ? 'ghost' : 'ghost')
+    ]);
   }
 
   function testServoBtn(label, sv, active) {
@@ -1285,43 +1564,74 @@
     ]);
     if (!open) return line;
 
-    // The servo div — everything for this fret's servo in one place: whether it gears
-    // two frets, its PCA board + pin, the angle(s) + rotation direction, and a live
-    // test. A geared servo shows BOTH press angles; its rest sits at their midpoint
-    // automatically (both fingers lifted).
+    // Calibrating ONE fret: the two positions the builder has to find with their
+    // own eyes (rest and press), a live test, and a jump to the next fret. The
+    // wiring is a one-line summary and the gearing / fine timing sit behind
+    // "Advanced" — a fret editor used to open on PCA board, I²C bus and channel
+    // before showing a single angle (UX audit 3).
     var hasAdjacent = (fret + 1 <= p.strings[strIdx].maxFret) || (fret - 1 >= 1 && !fingerFor(strIdx, fret - 1));
-    var gearToggle = h('input', { type: 'checkbox', checked: geared, disabled: !geared && !hasAdjacent });
-    gearToggle.addEventListener('change', function () { setGeared(sv, gearToggle.checked, strIdx); drawStep(); });
-
     var syncRest = function () { sv.restUs = Math.round((sv.activeUs + sv.activeBUs) / 2); };
     var angles = geared ? [
-      angleStepper(sv, 'activeUs', 'Angle · fret ' + sv.fret, 'press fret ' + sv.fret, syncRest),
-      angleStepper(sv, 'activeBUs', 'Angle · fret ' + sv.fretB, 'press fret ' + sv.fretB, syncRest)
+      angleStepper(sv, 'activeUs', 'Press · fret ' + sv.fret, 'presses fret ' + sv.fret, syncRest),
+      angleStepper(sv, 'activeBUs', 'Press · fret ' + sv.fretB, 'presses fret ' + sv.fretB, syncRest)
     ] : [
-      angleStepper(sv, 'activeUs', 'Contact angle', 'finger pressing the fret'),
-      angleStepper(sv, 'restUs', 'Rest angle', 'finger lifted off the string')
+      angleStepper(sv, 'restUs', 'Rest position', 'finger lifted off the string'),
+      angleStepper(sv, 'activeUs', 'Press position', 'finger pressing the fret')
     ];
 
-    var detail = [
-      h('label.inline.builder-opt', [gearToggle,
-        h('span', 'One servo drives 2 frets (geared)' + (!geared && !hasAdjacent ? ' — no free adjacent fret' : ''))]),
-      wiringRow(sv),
-      h('div.grid2', angles),
-      GMB.field('Reverse rotation direction', GMB.input(sv, 'inverted', { type: 'checkbox' }),
-        'flip the servo direction if the finger moves the wrong way')
-    ];
+    var detail = [h('div.grid2', angles)];
     detail.push(geared
       ? h('div.row', [
-          testPulseBtn('→ fret ' + sv.fret, sv, 'activeUs', 'Servo → fret ' + sv.fret),
-          testPulseBtn('→ fret ' + sv.fretB, sv, 'activeBUs', 'Servo → fret ' + sv.fretB),
+          testPulseBtn('Test fret ' + sv.fret, sv, 'activeUs', 'Servo → fret ' + sv.fret),
+          testPulseBtn('Test fret ' + sv.fretB, sv, 'activeBUs', 'Servo → fret ' + sv.fretB),
           testPulseBtn('→ rest', sv, 'restUs', 'Servo → rest (midpoint)'),
           playNoteBtn(strIdx, sv.fret, '▶ Play ' + sv.fret),
-          playNoteBtn(strIdx, sv.fretB, '▶ Play ' + sv.fretB)])
+          playNoteBtn(strIdx, sv.fretB, '▶ Play ' + sv.fretB),
+          nextFretBtn(strIdx, fret)])
       : h('div.row', [
           testServoBtn('→ rest', sv, false),
-          testServoBtn('→ contact', sv, true),
-          playNoteBtn(strIdx, fret)]));
+          testServoBtn('Test', sv, true),
+          playNoteBtn(strIdx, fret),
+          nextFretBtn(strIdx, fret)]));
+    detail.push(invertRow(sv, 'finger'));
+    detail.push(wiringRow(sv));
+    detail.push(GMB.disclosure('fret-adv:' + strIdx + ':' + fret, 'Advanced', function () {
+      var gearToggle = h('input', { type: 'checkbox', checked: geared, disabled: !geared && !hasAdjacent });
+      gearToggle.addEventListener('change', function () { setGeared(sv, gearToggle.checked, strIdx); drawStep(); });
+      return [
+        h('label.inline.builder-opt', [gearToggle,
+          h('span', 'This servo drives 2 frets (geared)' +
+            (!geared && !hasAdjacent ? ' — no free adjacent fret' : ''))]),
+        h('div.grid2', [
+          GMB.field('Travel (ms)', GMB.input(sv, 'travelMs', { type: 'number', min: 0, max: 5000 }),
+            'time to move between rest and press'),
+          GMB.field('Settle (ms)', GMB.input(sv, 'settleMs', { type: 'number', min: 0, max: 5000 }),
+            'pause once the finger has arrived')
+        ]),
+        h('div.row', [GMB.button('Remove this finger servo', function () {
+          if (!confirm('Remove the finger servo on fret ' + fret + '? The fret becomes unplayable.')) return;
+          removeServo(sv); drawStep();
+        }, 'danger-ghost')])
+      ];
+    }));
     return h('div.fret-line-wrap', [line, h('div.fret-detail', detail)]);
+  }
+
+  // "Next →": close this fret, open the next equipped one on the same string, so
+  // calibration is a walk rather than a hunt.
+  function nextFretBtn(strIdx, fret) {
+    var s = GMB.state.profile.strings[strIdx];
+    var next = -1;
+    for (var f = fret + 1; f <= s.maxFret; f++) {
+      var sv = fingerFor(strIdx, f);
+      if (sv && (!isGeared(sv) || sv.fret === f)) { next = f; break; }
+    }
+    if (next < 0) return null;
+    return GMB.button('Next fret →', function () {
+      expandedFrets[strIdx + ':' + fret] = false;
+      expandedFrets[strIdx + ':' + next] = true;
+      drawStep();
+    }, 'primary');
   }
 
   // Equip a plain finger on every not-yet-equipped fret of a string (leaves the
@@ -1336,18 +1646,11 @@
     var p = GMB.state.profile;
     var s = p.strings[activeStr];
     body.appendChild(h('div.note-box',
-      'Frets — set up each finger servo. Tap a fret to open its servo: choose whether ' +
-      'one servo drives two frets (geared), its PCA board + pin, the angle(s) and the ' +
-      'rotation direction. Use the − / + buttons to move the servo to the exact target ' +
-      'angle, then play the note to check it.'));
+      'One string at a time: tap a fret, then find its two positions with the − / + ' +
+      'buttons — the finger lifted off the string, and the finger pressing it. Play ' +
+      'the note to check, then move on to the next fret.'));
 
     body.appendChild(armToolbar());
-    body.appendChild(testBench('Fret test bench', [
-      { label: 'Sweep this string', build: function () { return fretSweepSteps(activeStr); } },
-      { label: 'Sweep all strings', build: allFretsSteps },
-      { label: 'All fingers to rest', build: function () { return allRestSteps(activeStr); } }
-    ]));
-
     body.appendChild(stringTabs());
 
     // An open-only string has no fret servos yet — offer a one-tap equip.
@@ -1367,9 +1670,17 @@
       s.maxFret > 0 ? h('div.fret-lines', lines)
         : h('p.muted', 'Max fret is 0 — this string plays open only (no frets).')
     ]));
+
+    body.appendChild(GMB.disclosure('frets-bench', 'Group tests…', function () {
+      return testBench('Fret test bench', [
+        { label: 'Sweep this string', build: function () { return fretSweepSteps(activeStr); } },
+        { label: 'Sweep all strings', build: allFretsSteps },
+        { label: 'All fingers to rest', build: function () { return allRestSteps(activeStr); } }
+      ]);
+    }));
   }
 
-  // ---- Step: Plucking — plucker + strum lift + damper + aux calibration ------
+  // ---- shared plucking configuration ----------------------------------------
 
   // Ensure a loaded/older profile carries the global plucking block and the timing
   // fields the plucking card edits (older exports predate them).
@@ -1394,332 +1705,644 @@
     // recalibrates it in strikerAngles(), which writes rest/active/activeAlt together.
   }
 
-  function stepPluck(body) {
+  // ---- Step: Strings — the plectrum, and only the extras that exist ---------
+  //
+  // Progressive disclosure applied to what used to be the densest screen of the
+  // interface (UX audit 4): it opened with the wiring, then twenty-three fields
+  // covering strokes, travel, settle, mute source, mute hold, descent servo,
+  // engagement mode and damper — whether or not the instrument had any of those
+  // mechanisms. Now it shows the two plectrum positions, the movement type, and
+  // one "+ Add…" button per optional actuator. A mechanism that is not fitted
+  // takes exactly one line.
+
+  function stepStrings(body) {
     var p = GMB.state.profile;
     ensurePluckConfig(p);
+    ensureBuilder();
     body.appendChild(h('div.note-box',
-      'Plucking — one sounding servo per string. Calibrate the contact angle ' +
-      '(plectrum against the string) and each stroke end; alternation and rotation ' +
-      'direction are per-plectrum choices, never forced. Every position has its own ' +
-      'live test button. Optional per-string extras: a descent servo (lowers the ' +
-      'plectrum only while playing) and a damper.'));
+      'One string at a time: find the plectrum’s resting position against the ' +
+      'string and the end of its stroke, then listen. Add a damper or a descent ' +
+      'servo only if your instrument has one.'));
 
     body.appendChild(armToolbar());
-    body.appendChild(testBench('Plucking test bench', [
-      { label: 'Pluck each open string', build: pluckStringsSteps },
-      { label: 'Sweep strum servos', build: pluckServoSweepSteps }
-    ]));
-
-    // Global gesture (common to every string) — the firmware overlays these onto
-    // each striker at activation; 0 keeps the per-servo value.
-    body.appendChild(h('div.card.inset', [
-      h('h3', 'Gesture (all strings)'),
-      h('div.grid2', [
-        GMB.field('Stroke duration (ms)', GMB.input(p.pluck, 'strokeMs',
-          { type: 'number', min: 0, max: 2000 }),
-          'how long the plectrum stays at the stroke end before returning — 0 = each servo’s travel time'),
-        GMB.field('Minimum strike depth (%)', GMB.input(p.pluck, 'minStrikePct',
-          { type: 'number', min: 0, max: 100 }),
-          'soft (low-velocity) notes still sweep at least this share of the stroke — 0 = off')
-      ])
-    ]));
-
     body.appendChild(stringTabs());
     ensureStriker(activeStr);
     var striker = strikerFor(activeStr);
+    var sN = ' · string ' + (activeStr + 1);
 
-    // ---- Plectrum card ------------------------------------------------------
-    var altToggle = h('input', { type: 'checkbox', checked: !!striker.alternateDirection });
-    altToggle.addEventListener('change', function () {
-      striker.alternateDirection = altToggle.checked;
-      if (altToggle.checked && !(striker.activeAltUs > 0)) {
-        // Seed an EXPLICIT up-stroke: the down-stroke mirrored about contact,
-        // clamped into the pulse window (the firmware refuses an implicit
-        // out-of-window mirror rather than sweeping to an extremity).
-        var mirror = 2 * striker.restUs - striker.activeUs;
-        var lo = striker.pulseMinUs || 500, hi = striker.pulseMaxUs || 2500;
-        striker.activeAltUs = Math.max(lo, Math.min(hi, mirror));
-      }
-      GMB.markDirty();
-      drawStep();
-    });
-    var plectrumKids = [
-      wiringRow(striker),
-      h('div.grid2', [
-        angleStepper(striker, 'restUs', 'Contact angle', 'plectrum resting against the string'),
-        angleStepper(striker, 'activeUs', 'Down-stroke angle', 'stroke end on one side of contact')
-      ])
+    // ---- Plectrum ------------------------------------------------------------
+    var plectrumAngles = [
+      angleStepper(striker, 'restUs', 'Rest position', 'plectrum resting against the string'),
+      angleStepper(striker, 'activeUs', 'End of stroke', 'how far it sweeps past the string')
     ];
     if (striker.alternateDirection) {
-      plectrumKids.push(h('div.grid2', [
-        angleStepper(striker, 'activeAltUs', 'Up-stroke angle',
-          'stroke end on the other side — strokes alternate down/up')
-      ]));
+      plectrumAngles.push(angleStepper(striker, 'activeAltUs', 'End of the return stroke',
+        'the other side of rest — strokes alternate'));
     }
-    plectrumKids.push(h('label.inline.builder-opt', [altToggle,
-      h('span', 'Alternate stroke direction (down/up on successive notes)')]));
-    plectrumKids.push(GMB.field('Reverse rotation direction',
-      GMB.input(striker, 'inverted', { type: 'checkbox' }),
-      'mirror the output within the pulse window (mounting on the other side)'));
-    plectrumKids.push(h('div.grid2', [
-      GMB.field('Travel (ms)', GMB.input(striker, 'travelMs',
-        { type: 'number', min: 0, max: 5000 }), 'time to sweep between two positions'),
-      GMB.field('Settle (ms)', GMB.input(striker, 'settleMs',
-        { type: 'number', min: 0, max: 5000 }), 'pause after a move before the next action')
-    ]));
+    var plectrumKids = [h('div.grid2', plectrumAngles)];
     var plectrumTests = [
-      testServoBtn('→ contact', striker, false),
-      testPulseBtn('→ down-stroke', striker, 'activeUs', 'Servo → down-stroke')
+      testPulseBtn('Test stroke', striker, 'activeUs', 'Servo → stroke end'),
+      striker.alternateDirection
+        ? testPulseBtn('Test return stroke', striker, 'activeAltUs', 'Servo → return stroke') : null,
+      testServoBtn('→ rest', striker, false),
+      playNoteBtn(activeStr, 0, '▶ Play the open string')
     ];
-    if (striker.alternateDirection)
-      plectrumTests.push(testPulseBtn('→ up-stroke', striker, 'activeAltUs', 'Servo → up-stroke'));
-    plectrumTests.push(playNoteBtn(activeStr, 0, '▶ Pluck open'));
     plectrumKids.push(h('div.row', plectrumTests));
+
+    // Movement type — the per-string form of the designer's "how is the string
+    // played?" question, so a single string can differ from the rest.
+    var motionBtn = function (label, alt, strum) {
+      var on = !!striker.alternateDirection === alt && (striker.function === 'strum') === strum;
+      return h('button.chip-radio' + (on ? '.selected' : ''), {
+        type: 'button', 'aria-pressed': on ? 'true' : 'false',
+        onclick: function () {
+          striker.function = strum ? 'strum' : 'pluck';
+          striker.alternateDirection = alt;
+          if (alt && !(striker.activeAltUs > 0)) {
+            var mirror = 2 * striker.restUs - striker.activeUs;
+            striker.activeAltUs = Math.max(striker.pulseMinUs || 500,
+              Math.min(striker.pulseMaxUs || 2500, mirror));
+          }
+          GMB.markDirty();
+          drawStep();
+        }
+      }, label);
+    };
+    plectrumKids.push(h('div.field', [
+      h('span.field-label', 'Movement'),
+      h('div.chip-radios', [
+        motionBtn('Single stroke', false, false),
+        motionBtn('Back and forth', true, false),
+        motionBtn('Strum', true, true)
+      ])
+    ]));
+    plectrumKids.push(invertRow(striker, 'plectrum'));
+    plectrumKids.push(wiringRow(striker));
+    plectrumKids.push(GMB.disclosure('pluck-motion:' + activeStr, 'Movement settings', function () {
+      return [
+        h('p.muted', 'Recommended values already work. Change them only if the ' +
+          'plectrum is too slow, too violent, or misses soft notes.'),
+        h('div.grid2', [
+          GMB.field('Travel (ms)', GMB.input(striker, 'travelMs', { type: 'number', min: 0, max: 5000 }),
+            'time to sweep between two positions'),
+          GMB.field('Settle (ms)', GMB.input(striker, 'settleMs', { type: 'number', min: 0, max: 5000 }),
+            'pause after a move before the next action')
+        ]),
+        h('div.grid2', [
+          GMB.field('Stroke duration (ms) — all strings', GMB.input(p.pluck, 'strokeMs',
+            { type: 'number', min: 0, max: 2000 }),
+            'time held at the stroke end before returning — 0 = each servo’s travel time'),
+          GMB.field('Minimum strike depth (%) — all strings', GMB.input(p.pluck, 'minStrikePct',
+            { type: 'number', min: 0, max: 100 }),
+            'soft notes still sweep at least this share of the stroke — 0 = off')
+        ])
+      ];
+    }));
     body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Plectrum · string ' + (activeStr + 1)),
-        h('span.muted', striker.alternateDirection ? 'alternating down/up strokes'
-                                                   : 'single-direction stroke')]),
+      h('div.card-head', [h('h3', 'Plectrum' + sN),
+        h('span.muted', GMB.noteName(p.strings[activeStr].openNote))]),
       plectrumKids
     ]));
 
-    // ---- Mute card (global policy + this plectrum's mute position) ----------
-    var hasMutePos = (striker.muteUs | 0) > 0;
-    var muteToggle = h('input', { type: 'checkbox', checked: hasMutePos });
-    muteToggle.addEventListener('change', function () {
-      striker.muteUs = muteToggle.checked ? striker.restUs : 0;  // seed at contact
-      GMB.markDirty();
-      drawStep();
-    });
-    var muteKids = [
-      h('div.grid2', [
-        GMB.field('Mute at Note Off', GMB.input(p.pluck, 'muteSource', {
-          type: 'select',
-          options: [
-            { value: 'auto', label: 'Auto (damper if present)' },
-            { value: 'plectrum', label: 'Plectrum against the string' },
-            { value: 'damper', label: 'Damper servo' },
-            { value: 'lift', label: 'Descent servo leaning on the string' },
-            { value: 'none', label: 'None (let it ring)' }
-          ],
-          onChange: drawStep
-        }), 'who damps the string when the note is released'),
+    // ---- Optional actuators: one line each until they exist ------------------
+    var lift = perStringServo(activeStr, 'strumLift');
+    var damper = perStringServo(activeStr, 'damper');
+    var optKids = [];
+
+    if (!damper && !lift) {
+      optKids.push(h('p.muted', 'Nothing else is fitted on this string. Add an ' +
+        'actuator here if your build has one.'));
+    }
+
+    // Damper.
+    if (damper) {
+      optKids.push(h('div.opt-actuator', [
+        h('div.card-head', [h('h4', 'Damper'), h('span.spacer'),
+          GMB.button('Remove', function () {
+            if (!confirm('Remove the damper on string ' + (activeStr + 1) + '?')) return;
+            removeServo(damper); drawStep();
+          }, 'danger-ghost')]),
+        h('div.grid2', [
+          angleStepper(damper, 'restUs', 'Rest position', 'damper clear of the string'),
+          angleStepper(damper, 'activeUs', 'Damping position', 'damper pressed on the string')
+        ]),
+        h('div.row', [testServoBtn('→ rest', damper, false), testServoBtn('Test', damper, true)]),
+        invertRow(damper, 'damper'),
+        wiringRow(damper),
+        GMB.disclosure('damper-adv:' + activeStr, 'Movement settings', function () {
+          return h('div.grid2', [
+            GMB.field('Travel (ms)', GMB.input(damper, 'travelMs', { type: 'number', min: 0, max: 5000 }),
+              'time to reach the string')
+          ]);
+        })
+      ]));
+    } else {
+      optKids.push(h('div.row', [GMB.button('+ Add a damper', function () {
+        addRoleServo('damper', activeStr);
+        if (p.pluck.muteSource === 'none' || p.pluck.muteSource === 'auto') p.pluck.muteSource = 'damper';
+        drawStep();
+      }, 'ghost')]));
+    }
+
+    // Descent servo.
+    if (lift) {
+      var raise = p.pluck.liftEngage === 'raiseToPlay';
+      optKids.push(h('div.opt-actuator', [
+        h('div.card-head', [h('h4', 'Descent servo'), h('span.spacer'),
+          GMB.button('Remove', function () {
+            if (!confirm('Remove the descent servo on string ' + (activeStr + 1) + '?')) return;
+            removeServo(lift); drawStep();
+          }, 'danger-ghost')]),
+        h('div.grid2', [
+          angleStepper(lift, 'restUs', 'Rest position',
+            raise ? 'plectrum ON the string (mutes at rest)' : 'plectrum clear of the string'),
+          angleStepper(lift, 'activeUs', 'Playing position',
+            raise ? 'plectrum raised to let the string ring' : 'plectrum lowered onto the string')
+        ]),
+        h('div.row', [testServoBtn('→ rest', lift, false), testServoBtn('Test', lift, true)]),
+        invertRow(lift, 'descent servo'),
+        wiringRow(lift),
+        GMB.disclosure('lift-adv:' + activeStr, 'Movement settings', function () {
+          return [
+            h('div.grid2', [
+              GMB.field('Travel (ms)', GMB.input(lift, 'travelMs', { type: 'number', min: 0, max: 5000 }),
+                'time to lower/raise the plectrum'),
+              GMB.field('Engage delay (ms)', GMB.input(lift, 'engageDelayMs',
+                { type: 'number', min: 0, max: 5000 }), 'extra pause once lowered before the stroke')
+            ]),
+            GMB.field('Which end plays — all strings', GMB.input(p.pluck, 'liftEngage', {
+              type: 'select',
+              options: [
+                { value: 'lowerToPlay', label: 'Lower to play (rests clear of the string)' },
+                { value: 'raiseToPlay', label: 'Raise to play (rests ON the string, muting)' }
+              ],
+              onChange: drawStep
+            }))
+          ];
+        })
+      ]));
+    } else {
+      optKids.push(h('div.row', [GMB.button('+ Add a descent servo', function () {
+        addRoleServo('strumLift', activeStr); drawStep();
+      }, 'ghost')]));
+    }
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Extras' + sN), h('span.muted', 'optional actuators')]),
+      optKids
+    ]));
+
+    // ---- How the note stops --------------------------------------------------
+    // Chosen once in the designer; here it is a statement of fact, plus the one
+    // angle the mechanism needs and the escape hatch to change the policy.
+    var stopLabel = {
+      none: 'it rings until it decays', plectrum: 'the plectrum leans back on the string',
+      damper: 'the damper presses the string', lift: 'the descent servo leans on the string',
+      auto: 'automatic (damper if one is fitted)'
+    }[p.pluck.muteSource] || String(p.pluck.muteSource);
+    var stopKids = [GMB.summaryLine('At Note Off', stopLabel, 'Change…', function () {
+      goto('setup', FLOWS.setup.indexOf('builder'));
+    })];
+    if (p.pluck.muteSource === 'plectrum' || (p.pluck.muteSource === 'auto' && !damper)) {
+      if (!((striker.muteUs | 0) > 0)) striker.muteUs = striker.restUs;
+      stopKids.push(h('div.grid2', [
+        angleStepper(striker, 'muteUs', 'Muting position', 'plectrum leaning on the string')
+      ]));
+      stopKids.push(h('div.row', [
+        testPulseBtn('Test muting', striker, 'muteUs', 'Servo → mute position'),
+        testServoBtn('→ rest', striker, false)
+      ]));
+    }
+    stopKids.push(GMB.disclosure('mute-adv', 'Advanced', function () {
+      return [
         GMB.field('Mute hold (ms)', GMB.input(p.pluck, 'muteHoldMs',
           { type: 'number', min: 0, max: 5000 }),
-          'hold time AFTER the mute has physically reached the string')
-      ]),
-      GMB.field('Also lean the descent servo on the string at Note Off',
-        GMB.input(p.pluck, 'liftMuteOnNoteOff', { type: 'checkbox' }),
-        'a descent servo that doubles as a damper'),
-      h('label.inline.builder-opt', [muteToggle,
-        h('span', 'This plectrum has a mute position (rests against the string to damp it)')])
-    ];
-    if (hasMutePos) {
-      muteKids.push(h('div.grid2', [
-        angleStepper(striker, 'muteUs', 'Mute angle', 'plectrum leaning on the string')
-      ]));
-      muteKids.push(h('div.row', [
-        testPulseBtn('→ mute', striker, 'muteUs', 'Servo → mute position'),
-        testServoBtn('→ contact', striker, false)
-      ]));
-    }
+          'how long the mute stays on the string after it has physically reached it'),
+        GMB.field('Also lean the descent servo on the string at Note Off',
+          GMB.input(p.pluck, 'liftMuteOnNoteOff', { type: 'checkbox' }),
+          'a descent servo that doubles as a damper')
+      ];
+    }));
     body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Mute · string ' + (activeStr + 1)),
-        h('span.muted', 'Note-Off damping')]),
-      muteKids
+      h('div.card-head', [h('h3', 'Stopping the note'), h('span.muted', 'all strings')]),
+      stopKids
     ]));
 
-    // Descent servo (optional) — the second way to strum: the plectrum rests OFF the
-    // string and a second servo lowers it on only while the string plays.
-    var lift = perStringServo(activeStr, 'strumLift');
-    var descToggle = h('input', { type: 'checkbox', checked: !!lift });
-    descToggle.addEventListener('change', function () {
-      if (descToggle.checked && !lift) addRoleServo('strumLift', activeStr);
-      else if (!descToggle.checked && lift) removeServo(lift);
-      GMB.markDirty();
-      drawStep();
-    });
-    var descKids = [h('label.inline.builder-opt', [descToggle,
-      h('span', 'Add a descent servo (lowers the plectrum onto the string only while playing)')])];
-    if (lift) {
-      descKids.push(wiringRow(lift));
-      descKids.push(h('div.grid2', [
-        angleStepper(lift, 'restUs', 'Rest angle',
-          p.pluck.liftEngage === 'raiseToPlay' ? 'plectrum ON the string (mutes at rest)'
-                                               : 'plectrum off the string (rest)'),
-        angleStepper(lift, 'activeUs', 'Play angle',
-          p.pluck.liftEngage === 'raiseToPlay' ? 'plectrum raised to let the string ring'
-                                               : 'plectrum on the string (to strum)')
-      ]));
-      descKids.push(GMB.field('Reverse rotation direction',
-        GMB.input(lift, 'inverted', { type: 'checkbox' }),
-        'mirror the output within the pulse window'));
-      descKids.push(h('div.grid2', [
-        GMB.field('Travel (ms)', GMB.input(lift, 'travelMs',
-          { type: 'number', min: 0, max: 5000 }), 'time to lower/raise the plectrum'),
-        GMB.field('Engage delay (ms)', GMB.input(lift, 'engageDelayMs',
-          { type: 'number', min: 0, max: 5000 }),
-          'extra pause once lowered before the stroke fires')
-      ]));
-      descKids.push(GMB.field('Engagement', GMB.input(p.pluck, 'liftEngage', {
-        type: 'select',
-        options: [
-          { value: 'lowerToPlay', label: 'Lower to play (rests clear of the string)' },
-          { value: 'raiseToPlay', label: 'Raise to play (rests ON the string, muting)' }
-        ],
-        onChange: drawStep
-      }), 'which end of the travel plays — applies to every string'));
-      descKids.push(h('div.row', [testServoBtn('→ rest', lift, false),
-                                  testServoBtn('→ play', lift, true)]));
-    }
-    body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Descent servo · string ' + (activeStr + 1)),
-        h('span.muted', 'optional')]),
-      descKids
-    ]));
-
-    // ---- Damper card (optional per-string Note-Off damper) -------------------
-    var damper = perStringServo(activeStr, 'damper');
-    var dampToggle = h('input', { type: 'checkbox', checked: !!damper });
-    dampToggle.addEventListener('change', function () {
-      if (dampToggle.checked && !damper) addRoleServo('damper', activeStr);
-      else if (!dampToggle.checked && damper) removeServo(damper);
-      GMB.markDirty();
-      drawStep();
-    });
-    var dampKids = [h('label.inline.builder-opt', [dampToggle,
-      h('span', 'Add a damper servo (strikes the string to mute it at Note Off)')])];
-    if (damper) {
-      dampKids.push(wiringRow(damper));
-      dampKids.push(h('div.grid2', [
-        angleStepper(damper, 'restUs', 'Rest angle', 'damper clear of the string'),
-        angleStepper(damper, 'activeUs', 'Damp angle', 'damper pressed on the string')
-      ]));
-      dampKids.push(GMB.field('Reverse rotation direction',
-        GMB.input(damper, 'inverted', { type: 'checkbox' }),
-        'mirror the output within the pulse window'));
-      dampKids.push(GMB.field('Travel (ms)', GMB.input(damper, 'travelMs',
-        { type: 'number', min: 0, max: 5000 }), 'time to reach the string'));
-      dampKids.push(h('div.row', [testServoBtn('→ rest', damper, false),
-                                  testServoBtn('→ damp', damper, true)]));
-    }
-    body.appendChild(h('div.card', [
-      h('div.card-head', [h('h3', 'Damper · string ' + (activeStr + 1)),
-        h('span.muted', 'optional')]),
-      dampKids
-    ]));
+    body.appendChild(GMB.disclosure('strings-bench', 'Group tests…', function () {
+      return testBench('String test bench', [
+        { label: 'Pluck each open string', build: pluckStringsSteps },
+        { label: 'Sweep every plectrum', build: pluckServoSweepSteps },
+        anyRole('damper') ? { label: 'Sweep every damper',
+          build: function () { return roleSweepSteps('damper', 'damp'); } } : null,
+        anyRole('strumLift') ? { label: 'Sweep every descent servo',
+          build: function () { return roleSweepSteps('strumLift', 'lower'); } } : null
+      ]);
+    }));
   }
 
-  // ---- Step: Power / current management -------------------------------------
+  // ---- Timing & power (NOT a creation step) ---------------------------------
+  //
+  // Chord synchronisation, the fixed-time FIFO, the fret→strum delay and the
+  // servo-start governor all have working defaults the firmware applies on its
+  // own. No first instrument should require a decision on any of them (UX audit
+  // 5), so this panel lives in ⚙ → Advanced hardware, behind a three-way
+  // "Responsiveness" preset that covers what most builders actually want.
 
-  function stepPower(body) {
-    var p = GMB.state.profile;
+  function ensureTimingConfig(p) {
     if (!p.power) p.power = {};
     if (p.power.maxConcurrentMoves === undefined) p.power.maxConcurrentMoves = 3;
     if (p.power.maxConcurrentPerBoard === undefined) p.power.maxConcurrentPerBoard = 0;
     if (p.power.staggerMs === undefined) p.power.staggerMs = 8;
     ensurePluckConfig(p);
-
-    // Timing — the two global delays that shape when every note fires.
-    body.appendChild(h('div.card.inset', [
-      h('h3', 'Timing'),
-      h('p.muted',
-        'Chords are synchronised by the firmware: the notes of a chord share one strike ' +
-        'deadline that covers the slowest string’s mechanical preparation (finger ' +
-        'travel + settle). The global action delay adds a fixed reception → sound ' +
-        'floor on top, keeping single-note feel even; the fret → strum delay waits ' +
-        'after the finger has seated a fret before the plectrum strikes.'),
-      h('div.grid2', [
-        GMB.field('Global action delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
-          { type: 'number', min: 0, max: 2000 }), 'fixed-time FIFO buffer — reception → sound latency'),
-        GMB.field('Fret → strum delay (ms)', GMB.input(p.pluck, 'fretToPluckMs',
-          { type: 'number', min: 0, max: 1000 }), 'wait after the finger is seated before the plectrum strikes'),
-        GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs',
-          { type: 'number', min: 0, max: 2000 }), 'lower the strum lift early (0 = off)')
-      ])
-    ]));
-
-    // Current management — an OPTIONAL governor. A servo peaks its current in the
-    // first milliseconds of a move; the governor staggers how many servos START
-    // together so a chord re-fretting many strings doesn't brown out the 5–6 V rail.
-    var pw = p.power;
-    var limitOn = (pw.maxConcurrentMoves > 0) || (pw.maxConcurrentPerBoard > 0);
-    var limitToggle = h('input', { type: 'checkbox', checked: limitOn });
-    limitToggle.addEventListener('change', function () {
-      if (limitToggle.checked) {
-        if (!(pw.maxConcurrentMoves > 0) && !(pw.maxConcurrentPerBoard > 0)) pw.maxConcurrentMoves = 3;
-      } else { pw.maxConcurrentMoves = 0; pw.maxConcurrentPerBoard = 0; }
-      GMB.markDirty(); drawStep();
-    });
-    var cmKids = [
-      h('p.muted',
-        'Optional — limits PCA9685 in-rush current by staggering how many servos start ' +
-        'moving at once (idle fingers already cut their PWM, and only one finger presses per ' +
-        'string at a time). Turn it off to let everything move together.'),
-      h('label.inline.builder-opt', [limitToggle,
-        h('span', 'Limit how many servos start moving at once')])
-    ];
-    if (limitOn) {
-      cmKids.push(h('div.grid3', [
-        GMB.field('Max at once — whole instrument', GMB.input(pw, 'maxConcurrentMoves',
-          { type: 'number', min: 0, max: 32 }), '0 = no overall cap'),
-        GMB.field('Max at once — per PCA board', GMB.input(pw, 'maxConcurrentPerBoard',
-          { type: 'number', min: 0, max: 16 }), '0 = no per-board cap (each board has its own supply)'),
-        GMB.field('Stagger between starts (ms)', GMB.input(pw, 'staggerMs',
-          { type: 'number', min: 0, max: 200 }), '0 disables staggering')
-      ]));
-    }
-    body.appendChild(h('div.card.inset', [h('h3', 'Current management'), cmKids]));
   }
 
-  // ---- Step 6: Test (whole instrument) --------------------------------------
+  // The three presets, in the language of the result rather than the mechanism.
+  var RESPONSIVENESS = {
+    fast:     { noteExecutionDelayMs: 0,  fretToPluckMs: 0,  maxConcurrentMoves: 0, staggerMs: 0 },
+    balanced: { noteExecutionDelayMs: 0,  fretToPluckMs: 0,  maxConcurrentMoves: 3, staggerMs: 8 },
+    limited:  { noteExecutionDelayMs: 40, fretToPluckMs: 10, maxConcurrentMoves: 2, staggerMs: 20 }
+  };
+  function currentResponsiveness(p) {
+    var keys = Object.keys(RESPONSIVENESS);
+    for (var i = 0; i < keys.length; i++) {
+      var r = RESPONSIVENESS[keys[i]];
+      if ((p.midi.noteExecutionDelayMs | 0) === r.noteExecutionDelayMs &&
+          (p.pluck.fretToPluckMs | 0) === r.fretToPluckMs &&
+          (p.power.maxConcurrentMoves | 0) === r.maxConcurrentMoves &&
+          (p.power.staggerMs | 0) === r.staggerMs) return keys[i];
+    }
+    return 'custom';
+  }
+  function applyResponsiveness(p, key) {
+    var r = RESPONSIVENESS[key];
+    if (!r) return;
+    p.midi.noteExecutionDelayMs = r.noteExecutionDelayMs;
+    p.pluck.fretToPluckMs = r.fretToPluckMs;
+    p.power.maxConcurrentMoves = r.maxConcurrentMoves;
+    p.power.staggerMs = r.staggerMs;
+    GMB.markDirty();
+  }
+  // A recommendation computed from the rig itself: more servos on one PCA board
+  // means more in-rush current to stagger.
+  function recommendedGovernor() {
+    var byBoard = {};
+    GMB.state.profile.servos.forEach(function (s) {
+      if (s.source !== 'pca') return;
+      var k = (s.i2cBus === 1 ? 1 : 0) + ':' + s.pcaBoard;
+      byBoard[k] = (byBoard[k] || 0) + 1;
+    });
+    var boards = Object.keys(byBoard).length;
+    var total = GMB.state.profile.servos.length;
+    if (total <= 8) return { moves: 0, note: 'small rig — no limit needed' };
+    if (boards <= 2) return { moves: 3, note: total + ' servos on ' + boards + ' board(s)' };
+    return { moves: 4, note: total + ' servos on ' + boards + ' boards' };
+  }
+
+  function timingPanel(body) {
+    var p = GMB.state.profile;
+    ensureTimingConfig(p);
+    var cur = currentResponsiveness(p);
+    var card = function (key, title, desc) {
+      return radioCard(cur === key, title, desc, null, function () {
+        applyResponsiveness(p, key);
+        GMB.redraw();
+      });
+    };
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h2', 'Responsiveness'),
+        h('span.muted', cur === 'custom' ? 'custom values' : 'preset')]),
+      h('p.muted', 'How the instrument trades latency against a calm power supply. ' +
+        'The firmware already synchronises the notes of a chord on one strike deadline; ' +
+        'this only shapes what happens around it.'),
+      h('div.radio-row', [
+        card('fast', 'Fast', 'No added delay, every servo free to start at once. ' +
+          'Needs a supply that can take the in-rush.'),
+        card('balanced', 'Balanced', 'Recommended. At most 3 servos start together, ' +
+          '8 ms apart, with no added latency.'),
+        card('limited', 'Limited power supply', 'Staggers harder and buys 40 ms of ' +
+          'buffer so a weak 5 V rail never browns out.')
+      ]),
+      cur === 'custom' ? h('div.pill.warn', 'These values do not match any preset — ' +
+        'see the exact numbers below.') : null,
+      GMB.disclosure('timing-exact', 'Exact values', function () {
+        var pw = p.power;
+        var recg = recommendedGovernor();
+        return [
+          h('h3', 'Timing'),
+          h('div.grid2', [
+            GMB.field('Global action delay (ms)', GMB.input(p.midi, 'noteExecutionDelayMs',
+              { type: 'number', min: 0, max: 2000, onChange: GMB.redraw }),
+              'fixed-time FIFO buffer — reception → sound latency'),
+            GMB.field('Fret → strum delay (ms)', GMB.input(p.pluck, 'fretToPluckMs',
+              { type: 'number', min: 0, max: 1000, onChange: GMB.redraw }),
+              'wait after the finger is seated before the plectrum strikes'),
+            GMB.field('Strum lead (ms)', GMB.input(p.midi, 'strumLeadMs',
+              { type: 'number', min: 0, max: 2000 }), 'lower the strum lift early (0 = off)')
+          ]),
+          h('h3', 'Servo-start governor'),
+          h('p.muted', 'A servo peaks its current in the first milliseconds of a move. ' +
+            'The governor staggers how many START together so a chord re-fretting many ' +
+            'strings does not brown out the 5–6 V rail. Recommended for this ' +
+            'instrument: ' + (recg.moves ? recg.moves + ' at once' : 'no limit') +
+            ' (' + recg.note + ').'),
+          h('div.grid3', [
+            GMB.field('Max at once — whole instrument', GMB.input(pw, 'maxConcurrentMoves',
+              { type: 'number', min: 0, max: 32, onChange: GMB.redraw }), '0 = no overall cap'),
+            GMB.field('Max at once — per PCA board', GMB.input(pw, 'maxConcurrentPerBoard',
+              { type: 'number', min: 0, max: 16 }), '0 = no per-board cap'),
+            GMB.field('Stagger between starts (ms)', GMB.input(pw, 'staggerMs',
+              { type: 'number', min: 0, max: 200, onChange: GMB.redraw }), '0 disables staggering')
+          ]),
+          h('div.toolbar', [GMB.button('Use the recommended limit', function () {
+            pw.maxConcurrentMoves = recg.moves;
+            GMB.markDirty(); GMB.redraw();
+          }, 'ghost')])
+        ];
+      })
+    ]));
+  }
+
+  // ---- Step: Test — one button that exercises the whole instrument ----------
+
+  // The automatic run, in the order a builder would check things by hand:
+  // fingers, then plectrums, then every open string, then a few real notes.
+  function autoTestSteps() {
+    return allFretsSteps()
+      .concat(pluckServoSweepSteps())
+      .concat(pluckStringsSteps())
+      .concat(everythingSteps());
+  }
+  // A representative fretted note per string: the middle of what is actually
+  // equipped. Hard-coding fret 5 asked a maxFret=3 string for a note it cannot
+  // play (UX audit 13).
+  function midFret(strIdx) {
+    var frets = GMB.availableFrets(GMB.state.profile, strIdx);
+    if (!frets.length) return 0;
+    return frets[Math.floor((frets.length - 1) / 2)];
+  }
 
   function stepTest(body) {
     var p = GMB.state.profile;
-    body.appendChild(h('div.note-box',
-      'Full instrument test. Arm the mechanics, then run a group test — play every open ' +
-      'string, sweep every finger, sweep every plucker, run a scale on the active string, ' +
-      'or test everything end-to-end. Stop halts the sequence immediately.'));
+    var issues = GMB.validateProfile(p);
+    var errors = issues.filter(function (i) { return i.level === 'error'; });
 
+    body.appendChild(h('div.note-box',
+      'Arm the mechanics, then let the instrument test itself. Stop halts the ' +
+      'sequence immediately, and the big STOP cuts every driver.'));
     body.appendChild(armToolbar());
-    body.appendChild(testBench('Full instrument test', [
-      { label: 'Play all open strings', build: pluckStringsSteps },
-      { label: 'Sweep all fingers', build: allFretsSteps },
-      { label: 'Sweep all pluckers', build: pluckServoSweepSteps },
-      { label: 'Scale on string ' + (activeStr + 1), build: function () { return scaleSteps(activeStr); } },
-      { label: 'Test everything', build: everythingSteps }
+
+    var checks = h('div.check-list', [
+      h('div.check-item' + (errors.length ? '.bad' : '.good'),
+        errors.length ? '✖ ' + errors.length + ' problem(s) to fix before this instrument can run'
+                      : '✓ Configuration valid'),
+      h('div.check-item.good', '✓ ' + p.servos.length + ' servos generated across ' +
+        p.strings.length + ' string(s)')
+    ]);
+
+    var runner = testBench('Automatic test', [
+      { label: 'Test the instrument automatically', build: autoTestSteps }
+    ]);
+    runner.classList.add('testbench-primary');
+
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Instrument test')]),
+      checks,
+      runner,
+      h('ol.test-plan', [
+        h('li', 'every finger, one fret at a time'),
+        h('li', 'every plectrum'),
+        h('li', 'each open string, through the real note path'),
+        h('li', 'a few fretted notes per string')
+      ])
     ]));
 
-    body.appendChild(stringTabs());
-    var rows = p.strings.map(function (s, i) {
-      return h('div.row', [
-        h('span', 'String ' + (i + 1) + ' (' + GMB.noteName(s.openNote) + ')'),
-        GMB.button('Open (fret 0)', function () {
-          GMB.api.testNote({ channel: 0, note: s.openNote, velocity: 100, durationMs: 400 })
-            .catch(function () { GMB.toast('Arm the instrument first.', 'warn'); });
-        }, 'ghost'),
-        GMB.button('Fret 5', function () {
-          GMB.api.testNote({ channel: 0, note: s.openNote + 5, velocity: 100, durationMs: 400 })
-            .catch(function () {});
-        }, 'ghost')
-      ]);
-    });
-    body.appendChild(h('div.card', [h('div.card-head', [h('h3', 'Per-string quick play')]), rows]));
+    body.appendChild(GMB.disclosure('test-individual', 'Individual tests…', function () {
+      var rows = p.strings.map(function (s, i) {
+        var mf = midFret(i);
+        return h('div.row', [
+          h('span', 'String ' + (i + 1) + ' (' + GMB.noteName(s.openNote) + ')'),
+          GMB.button('Open string', function () {
+            GMB.api.testNote({ channel: 0, note: s.openNote, velocity: 100, durationMs: 400 })
+              .catch(function () { GMB.toast('Arm the instrument first.', 'warn'); });
+          }, 'ghost'),
+          mf > 0 ? GMB.button('Fret ' + mf + ' (' + GMB.noteName(s.openNote + mf) + ')', function () {
+            GMB.api.testNote({ channel: 0, note: s.openNote + mf, velocity: 100, durationMs: 400 })
+              .catch(function () { GMB.toast('Arm the instrument first.', 'warn'); });
+          }, 'ghost') : h('span.muted', 'no fretted note available')
+        ]);
+      });
+      return [
+        testBench('Group tests', [
+          { label: 'Play all open strings', build: pluckStringsSteps },
+          { label: 'Sweep all fingers', build: allFretsSteps },
+          { label: 'Sweep all plectrums', build: pluckServoSweepSteps },
+          { label: 'Scale on string ' + (activeStr + 1), build: function () { return scaleSteps(activeStr); } }
+        ]),
+        stringTabs(),
+        h('div.card.inset', [h('h3', 'Per-string quick play'), rows])
+      ];
+    }));
+
     body.appendChild(h('div.row', [GMB.button('STOP (panic)', function () { GMB.doPanic && GMB.doPanic(); }, 'danger')]));
   }
 
-  // ---- Step 7: Validation ---------------------------------------------------
+  // ---- Step: Finish — plain-language validation, wiring recap, apply --------
 
-  function stepValidation(body) {
-    var issues = GMB.validateProfile(GMB.state.profile);
+  // Turn a validator issue into something a builder can act on: WHO is affected
+  // (string / fret), WHAT is wrong, and — where the software can work it out —
+  // a one-click fix. The raw field path stays available under "Technical
+  // details" (UX audit 14).
+  function humanIssue(is) {
+    var p = GMB.state.profile;
+    var m = /^servos\[(\d+)\]$/.exec(is.field || '');
+    var out = { who: is.field || 'Configuration', what: is.message, fix: null, tech: is.field };
+    if (m) {
+      var sv = p.servos[Number(m[1])];
+      if (sv) {
+        out.who = (sv.stringIndex >= 0 ? 'String ' + (sv.stringIndex + 1) : 'Instrument') +
+          (sv.function === 'finger' && sv.fret >= 1 ? ' — fret ' + sv.fret : '') +
+          (sv.function !== 'finger' ? ' — ' + roleName(sv.function) : '');
+        out.tech = is.field + ' (' + sv.function + ', ' +
+          (sv.source === 'gpio' ? 'GPIO' + sv.gpio : 'PCA ' + sv.pcaBoard + '/CH' + sv.channel) + ')';
+        if (/used twice|channel must be|board must be/.test(is.message)) {
+          out.what = 'Two actuators are wired to the same PCA9685 output, or the ' +
+            'channel is out of range — this one has no usable output.';
+          out.fix = function () { return reassignServo(sv); };
+        } else if (/needs a GPIO/.test(is.message)) {
+          out.what = 'No pin is assigned to this servo.';
+          out.fix = function () { return reassignServo(sv); };
+        } else if (/nearly equal/.test(is.message)) {
+          out.what = 'The rest and press positions are almost the same — the finger ' +
+            'probably will not press the string. Calibrate it on the Frets step.';
+        } else if (/geared neutral/.test(is.message)) {
+          out.what = 'The geared finger’s neutral position does not sit between its ' +
+            'two press positions, so one side never lifts.';
+        }
+      }
+    } else if (/^string (\d+)$/.test(is.field || '')) {
+      var si = Number(/^string (\d+)$/.exec(is.field)[1]);
+      out.who = 'String ' + (si + 1);
+      if (/no plucker/.test(is.message)) {
+        out.what = 'Nothing can sound this string — it has no plectrum.';
+        out.fix = function () { ensureStriker(si); return true; };
+      } else if (/no finger servo/.test(is.message)) {
+        out.what = 'No finger servo: this string only plays its open note.';
+      }
+    } else if (is.field === 'pins') {
+      out.who = 'Wiring';
+      out.what = 'The I²C signals (SDA, SCL) and the servo enable line have no GPIO yet.';
+      out.fix = function () {
+        var p2 = GMB.state.profile;
+        p2.board = p2.board || {};
+        p2.board.automaticPinAssignment = true;
+        p2.pins = (p2.pins || []).filter(function (x) { return x.gpio >= 0; });
+        var R = rec();
+        [['SDA', 'sda'], ['SCL', 'scl'], ['SERVO_OE', 'servoOe']].forEach(function (sig) {
+          if (p2.pins.some(function (x) { return x.signal === sig[0]; })) return;
+          if (R[sig[0]] == null) return;
+          p2.pins.push({ signal: sig[0], kind: sig[1], gpio: R[sig[0]] });
+        });
+        return true;
+      };
+    } else if (is.field === 'servos' || is.field === 'power') {
+      out.who = 'Instrument';
+    }
+    return out;
+  }
+  function roleName(fn) {
+    return ({ pluck: 'plectrum', strum: 'strum arm', strumLift: 'descent servo',
+      damper: 'damper', aux: 'auxiliary servo', finger: 'finger' })[fn] || fn;
+  }
+  // Move a servo onto the first genuinely free PCA output (or give a direct
+  // servo a free GPIO). Returns false when nothing is available.
+  function reassignServo(sv) {
+    if (sv.source === 'gpio') {
+      var used = usedGpios(sv);
+      var reserveUsb = GMB.state.profile.board && GMB.state.profile.board.reserveUsb;
+      var pick = boardPins().filter(function (c) {
+        return !used[c.gpio] && !c.reserved && c.preference !== 'reserved' &&
+               !(c.usb && reserveUsb) && GMB.pinSupports(c, 'servo');
+      })[0];
+      if (!pick) return false;
+      sv.gpio = pick.gpio;
+      GMB.markDirty();
+      return true;
+    }
+    var taken = {};
+    GMB.state.profile.servos.forEach(function (s) {
+      if (s === sv || s.source !== 'pca') return;
+      taken[(s.i2cBus === 1 ? 1 : 0) + ':' + s.pcaBoard + ':' + s.channel] = true;
+    });
+    var bus = sv.i2cBus === 1 ? 1 : 0;
+    for (var b = 0; b < 8; b++) {
+      for (var c = 0; c < 16; c++) {
+        if (taken[bus + ':' + b + ':' + c]) continue;
+        sv.pcaBoard = b; sv.channel = c;
+        GMB.markDirty();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // A one-glance recap of the generated harness: which board drives which string.
+  function wiringRecap() {
+    var p = GMB.state.profile, byBoard = {};
+    p.servos.forEach(function (s) {
+      if (s.source !== 'pca') return;
+      var k = (s.i2cBus === 1 ? 1 : 0) + ':' + s.pcaBoard;
+      var e = byBoard[k] || (byBoard[k] = { bus: s.i2cBus === 1 ? 1 : 0, board: s.pcaBoard, strings: {}, n: 0 });
+      e.n++;
+      if (s.stringIndex >= 0) e.strings[s.stringIndex + 1] = true;
+    });
+    var direct = p.servos.filter(function (s) { return s.source === 'gpio'; }).length;
+    var two = anyBus1();
+    var rows = Object.keys(byBoard).sort().map(function (k) {
+      var e = byBoard[k];
+      var list = Object.keys(e.strings).sort(function (a, b) { return a - b; });
+      return h('div.recap-line', [
+        h('span.recap-node', 'ESP32'), h('span.recap-arrow', '→'),
+        h('span.recap-node', (two ? 'bus ' + e.bus + ' · ' : '') + 'PCA #' + e.board),
+        h('span.recap-arrow', '→'),
+        h('span', list.length ? ('string' + (list.length > 1 ? 's ' : ' ') + list.join(', ')) : 'shared actuators'),
+        h('span.spacer'),
+        h('span.muted', e.n + '/16 channels')
+      ]);
+    });
+    if (direct) rows.push(h('div.recap-line', [
+      h('span.recap-node', 'ESP32'), h('span.recap-arrow', '→'),
+      h('span', direct + ' servo(s) wired straight to a GPIO')
+    ]));
+    return rows;
+  }
+
+  function stepFinish(body) {
+    var p = GMB.state.profile;
+    var issues = GMB.validateProfile(p);
+    var errors = issues.filter(function (i) { return i.level === 'error'; });
+    var warns = issues.filter(function (i) { return i.level !== 'error'; });
+
+    // ---- validation, in the user's words ------------------------------------
+    var vKids = [];
     if (!issues.length) {
-      body.appendChild(h('div.pill.ok', 'No problems found — ready to save.'));
+      vKids.push(h('div.big-ok', 'Everything checks out.'));
     } else {
       issues.forEach(function (is) {
-        body.appendChild(h('div.pill.' + (is.level === 'error' ? 'error' : 'warn'),
-          (is.field ? is.field + ' — ' : '') + is.message));
+        var hi = humanIssue(is);
+        var err = is.level === 'error';
+        var kids = [
+          h('div.issue-head', [
+            h('span.issue-mark', err ? '✖' : '⚠'),
+            h('strong', hi.who), h('span.spacer'),
+            hi.fix ? GMB.button('Fix automatically', function () {
+              if (hi.fix() === false) { GMB.toast('No free output left — free one first.', 'error'); return; }
+              GMB.toast('Fixed.', 'ok');
+              drawStep();
+            }, 'ghost.small') : null
+          ]),
+          h('p.issue-text', hi.what)
+        ];
+        kids.push(h('details.issue-tech', [h('summary', 'Technical details'),
+          h('code', (hi.tech || '') + ' — ' + is.message)]));
+        vKids.push(h('div.issue.' + (err ? 'error' : 'warn'), kids));
       });
     }
-    body.appendChild(h('div.row', [GMB.button('Save & publish', function () { GMB.saveProfile().catch(function () {}); }, 'primary')]));
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Check'),
+        h('span.muted', errors.length + ' error(s) · ' + warns.length + ' recommendation(s)')]),
+      vKids
+    ]));
+
+    // ---- what will be wired --------------------------------------------------
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Wiring'), h('span.spacer'),
+        GMB.button('Open the wiring page', function () { GMB.navigate('hardware'); }, 'ghost')]),
+      h('div.recap', wiringRecap()),
+      errors.length ? h('div.pill.error', 'Conflicts remain — see the check above.')
+                    : h('div.pill.ok', 'No conflict')
+    ]));
+
+    // ---- apply ---------------------------------------------------------------
+    body.appendChild(h('div.card', [
+      h('div.card-head', [h('h3', 'Apply')]),
+      h('p.muted', 'The instrument stops, loads the new configuration, parks its ' +
+        'servos and re-arms. It takes a few seconds.'),
+      h('div.row', [
+        GMB.button('Save and apply', function () {
+          GMB.saveProfile().then(function () { drawStep(); }).catch(function () {});
+        }, 'primary'),
+        GMB.button('Discard changes', function () { GMB.discardChanges(); }, 'ghost')
+      ]),
+      GMB.state.dirty ? null : h('div.commissioning-cta', [
+        h('h4', 'Before the first full power-up'),
+        h('p.muted', 'Instrument configured ✓ · wiring generated ✓ · calibration done ✓ — ' +
+          'the commissioning checklist walks the staged power-up (drivers off, one ' +
+          'board at a time, E-stop proven) before the whole rig gets current.'),
+        GMB.button('Start the commissioning procedure', function () {
+          GMB.navigate('hardware');
+          if (GMB.openHardwareSub) GMB.openHardwareSub('commissioning');
+        }, 'primary')
+      ])
+    ]));
   }
 
   // Client-side pre-check (the firmware ProfileValidator is authoritative).
@@ -1794,19 +2417,106 @@
     return out;
   };
 
-  // The whole instrument setup is one main page (Instrument -> Frets -> Plucking ->
-  // MIDI -> Timing -> Test -> Validation). Teardown releases the live MIDI socket the
-  // MIDI step may hold and stops any running test sequence.
+  // ---- Welcome: the first thing a brand-new install shows -------------------
+  //
+  // Landing on a fretboard for an instrument that does not exist yet, and asking
+  // the user to find "Setup" on their own, was exactly backwards (UX audit 7).
+  // Until a configuration has been applied once, the interface opens here and
+  // walks straight into creating one.
+  var welcomePick = false;   // true once "Use a template" has been pressed
+
+  function welcomeView(host) {
+    var p = GMB.state.profile;
+    var kids = [
+      h('h1.welcome-title', 'Welcome'),
+      h('p.welcome-lead', 'Let’s build your instrument. You describe the machine — ' +
+        'how many strings, how the frets are pressed, how the strings are played — ' +
+        'and the software works out every servo, board and channel for you.')
+    ];
+    if (!welcomePick) {
+      kids.push(h('div.welcome-actions', [
+        GMB.button('Use a template', function () { welcomePick = true; GMB.render(); }, 'primary'),
+        GMB.button('Create a custom instrument', function () {
+          GMB.markSetupComplete();
+          GMB.gotoSetupStep('builder');
+        }, 'ghost')
+      ]));
+    } else {
+      kids.push(h('p.muted', 'Pick the instrument closest to what you are building — ' +
+        'you can change everything afterwards.'));
+      kids.push(h('div.preset-row', ['ukulele', 'guitar', 'bass', 'mandolin', 'banjo'].map(function (t) {
+        return h('button.preset-card', { type: 'button', onclick: function () {
+          applyPreset(t, true);
+          GMB.markSetupComplete();
+          GMB.gotoSetupStep('builder');
+        } }, [h('strong', cap(t)), h('span.muted', TUNINGS[t].notes.length + ' strings')]);
+      })));
+      kids.push(h('div.row', [GMB.button('← Back', function () { welcomePick = false; GMB.render(); }, 'ghost')]));
+    }
+    kids.push(h('p.welcome-skip', [
+      'Already have a configured instrument on this device? ',
+      h('button.linkbtn', { type: 'button', onclick: function () {
+        GMB.markSetupComplete();
+        GMB.navigate('fretboard');
+      } }, 'Go straight to it')
+    ]));
+    host.appendChild(h('div.card.welcome-card', kids));
+    host.appendChild(h('div.note-box', 'Currently loaded: “' + (p.instrument.name || 'unnamed') +
+      '” — ' + p.strings.length + ' string(s). Creating a new instrument replaces it.'));
+  }
+  GMB.views.welcome = { render: welcomeView };
+
+  // ---- panels the Settings modal hosts (not creation steps) ------------------
+  // Advanced hardware: the board, the I²C topology, the PCA capacity and the
+  // timing / governor. All of it is generated or defaulted; none of it belongs in
+  // the creation flow (UX audit 9, 10, 11).
+  GMB.hardwarePanels = {
+    board: function (host) {
+      var p = GMB.state.profile;
+      var boardOpts = (GMB.boardList ? GMB.boardList() : []).map(function (b) {
+        return { value: b.id, label: b.name };
+      });
+      host.appendChild(h('div.card', [
+        h('div.card-head', [h('h2', 'Controller board')]),
+        h('div.grid2', [
+          GMB.field('ESP32 board', GMB.input(p.board, 'profile', {
+            type: 'select', options: boardOpts,
+            onChange: function () { GMB.markDirty(); GMB.redraw(); } }),
+            'the pinout everything wires to'),
+          GMB.field('Reserve the native USB pins', GMB.input(p.board, 'reserveUsb', { type: 'checkbox' }),
+            'keeps the USB-serial pins free — leave on unless you need them for servos')
+        ])
+      ]));
+    },
+    i2c: function (host) {
+      ensureBuilder();
+      host.appendChild(h('div.card', [
+        h('div.card-head', [h('h2', 'PCA9685 boards & I²C'),
+          h('span.muted', 'assigned automatically')]),
+        h('p.muted', 'The generator spreads the servos over as many PCA9685 boards as ' +
+          'the instrument needs and keeps one board per string where it can. Change ' +
+          'this only to match boards you have already addressed by hand.'),
+        capacityReport(),
+        busTopology()
+      ]));
+    },
+    timing: timingPanel
+  };
+
+  // The instrument setup page (Instrument -> Frets -> Strings -> Test -> Finish).
   GMB.views.setup = {
     render: function (host) { renderFlow(host, 'setup'); },
     teardown: function () {
       flowHost.setup = null;
+      GMB.setRedraw(null);
       if (GMB.midiSettings && GMB.midiSettings.teardown) GMB.midiSettings.teardown();
       if (GMB.testRunner && GMB.testRunner.stop) GMB.testRunner.stop();
     }
   };
-  // Jump straight to a named step of the setup page (e.g. from the Instrument view).
+  // Jump straight to a named step of the setup page (e.g. from the Instrument
+  // view, the welcome screen or a deep link). Retired step ids still resolve.
   GMB.gotoSetupStep = function (stepId) {
+    stepId = STEP_ALIASES[stepId] || stepId;
     var i = FLOWS.setup.indexOf(stepId);
     GMB.navigate('setup');
     if (i >= 0) { flowStep.setup = i; if (flowHost.setup) renderFlow(flowHost.setup, 'setup'); }

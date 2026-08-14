@@ -54,8 +54,9 @@ live status jitter. A pulsing **DEMO / MOCK DATA** badge appears in the top bar
 whenever mock data is in use.
 
 This means you can open `web-interface/index.html` in any browser and exercise
-the entire UI — the playable neck, the whole Setup flow, the five hardware sub-tabs,
-the MIDI monitor, the test tool and the SysEx tester — with nothing else running.
+the entire UI — the welcome screen, the playable neck, the whole Configure flow, the
+generated wiring, the commissioning checklist, every settings tab, the MIDI monitor,
+the test tool and the SysEx tester — with nothing else running.
 It is also how the screenshots in `img/screenshots/` are taken.
 
 To try it:
@@ -66,35 +67,42 @@ python3 -m http.server -d web-interface 8080
 # then browse http://localhost:8080/
 ```
 
-## Navigation (three pages; device settings in a gear modal)
+## Navigation (three pages + a gear menu)
 
-The UI is deliberately minimal: **three main pages** in the sidebar, and the whole
-instrument creation grouped into ONE ordered flow on the Setup page. Only device
-Wi-Fi and the diagnostic tools live in the gear modal (top-right).
+**Design rule (UX audit):** a creation screen only shows the decisions the software
+cannot take itself. Everything derivable, generatable or safely defaulted is hidden
+behind a **local** disclosure — never behind a global expert switch. The shared atoms
+for that live in `app.js`: `GMB.disclosure()`, `GMB.summaryLine()` and `GMB.alert()`.
 
-- **Instrument** (`fretboard.js`) — the default landing page: a prominent
-  **emergency stop** (STOP + reset/re-arm) and the **playable fretboard**.
-- **Setup** (`wizard.js`, the single setup flow) — the complete creation of an
-  instrument, in order: **Instrument → Frets → Plucking → MIDI → Timing → Test →
-  Validation**. Define it (identity, mechanics, ESP32 board, wiring), calibrate what
-  you defined by hand (contact / stroke angles + rotation direction), set its MIDI
-  behaviour and timing, then test and save — nothing split across a page and a modal.
-- **Wiring & GPIO** (`hardware.js`) — the electrical installation assistant, with
-  **five sub-tabs**: **Harness** (`wiring.js`, the adaptive wiring diagram + power
-  wiring advice), **Power & safety** (`wiringpower.js`, safety-chain declarations,
-  power tree, current/fuse/cap/PSU estimator), **I²C & PCA** (`wiringi2c.js`,
-  addresses, A0–A2 jumpers, pull-up budget), **GPIO pins** (`pins.js`, the GPIO grid,
-  the graphical board pinout and the hardware E-stop declaration) and
-  **Commissioning** (`commissioning.js`, the staged power-up checklist). The board is
-  chosen on the Setup page; this page assigns pins on it.
+- **Instrument** (`fretboard.js`) — the home page once something has been configured:
+  a prominent **emergency stop** (STOP + reset/re-arm) and the **playable fretboard**.
+- **Configure** (`wizard.js`) — the whole creation of an instrument, in order:
+  **Instrument → Frets → Strings → Test → Finish**. Step 1 is the *designer*: tuning,
+  then the three mechanical questions (fret actuation · how the string is played ·
+  how it is stopped), each card showing the servo count it implies, and a live summary
+  of what was generated. Steps 2–3 calibrate; step 4 tests; step 5 checks and applies.
+  A **health bar** above every step reports the current error/recommendation count.
+- **Wiring** (`hardware.js`) — the harness is generated, not configured: **Diagram**
+  (`wiring.js`, the adaptive wiring diagram + power-wiring advice) and
+  **Commissioning** (`commissioning.js`, the staged power-up checklist).
+- **Welcome** (`wizard.js`, `GMB.views.welcome`) — shown instead of the fretboard
+  until a configuration has been applied from this browser
+  (`GMB.setupComplete()` / `GMB.markSetupComplete()`, localStorage).
 
-The **gear modal** (`settings.js`) holds only what belongs to the device, in two tabs:
+The **gear modal** (`settings.js`) holds everything the software decided for the
+user, split by who needs it:
 
-- **Network** — network mode, SSIDs, hostname, a *Scan networks* picker,
-  write-only Wi-Fi credentials, hotspot switch.
-- **Advanced** — device security (admin token, UDP MIDI source policy), GMB identity
-  & capabilities + SysEx tester (`sysex.js`) and the live MIDI monitor + integrated
-  tester (`midiselect.js` tools).
+| Tab | Contents |
+| --- | -------- |
+| **Device** | current Wi-Fi + *Change network* scanner, fallback hotspot; mode/SSID/hostname and credential erasure folded under *Advanced network options* |
+| **MIDI** | `midiselect.js` settings — "Automatic" by default; parameters, tablature and selection internals behind disclosures |
+| **Advanced hardware** | `GMB.hardwarePanels` (board · PCA9685/I²C capacity + bus split · responsiveness presets and exact timing/governor values) plus, folded, `pins.js`, `wiringi2c.js` and `wiringpower.js` |
+| **Security** | admin token + UDP MIDI source policy |
+| **Diagnostics** | live MIDI monitor + integrated tester (`midiselect.js` tools) |
+| **Developer** | GMB identity & capabilities + SysEx tester (`sysex.js`) |
+
+The modal is a real dialog: `role="dialog"`, `aria-modal`, a Tab focus trap, Escape
+to close and focus restored to the gear button.
 
 Profiles are intentionally **not** exposed (a hidden, non-user setting).
 
@@ -106,20 +114,20 @@ web-interface/
 ├── css/style.css         responsive styling, light/dark via prefers-color-scheme
 ├── js/
 │   ├── api.js            REST + WebSocket client, board profile, mock backend, test sequencer
-│   ├── app.js            shell, 3-page routing, DOM helpers, draft-profile state
+│   ├── app.js            shell, routing, DOM helpers, draft state, disclosure/summary/alert atoms, first-run flag
 │   ├── fretboard.js      Instrument page — emergency stop + playable fretboard (press-and-hold) + chord bar
-│   ├── hardware.js       Wiring & GPIO page — sub-tab switch over the five hardware views
+│   ├── hardware.js       Wiring page — Diagram / Commissioning sub-tabs
 │   ├── pins.js           GPIO grid + graphical board pinout + hardware E-stop declaration (§11)
 │   ├── wiring.js         graphical ESP32 + PCA9685 wiring map (adaptive harness diagram) + power-wiring card
 │   ├── wiringpower.js    Power & safety — safety chain, power tree SVG, current/fuse/cap/PSU estimator
 │   ├── wiringi2c.js      I²C & PCA — per-bus addresses, A0–A2 jumpers, pull-up budget
 │   ├── commissioning.js  staged power-up checklist (progress kept in the browser)
-│   ├── wizard.js         single setup-flow step engine: Instrument → Frets → Plucking → MIDI → Timing → Test → Validation (§10)
+│   ├── wizard.js         designer + flow engine: Instrument → Frets → Strings → Test → Finish, the welcome view and the advanced-hardware panels (§10)
 │   ├── midimonitor.js    reusable real-time MIDI monitor (§15)
-│   ├── midiselect.js     MIDI settings (§14/§18, the Setup MIDI step) + live monitor/test tools (§16, gear-modal Advanced tab)
+│   ├── midiselect.js     MIDI settings (§14/§18, gear-modal MIDI tab) + live monitor/test tools (§16, Diagnostics tab)
 │   ├── sysex.js          GMB identity & capabilities + SysEx tester (§17/§18)
 │   ├── profiles.js       profile slots (§20) — loaded but not exposed in the UI (hidden setting)
-│   └── settings.js       gear modal — Network / Advanced (device + diagnostics) tabs
+│   └── settings.js       gear modal — Device / MIDI / Advanced hardware / Security / Diagnostics / Developer
 ├── test/run-tests.js     headless checks of the UI helpers (node, no dependencies)
 ├── tools/screenshots.js  regenerates img/screenshots/*.png from the mock UI (Playwright)
 └── README.md
@@ -138,61 +146,98 @@ node web-interface/tools/screenshots.js
 
 The file names are the contract with the docs; keep them stable when adding a view.
 
-## Simplified-only (no expert mode)
+## Progressive disclosure (no expert mode, and no expert dumping ground)
 
-The interface is deliberately **simplified-only** — there is no Simplified/Advanced
-toggle. `GMB.isAdvanced()` is kept as a stable `false` no-op, so the expert-only
-branches still in `midiselect.js`, `wizard.js` and `pins.js` never render: the MIDI
-transpose / chord window / sustain / saturation strategy, the detailed CC-selection
-editor, the second-bus topology card and the `/OE`-per-bus toggle live in the profile
-and the firmware, not on screen. Document that gap rather than describing those
-controls as available.
+There is no Simplified/Advanced toggle, and "simplified" does **not** mean "every
+expert parameter is present, just fewer of them" — that was the actual state of the
+UI before this pass, and it is what the UX audit called out. It means: **the software
+takes the technical decisions and only asks the user for the mechanical ones they
+alone can know.**
 
-What each step does keep is the handful of choices that matter: per-servo the **PCA
-board + pin**, the **I²C bus** and the **angle(s)** right where you calibrate them
-(precise − / + steppers, no sliders); recommended GPIOs only; the servo's mechanical
-**pulse window** stays hidden (angles are converted against it), and travel/settle
-show up only where they shape the gesture (the Plucking step).
+In practice:
 
-## Instrument step — preset + tuning + board (Setup → Instrument step)
+- **Generated, shown as a summary.** Wiring is `Wiring · PCA #2 · CH7 ✓ [Change…]` —
+  one line that expands into the full source editor (PCA board + I²C bus + channel, or
+  a direct GPIO). Same pattern for the controller, MIDI and the timing on step 1.
+- **Conditional, not pre-emptive.** A damper or a descent servo costs one line
+  (`+ Add a damper`) until it exists; only then does its calibration appear.
+- **Behind a local disclosure.** `travelMs` / `settleMs` / `strokeMs` /
+  `minStrikePct` / `muteHoldMs`, the per-fret gearing toggle, the CC-level MIDI
+  editor, the second-bus topology, the `/OE`-per-bus toggle, the GPIO grid, the I²C
+  pull-up budget and the power dossier are all reachable — none of them is in the way.
+- **Symptom, not mechanism.** "The finger moves the wrong way? [Invert]" instead of a
+  checkbox called *Reverse rotation direction*.
+- **User units.** MIDI channels are 1–16 on screen; the zero-based storage is handled
+  by `GMB.offsetInput()` and never surfaced.
+- **Destructive actions out of the path.** *Reset wiring & calibration* lives in a
+  Danger zone under *Advanced options*; *Discard* asks for confirmation.
+- **Errors persist.** A rejected save opens a dismissible alert under the top bar with
+  the reasons and a *Technical details* fold, instead of a toast that disappears.
 
-The **type is cosmetic**. The **Instrument** step of the Setup flow is one short
-screen — pick a **preset** (ukulele/guitar/bass/mandolin/banjo, or **Custom**), name
-it, set **strings & tuning** (count 1–6, per-string open note + max fret), and the
-**Board** (ESP32 board selector — S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1 + native-USB reserve;
-Wi-Fi / hostname are in the gear modal, device not instrument). A preset generates a
-working servo wiring automatically; changing the string count or a max fret
-re-generates it. The **mechanics** — gearing, PCA board + pin, angles — are then set
-per-servo on the Frets / Plucking steps.
+The servo's mechanical **pulse window** stays hidden throughout (angles are converted
+against it), and the calibration steppers are precise − / + degree controls, not
+sliders.
 
-## Frets and Plucking — calibrated in the same flow (Setup page)
+### Accessibility
 
-On the **Setup** page, the two physical halves of each string are calibrated and
-tested on their **own steps** (Frets → Plucking → Test), right after the Instrument
-step. Both carry an **Arm** control and a **test bench**.
+`:focus-visible` on every interactive control; `aria-label` on the gear and hamburger
+buttons (+ `aria-expanded`); `aria-current` on nav items; `role="tablist"`/`tab`/
+`aria-selected` on the steppers, sub-tabs and settings tabs; `aria-pressed` on the
+movement chips; an `aria-live` toast host and `role="alert"` errors; a real modal
+dialog with a focus trap; `prefers-reduced-motion` support; and touch targets raised
+to 42–44 px (the fret chips were 30 px).
+
+## Instrument step — the designer (Configure → step 1)
+
+The **type is cosmetic** — it tags the name and the GM program. What actually builds
+the instrument is the tuning plus the three mechanical questions:
+
+| Question | Options | Effect |
+| -------- | ------- | ------ |
+| How are the frets actuated? | one servo per fret · one servo for two frets (+ *pair up to* threshold) · open strings only · custom | `builder.global.fretting` / `gearThreshold` → `GMB.buildStringServos` |
+| How is the string played? | single pick · back and forth · strum | `sounding` (`pluck`/`strum`) + `alternate` (seeds `activeAltUs` inside the pulse window) |
+| How is the string stopped? | let it ring · the plectrum · a damper · a descent servo | `stop` → `p.pluck.muteSource` / `liftMuteOnNoteOff`, and the `damper` / `strumLift` servos |
+
+Each card carries the **servo count it implies**, so the trade-off is visible before
+committing. The whole spec is **derived** from the servo list on entry
+(`deriveSpec()`), edited through these cards, and committed by `applyBuilder()`;
+`GMB.mergeBuilderServos` makes regeneration **differential**, so every servo whose
+mechanical identity survives keeps its full calibration and wiring. When the strings
+disagree on a field the card shows *mixed* instead of pretending one is selected.
+
+The last card is the answer: `6 strings · 72 finger servos · 6 plectrums · 5 PCA9685
+boards needed`, then one summary line each for the controller, the wiring, MIDI and
+the timing. The ESP32 board selector itself moved to ⚙ → Advanced hardware (step 1
+shows `Controller · ESP32-S3-DevKitC-1 ✓ [Change]`), and *Reset wiring & calibration*
+is in a Danger zone under *Advanced options*.
+
+## Frets and Strings — calibrated in the same flow (Configure page)
+
+The two physical halves of each string are calibrated and tested on their **own
+steps** (Frets → Strings → Test). Both carry an **Arm** control, and their group test
+bench is folded under *Group tests…*.
 
 - **Frets step — the finger servos.** Per string (string-tab strip), a **coverage
-  strip** shows which frets carry a servo (geared ⚙). **Tap a fret** to open its
-  **servo div**: a **"One servo drives 2 frets (geared)"** toggle (side A = `fret`,
-  side B = `fretB`/`activeBUs`, rest = their **midpoint**, computed automatically),
-  the **PCA board + pin**, the **angle(s)** on precise **− / + steppers** (plain =
-  contact + rest; geared = one press angle per fret) and the **rotation direction**.
-  Each step drives the servo to that `us` pulse live (`POST /api/test/servo`); **play
-  the note** checks it (`POST /api/test/note`).
+  strip** shows which frets carry a servo (geared ⚙). **Tap a fret** to calibrate its
+  **rest** and **press** positions on precise **− / + steppers**, test it, play the
+  note, and jump to the **next fret**. Each step drives the servo to that `us` pulse
+  live (`POST /api/test/servo`); the note check uses `POST /api/test/note`. The wiring
+  is a summary line; *Advanced* holds the **geared** toggle (side A = `fret`, side B =
+  `fretB`/`activeBUs`, rest = their **midpoint**, computed automatically), travel /
+  settle, and servo removal. A geared servo shows one press angle per fret.
 
-- **Plucking step — the sounding servo.** Per string, one **pluck/strum** servo: its
-  **PCA board + pin**, the **contact**, **down-stroke** and **up-stroke** angles,
-  per-plectrum **alternation** and **rotation direction**, travel/settle, plus the
-  **mute** policy (source / hold / plectrum mute angle) and the global gesture
-  (stroke duration, minimum strike depth). Optionally add a **descent servo**
-  (`strumLift`) — rest/play angles, direction, travel, engage delay, lower- or
-  raise-to-play — and a **damper servo** (rest/damp angles, direction, travel).
-  Test every position live (→ contact / down / up / mute) and **pluck the open
-  string**.
+- **Strings step — the sounding servo.** Per string, one **pluck/strum** servo: its
+  **rest position**, **end of stroke** and (when alternating) **end of the return
+  stroke**, a test row, the **movement** chips (single / back and forth / strum) and
+  *Invert*. `travelMs` / `settleMs` / `strokeMs` / `minStrikePct` are under *Movement
+  settings*. **Extras** is one `+ Add…` line per missing mechanism — a **damper** or a
+  **descent servo** (`strumLift`) unfold their own calibration once fitted. **Stopping
+  the note** states the policy chosen in the designer and shows only the angle it
+  needs; *Advanced* holds the mute hold and the descent-servo-as-damper option.
 
-Each servo carries a signal **source** in the profile (the simplified editors assign
-a **PCA board + pin**; direct-GPIO servos remain valid in the data model and the
-wiring diagram):
+Each servo carries a signal **source** in the profile. The generator assigns it, the
+calibration screens show it as a one-line summary, and *Change…* opens the editor;
+direct-GPIO servos are fully supported and mixing the two is a feature:
 - **PCA9685** — `pcaBoard` (**0–7**, addresses 0x40–0x47), the **I²C bus** (`i2cBus`
   **0** = SDA/SCL, **1** = SDA2/SCL2) and `channel` (0–15).
 - **Direct GPIO** — a free ESP32 pin (green pins), filtered with the same
@@ -204,7 +249,10 @@ boards can be split across a second bus (`Wire1`, pins **SDA2/SCL2**) to halve t
 bus traffic and refresh the servos faster on large instruments (many strings / many
 boards). In the simplified UI the bus is picked **per servo**, next to its PCA board
 and channel (*I²C bus: Bus 0 / Bus 1*) — a physical board is the pair
-**(bus, address)**. As soon as one servo lands on bus 1 the profile gains its
+**(bus, address)**. The bus split is normally decided by the generator and adjusted
+in ⚙ → Advanced hardware → *PCA9685 boards & I²C* (per-board picker, auto-split, and
+the `/OE`-per-bus toggle); a single servo can still be moved by hand from its wiring
+editor. As soon as one servo lands on bus 1 the profile gains its
 `SDA2` / `SCL2` signals, defaulted **from the board profile** (never a hard-coded
 pin: GPIO38 is free on a DevKitC-1 v1.0 but drives the RGB LED on a v1.1) and
 assignable in the **GPIO pins** sub-tab; moving the last servo back drops them again.
@@ -213,9 +261,8 @@ Each I²C bus addresses **up to 8 boards** (0x40–0x47), so two buses reach **1
 
 The firmware drives **both controllers** (`Wire` = bus 0, `Wire1` = bus 1), routing
 each board to its own bus and holding every configured `/OE` line in the safe state.
-A **`/OE` split per bus** (`SERVO_OE2`) is supported by the profile and the firmware,
-but the control that created it disappeared with the expert mode — from the interface
-both buses share a single `/OE` line.
+A **`/OE` split per bus** (`SERVO_OE2`) is offered by the bus-topology card once a
+second bus is in use; otherwise both buses share a single `/OE` line.
 
 The system works with **no PCA at all** (every servo on a direct GPIO) or any mix.
 Per-string servos get their `stringIndex` set automatically. Each servo carries its
@@ -258,7 +305,7 @@ page (or a re-render) always lifts any held finger and cancels pending strokes; 
 **STOP (panic)** button — in the top bar and at the bottom of the sidebar — is the
 manual safety net.
 
-## Wiring map (Wiring & GPIO page → Harness sub-tab)
+## Wiring map (Wiring page → Diagram sub-tab)
 
 The **Harness** sub-tab draws the current instrument's electrical harness as a
 schematic, **as close to the real build as the profile allows** and fully

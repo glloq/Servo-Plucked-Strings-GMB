@@ -1,26 +1,30 @@
 /*
- * settings.js — the device Settings modal (gear button, top-right).
+ * settings.js — the Settings modal (gear button, top-right).
  *
- * UI redesign: the WHOLE instrument creation now lives on the Setup main page
- * (one ordered flow), so this modal holds only what belongs to the device rather
- * than the instrument, behind two tabs:
+ * Everything the software can decide for the user lives here rather than in the
+ * creation flow (UX audit 17), split by WHO needs it instead of by which
+ * firmware subsystem owns it:
  *
- *   • Network  — network mode, SSIDs, hostname, Wi-Fi credentials (write-only)
- *                and the on-demand hotspot switch.
- *   • Advanced — GMB identity & capabilities (SysEx) + the live MIDI monitor
- *                and integrated tester (diagnostics).
+ *   • Device            — Wi-Fi (one line + "Change network"), device name, hotspot.
+ *   • MIDI              — automatic by default; parameters and tablature behind
+ *                         disclosures (midiselect.js).
+ *   • Advanced hardware — controller board, PCA9685 / I²C topology, GPIO grid,
+ *                         power & safety dossier, timing & servo-start governor.
+ *   • Security          — admin token, network-MIDI source posture.
+ *   • Diagnostics       — live MIDI monitor + integrated note tester.
+ *   • Developer         — GMB identity & capabilities (SysEx).
  *
- * Profiles are intentionally not exposed here (a hidden, non-user setting). The
- * Simplified / Advanced toggle is mirrored in the footer because the overlay
- * covers the sidebar. The Advanced tab owns a live MIDI socket, torn down on
- * every tab switch and on close.
+ * SysEx therefore never appears in front of somebody who only wants to build a
+ * guitar. The modal is a real dialog: role="dialog", aria-modal, a focus trap and
+ * focus restored to the gear button on close.
  */
 (function (global) {
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
   var overlay = null;
-  var activeTab = 'network';
+  var lastFocus = null;
+  var activeTab = 'device';
   // openNetwork/pickedSsid: the "no password needed" state is only trusted while
   // the SSID field still holds the exact network picked from the scan — a manual
   // edit falls back to "unknown security" and shows the password field again.
@@ -29,6 +33,7 @@
   // Wi-Fi scan state: null until a scan ran; { scanning, networks } afterwards.
   var scan = null;
   var scanPollTimer = null;
+  var changingNetwork = false;   // "Change network" pressed: show the picker
 
   function openNetworkSelected() {
     var net = GMB.state.profile && GMB.state.profile.network;
@@ -36,9 +41,15 @@
   }
 
   var TABS = [
-    { id: 'network',  label: 'Network' },
-    { id: 'advanced', label: 'Advanced' }
+    { id: 'device',     label: 'Device' },
+    { id: 'midi',       label: 'MIDI' },
+    { id: 'hardware',   label: 'Advanced hardware' },
+    { id: 'security',   label: 'Security' },
+    { id: 'diagnostics', label: 'Diagnostics' },
+    { id: 'developer',  label: 'Developer' }
   ];
+  // Retired tab ids still resolve (deep links, docs, the screenshot tool).
+  var TAB_ALIASES = { network: 'device', advanced: 'diagnostics', sysex: 'developer' };
 
   function section(title, children, hint) {
     return h('div.settings-section', [
@@ -48,23 +59,30 @@
 
   // ---- shell ----------------------------------------------------------------
   function build() {
-    var panel = h('div.settings-panel', { onclick: function (e) { e.stopPropagation(); } }, [
+    var panel = h('div.settings-panel', {
+      role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'settings-title',
+      onclick: function (e) { e.stopPropagation(); }
+    }, [
       h('div.settings-head', [
         h('div.settings-head-top', [
-          h('h2', 'Settings'),
-          h('button.settings-close', { type: 'button', title: 'Close', onclick: close }, '×')
+          h('h2#settings-title', 'Settings'),
+          h('button.settings-close', { type: 'button', 'aria-label': 'Close settings',
+            title: 'Close', onclick: close }, '×')
         ]),
-        h('div.settings-tabs', TABS.map(function (t) {
-          return h('button.settings-tab' + (t.id === activeTab ? '.active' : ''),
-            { type: 'button', onclick: function () { switchTab(t.id); } }, t.label);
-        }))
+        h('div.settings-tabs', { role: 'tablist', 'aria-label': 'Settings sections' },
+          TABS.map(function (t) {
+            var on = t.id === activeTab;
+            return h('button.settings-tab' + (on ? '.active' : ''),
+              { type: 'button', role: 'tab', 'aria-selected': on ? 'true' : 'false',
+                onclick: function () { switchTab(t.id); } }, t.label);
+          }))
       ]),
       h('div.settings-body', { id: 'settings-body' }),
       h('div.settings-actions', [
         h('span.muted', GMB.api.mock ? 'Demo / mock backend' : ''),
         h('span.spacer'),
         GMB.button('Close', close, 'ghost'),
-        GMB.button('Save & publish', save, 'primary')
+        GMB.button('Save and apply', save, 'primary')
       ])
     ]);
 
@@ -78,8 +96,13 @@
     if (!body) return;
     teardownTab();
     body.innerHTML = '';
-    if (activeTab === 'advanced') advancedTab(body);
-    else networkTab(body);
+    GMB.setRedraw(drawTab);   // disclosures inside a tab redraw the TAB only
+    if (activeTab === 'midi') midiTab(body);
+    else if (activeTab === 'hardware') hardwareTab(body);
+    else if (activeTab === 'security') securityTab(body);
+    else if (activeTab === 'diagnostics') diagnosticsTab(body);
+    else if (activeTab === 'developer') developerTab(body);
+    else deviceTab(body);
   }
 
   function switchTab(id) {
@@ -87,7 +110,9 @@
     teardownTab();
     activeTab = id;
     if (overlay) overlay.querySelectorAll('.settings-tab').forEach(function (b, i) {
-      b.classList.toggle('active', TABS[i] && TABS[i].id === id);
+      var on = TABS[i] && TABS[i].id === id;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     drawTab();
   }
@@ -133,17 +158,6 @@
     if (scanPollTimer) { clearTimeout(scanPollTimer); scanPollTimer = null; }
   }
 
-  function pickNetwork(entry) {
-    var net = GMB.state.profile.network;
-    net.mode = 'station';
-    net.ssid = entry.ssid;
-    wifi.pickedSsid = entry.ssid;
-    wifi.openNetwork = !entry.secure;
-    if (wifi.openNetwork) wifi.stationPassword = '';  // open: no password to send
-    GMB.markDirty();
-    drawTab();
-  }
-
   function renderScanList() {
     var box = document.getElementById('wifi-scan-list');
     if (!box) return;
@@ -152,86 +166,190 @@
     if (scan.scanning) box.appendChild(h('p.muted', 'Scanning…'));
     var nets = scan.networks || [];
     if (!scan.scanning && !nets.length)
-      box.appendChild(h('p.muted', 'No network found. Scan again, or type the SSID by hand.'));
+      box.appendChild(h('p.muted', 'No network found. Scan again, or type the name by hand.'));
     nets.forEach(function (n) {
-      var row = h('button.btn.ghost.wifi-row', { type: 'button', onclick: function () { pickNetwork(n); } }, [
-        h('span', n.ssid),
-        h('span.muted', ' ' + (n.secure ? '🔒' : 'open') + ' · ' + n.rssi + ' dBm · ch ' + n.channel)
-      ]);
-      row.style.display = 'block';
-      row.style.width = '100%';
-      row.style.textAlign = 'left';
-      box.appendChild(row);
+      box.appendChild(h('button.btn.ghost.wifi-row',
+        { type: 'button', onclick: function () { pickNetwork(n); } }, [
+          h('span', n.ssid),
+          h('span.muted', ' ' + (n.secure ? '🔒' : 'open') + ' · ' + n.rssi + ' dBm · ch ' + n.channel)
+        ]));
     });
   }
 
-  function networkTab(host) {
+  function pickNetwork(entry) {
     var net = GMB.state.profile.network;
+    net.mode = 'station';
+    net.ssid = entry.ssid;
+    wifi.pickedSsid = entry.ssid;
+    wifi.openNetwork = !entry.secure;
+    if (wifi.openNetwork) wifi.stationPassword = '';  // open: no password to send
+    changingNetwork = true;
+    GMB.markDirty();
+    drawTab();
+  }
 
-    host.appendChild(section('Network', h('div.form-grid', [
-      GMB.field('Mode', GMB.input(net, 'mode', {
-        type: 'select',
-        options: [{ value: 'accessPoint', label: 'Access point (hotspot)' },
-                  { value: 'station', label: 'Wi-Fi client' }],
-        onChange: drawTab
-      })),
-      GMB.field('Access-point SSID', GMB.input(net, 'apSsid')),
-      net.mode === 'station'
-        ? GMB.field('Station SSID', GMB.input(net, 'ssid', {
-            // A hand-edited SSID is no longer the scanned (possibly open) network:
-            // security becomes unknown again, so the password field comes back.
-            onChange: function () {
-              if (net.ssid !== wifi.pickedSsid) { wifi.openNetwork = false; drawTab(); }
-            }
-          }))
-        : null,
-      GMB.field('Hostname', GMB.input(net, 'hostname'))
-    ]), 'Stored on the device itself (not in the instrument profile), so it survives ' +
-        'reboots and profile changes. “Save & publish” applies it immediately; if the ' +
-        'connection fails the device falls back to its hotspot.'));
+  // ---- Device tab ------------------------------------------------------------
+  // First view: where the device is connected, and how to reach it if that fails.
+  // Modes, SSIDs, hostname and credential erasure are a second click away
+  // (UX audit 16).
+  function deviceTab(host) {
+    var p = GMB.state.profile;
+    var net = p.network;
+    var station = net.mode === 'station';
 
-    if (net.mode === 'station') {
-      var scanKids = [
-        h('div.toolbar', [GMB.button('Scan networks', startScan, 'ghost')]),
-        h('div', { id: 'wifi-scan-list' })
+    var connKids = [
+      GMB.summaryLine('Connected to',
+        station ? (net.ssid || '(no network chosen)') : ('its own hotspot “' + (net.apSsid || 'GMB') + '”'),
+        changingNetwork ? 'Cancel' : 'Change network',
+        function () { changingNetwork = !changingNetwork; drawTab(); },
+        station ? !!net.ssid : true),
+      GMB.summaryLine('Reachable at', (net.hostname || 'gmb') + '.local', null, null, true)
+    ];
+    host.appendChild(section('Wi-Fi', h('div', connKids),
+      'Stored on the device itself (not in the instrument profile), so it survives ' +
+      'reboots and profile changes. If a network cannot be joined, the device falls ' +
+      'back to its own hotspot.'));
+
+    if (changingNetwork) {
+      var pickKids = [
+        h('div.toolbar', [
+          GMB.button('Scan for networks', startScan, 'primary'),
+          GMB.button('Use the device hotspot instead', function () {
+            net.mode = 'accessPoint'; GMB.markDirty(); changingNetwork = false; drawTab();
+          }, 'ghost')
+        ]),
+        h('div', { id: 'wifi-scan-list' }),
+        GMB.field('…or type the network name', GMB.input(net, 'ssid', {
+          // A hand-edited SSID is no longer the scanned (possibly open) network:
+          // security becomes unknown again, so the password field comes back.
+          onChange: function () {
+            net.mode = 'station';
+            if (net.ssid !== wifi.pickedSsid) { wifi.openNetwork = false; }
+            drawTab();
+          }
+        }))
       ];
-      host.appendChild(section('Nearby networks', h('div', scanKids),
-        'Pick a network to fill the SSID. Open networks need no password.'));
-    }
-
-    var credKids = [];
-    if (net.mode === 'station') {
-      if (openNetworkSelected()) {
-        credKids.push(h('p.muted', '“' + (net.ssid || '') + '” is an open network — no password needed.'));
-      } else {
-        credKids.push(GMB.field('Station password', GMB.input(wifi, 'stationPassword', { type: 'password' })));
+      if (net.mode === 'station') {
+        if (openNetworkSelected())
+          pickKids.push(h('p.muted', '“' + (net.ssid || '') + '” is an open network — no password needed.'));
+        else
+          pickKids.push(GMB.field('Wi-Fi password', GMB.input(wifi, 'stationPassword', { type: 'password' }),
+            'write-only — never displayed or exported'));
       }
-      var forget = h('input', { type: 'checkbox', checked: !!wifi.forgetStation });
-      forget.addEventListener('change', function () { wifi.forgetStation = forget.checked; });
-      credKids.push(h('label.inline.builder-opt', [forget,
-        h('span', 'Forget the stored station password')]));
+      pickKids.push(h('p.muted', 'Press “Save and apply” below to join.'));
+      host.appendChild(section('Choose a network', h('div', pickKids)));
     }
-    if (!wifi.forgetAp) {
-      credKids.push(GMB.field('Access-point password', GMB.input(wifi, 'apPassword', { type: 'password' }),
-        '8–63 characters (WPA2)'));
-    }
-    var forgetAp = h('input', { type: 'checkbox', checked: !!wifi.forgetAp });
-    forgetAp.addEventListener('change', function () {
-      wifi.forgetAp = forgetAp.checked;
-      if (wifi.forgetAp) wifi.apPassword = '';
-      drawTab();
-    });
-    credKids.push(h('label.inline.builder-opt', [forgetAp,
-      h('span', 'Remove the hotspot password (OPEN access point)')]));
-    host.appendChild(section('Wi-Fi credentials', h('div.form-grid', credKids),
-      'Write-only — never displayed or exported. Leave blank to keep unchanged; use ' +
-      '“Forget” / “Remove” (or pick an open network) to really erase a stored password.'));
 
-    host.appendChild(section('Hotspot', h('div.toolbar', [
-      GMB.button('Start hotspot now', startHotspot, 'ghost')
-    ]), 'Switch to the access point now with a captive portal: joining the device’s Wi-Fi opens this page. Also available by holding the board BOOT button for ~2 s.'));
+    host.appendChild(section('Fallback hotspot', h('div', [
+      GMB.summaryLine('Hotspot name', net.apSsid || 'GMB', null, null, true),
+      h('div.toolbar', [GMB.button('Start the hotspot now', startHotspot, 'ghost')]),
+      h('p.muted', 'Joining the device’s Wi-Fi opens this page automatically. Also ' +
+        'available by holding the board’s BOOT button for ~2 s.')
+    ])));
+
+    host.appendChild(GMB.disclosure('net-advanced', 'Advanced network options', function () {
+      var credKids = [];
+      if (net.mode === 'station') {
+        var forget = h('input', { type: 'checkbox', checked: !!wifi.forgetStation });
+        forget.addEventListener('change', function () { wifi.forgetStation = forget.checked; });
+        credKids.push(h('label.inline.builder-opt', [forget,
+          h('span', 'Forget the stored Wi-Fi password')]));
+      }
+      if (!wifi.forgetAp) {
+        credKids.push(GMB.field('Hotspot password', GMB.input(wifi, 'apPassword', { type: 'password' }),
+          '8–63 characters (WPA2)'));
+      }
+      var forgetAp = h('input', { type: 'checkbox', checked: !!wifi.forgetAp });
+      forgetAp.addEventListener('change', function () {
+        wifi.forgetAp = forgetAp.checked;
+        if (wifi.forgetAp) wifi.apPassword = '';
+        drawTab();
+      });
+      credKids.push(h('label.inline.builder-opt', [forgetAp,
+        h('span', 'Remove the hotspot password (OPEN access point)')]));
+
+      return [
+        h('div.form-grid', [
+          GMB.field('Mode', GMB.input(net, 'mode', {
+            type: 'select',
+            options: [{ value: 'accessPoint', label: 'Access point (hotspot)' },
+                      { value: 'station', label: 'Wi-Fi client' }],
+            onChange: drawTab
+          })),
+          GMB.field('Hotspot name (AP SSID)', GMB.input(net, 'apSsid')),
+          GMB.field('Device name (hostname)', GMB.input(net, 'hostname'),
+            'reachable as <name>.local on the network')
+        ]),
+        h('h4', 'Stored credentials'),
+        h('p.muted', 'Write-only — never displayed or exported. Leave blank to keep ' +
+          'unchanged; use “Forget” / “Remove” (or pick an open network) to really erase one.'),
+        h('div.form-grid', credKids)
+      ];
+    }));
+
+    host.appendChild(GMB.disclosure('device-firstrun', 'Re-run the welcome screen', function () {
+      return [
+        h('p.muted', 'Shows the “create your instrument” screen again the next time ' +
+          'this page is opened. Nothing on the device is changed.'),
+        h('div.toolbar', [GMB.button('Show the welcome screen again', function () {
+          GMB.resetFirstRun();
+          GMB.toast('The welcome screen will show on the next reload.', 'ok');
+        }, 'ghost')])
+      ];
+    }));
 
     renderScanList();
+  }
+
+  // ---- MIDI tab --------------------------------------------------------------
+  function midiTab(host) {
+    if (GMB.midiSettings && GMB.midiSettings.settings) GMB.midiSettings.settings(host);
+    else host.appendChild(h('div.note-box', 'MIDI settings module not loaded.'));
+  }
+
+  // ---- Advanced hardware tab -------------------------------------------------
+  // Everything the generator normally decides: the board, the PCA9685 / I²C
+  // topology, the GPIO grid, the power dossier and the timing / governor.
+  function hardwareTab(host) {
+    host.appendChild(h('div.note-box',
+      'Every value here already has a working default derived from your instrument. ' +
+      'You only need this page when the hardware differs from the recommended build, ' +
+      'or when you are diagnosing a real installation.'));
+    if (GMB.hardwarePanels) {
+      GMB.hardwarePanels.board(host);
+      GMB.hardwarePanels.i2c(host);
+      GMB.hardwarePanels.timing(host);
+    }
+    hwDisclosure(host, 'hw-gpio', 'GPIO pins', GMB.views.pins.render);
+    hwDisclosure(host, 'hw-i2c-detail', 'I²C addressing & pull-ups', GMB.views.wiringI2c.render);
+    hwDisclosure(host, 'hw-power', 'Power & safety dossier', GMB.views.wiringPower.render);
+  }
+
+  // A folded section hosting a whole view module. The box is ATTACHED to the
+  // document before the module renders into it: some views (the GPIO grid) look
+  // their own sub-elements up by id, which only works once they are in the DOM.
+  function hwDisclosure(host, key, label, renderFn) {
+    var box = h('div.hw-section');
+    host.appendChild(GMB.disclosure(key, label, function () { return box; }));
+    if (GMB.isDisclosed(key)) renderFn(box);
+  }
+
+  // ---- Diagnostics tab -------------------------------------------------------
+  function diagnosticsTab(host) {
+    host.appendChild(h('div.note-box',
+      'Live view of what the instrument receives and does: the MIDI monitor shows ' +
+      'every incoming event with its interpretation, and the tester sends one note ' +
+      'through the whole chain.'));
+    if (GMB.midiSettings && GMB.midiSettings.tools) GMB.midiSettings.tools(host);
+  }
+
+  // ---- Developer tab ---------------------------------------------------------
+  function developerTab(host) {
+    host.appendChild(h('div.note-box',
+      'The instrument’s machine-readable identity: the SysEx capability descriptor a ' +
+      'host queries to discover strings, frets, CC numbers and revision. Nothing here ' +
+      'is needed to build or play the instrument.'));
+    if (GMB.views.sysex && GMB.views.sysex.render) GMB.views.sysex.render(host);
   }
 
   // ---- Advanced tab ---------------------------------------------------------
@@ -350,50 +468,79 @@
       'shared Wi-Fi prefer “lock to first sender”.'));
   }
 
-  function advancedTab(host) {
-    // No "switch to Advanced" hint any more: the expert mode is gone and this tab
-    // IS the detailed view — everything below is on this one scrolling panel.
+  function securityTab(host) {
     host.appendChild(h('div.note-box',
-      'Advanced tools, in order below: device security (admin token, network MIDI ' +
-      'policy), GMB identity & capabilities (SysEx) with its tester, then the live ' +
-      'MIDI monitor and the integrated note tester.'));
+      'Who is allowed to change this instrument, and which hosts on the network may ' +
+      'send it notes. On an isolated hotspot the defaults are fine; before joining a ' +
+      'shared Wi-Fi, set an admin token.'));
     var sec = h('div', { id: 'security-section' });
     host.appendChild(sec);
     renderSecurity(sec, null);
     GMB.api.getStatus().then(function (st) { renderSecurity(sec, st); })
       .catch(function () {});
-    if (GMB.views.sysex && GMB.views.sysex.render) GMB.views.sysex.render(host);
-    if (GMB.midiSettings && GMB.midiSettings.tools) GMB.midiSettings.tools(host);
   }
 
   // ---- open / close ---------------------------------------------------------
   function open(tab) {
     if (!GMB.state.profile) { GMB.toast('Configuration still loading…', 'warn'); return; }
-    activeTab = (tab && TABS.some(function (t) { return t.id === tab; })) ? tab : 'network';
+    tab = TAB_ALIASES[tab] || tab;
+    activeTab = (tab && TABS.some(function (t) { return t.id === tab; })) ? tab : 'device';
     if (overlay) overlay.remove();
+    lastFocus = document.activeElement;
     build();
-    // rAF so the .open transition runs from the hidden state.
-    requestAnimationFrame(function () { if (overlay) overlay.classList.add('open'); });
-    document.addEventListener('keydown', onKey);
+    // rAF so the .open transition runs from the hidden state. Focus only moves
+    // on the NEXT frame: the overlay is still `visibility: hidden` while the
+    // class is being applied, and focus() on a hidden element is a no-op.
+    requestAnimationFrame(function () {
+      if (!overlay) return;
+      overlay.classList.add('open');
+      requestAnimationFrame(function () {
+        if (!overlay) return;
+        var first = overlay.querySelector('.settings-tab');
+        if (first) first.focus();
+      });
+    });
+    document.addEventListener('keydown', onKey, true);
   }
   GMB.openSettings = open;
 
   function close() {
-    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('keydown', onKey, true);
     teardownTab();
+    GMB.setRedraw(null);
     if (overlay) {
       var o = overlay;
       o.classList.remove('open');
       overlay = null;
       setTimeout(function () { o.remove(); }, 200);
     }
+    // Focus goes back where it came from (the gear button), so keyboard users are
+    // not dumped at the top of the document.
+    if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) {} }
+    lastFocus = null;
     // Refresh the underlying page so config changes show, and reset the wizard's
     // current-flow tracking to whatever page is now visible.
     if (GMB.render) GMB.render();
   }
   GMB.closeSettings = close;
 
-  function onKey(e) { if (e.key === 'Escape') close(); }
+  // Escape closes; Tab is trapped inside the dialog (a modal that leaks focus to
+  // the page behind it is not a modal).
+  var FOCUSABLE = 'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  function onKey(e) {
+    if (!overlay) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key !== 'Tab') return;
+    var items = Array.prototype.filter.call(overlay.querySelectorAll(FOCUSABLE), function (el) {
+      return !el.disabled && el.offsetParent !== null;
+    });
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    else if (overlay.contains(document.activeElement)) return;
+    else { e.preventDefault(); first.focus(); }
+  }
 
   // ---- save -----------------------------------------------------------------
   // Order matters (audit 4 P1.6): the PROFILE is published FIRST, over the link we
