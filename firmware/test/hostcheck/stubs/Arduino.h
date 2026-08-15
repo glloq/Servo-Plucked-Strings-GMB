@@ -67,10 +67,13 @@ inline unsigned long micros() { return 0; }
 inline void delay(unsigned long) {}
 inline void delayMicroseconds(unsigned long) {}
 
-// LEDC (Arduino-ESP32 3.x pin-based API)
+// LEDC (Arduino-ESP32 3.x pin-based API). ledcWrite() and ledcDetach() really do
+// return bool on 3.x — declaring them void here is what let ServoBank drop their
+// failure signal unnoticed by the compile-check (audit P2), exactly as the void
+// setPWM() stub hid the discarded I2C status.
 inline bool ledcAttach(int, uint32_t, uint8_t) { return true; }
-inline void ledcWrite(int, uint32_t) {}
-inline void ledcDetach(int) {}
+inline bool ledcWrite(int, uint32_t) { return true; }
+inline bool ledcDetach(int) { return true; }
 // 2.x channel-based API (compiled only when ESP_ARDUINO_VERSION_MAJOR < 3)
 inline void ledcSetup(int, uint32_t, uint8_t) {}
 inline void ledcAttachPin(int, int) {}

@@ -149,6 +149,36 @@ int main() {
     CHECK(bank.press(0) == ActuatorResult::Ok, "recovered bus -> Ok");
   }
 
+  // --- Firmware audit P1: neutralisation uses the chip's real FULL OFF --------
+  // setPWM(ch, 0, 0) is not a full-off: it programs the ON and OFF counters to
+  // the same value (NXP warns against it) instead of forcing the output off. The
+  // full-off bit is LEDn_OFF_H[4], reached with an OFF count of 4096 — which is
+  // what Adafruit's own setPin(num, 0) emits. The stub only logs `off` for 4096,
+  // so this check fails on the old encoding.
+  {
+    g_pwmLog.clear();
+    ServoBank::ParkResult n = bank.neutralizePcaOutputs();
+    CHECK(n.ok, "neutralisation succeeds on a healthy bus");
+    CHECK(g_pwmLog.size() == 2, "every enabled PCA channel is silenced");
+    bool allFullOff = !g_pwmLog.empty();
+    for (const auto& w : g_pwmLog)
+      if (!w.off) allFullOff = false;
+    CHECK(allFullOff, "each channel gets a real FULL OFF (LEDn_OFF_H[4], 4096)");
+  }
+
+  // --- Firmware audit P1: neutralisation is transactional ---------------------
+  // A full-off that never reached its board leaves the channel holding its old
+  // pulse. The caller must be able to SEE that and keep /OE high instead of
+  // releasing the outputs over a live latched command.
+  {
+    g_pwmError = 2;
+    ServoBank::ParkResult n = bank.neutralizePcaOutputs();
+    CHECK(!n.ok, "a failed full-off is reported, not swallowed");
+    CHECK(n.reason == ActuatorResult::BusFault, "with the I2C reason attached");
+    CHECK(n.failedServo >= 0, "and the channel that would not go quiet");
+    g_pwmError = 0;
+  }
+
   std::printf(g_fail ? "\nSERVOBANKCHECK FAILED (%d)\n" : "\nservobankcheck OK\n", g_fail);
   return g_fail ? 1 : 0;
 }

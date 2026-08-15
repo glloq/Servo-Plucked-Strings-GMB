@@ -82,6 +82,16 @@ On distingue **strictement** deux opérations (jamais l'une déguisée en l'autr
       rupture de fil y désactive silencieusement l'E-stop.
   - **Panique logicielle** : `POST /api/panic` → `hardStop` + état `Panic`. Il faut
     ensuite un **reset** explicite (`POST /api/reset`) pour ré-armer.
+> **`/OE` n'est abaissé que sur des canaux prouvés silencieux.** Avant chaque
+> descente de `/OE` (armement, swap de profil), `neutralizePcaOutputs()` écrit le
+> **FULL OFF** du PCA9685 — un compteur OFF de 4096, c'est-à-dire le bit
+> `LEDn_OFF_H[4]`, et non `setPWM(ch, 0, 0)` qui programme les compteurs ON et OFF
+> à la même valeur — sur chaque canal actif. L'opération est **transactionnelle** :
+> si une seule écriture n'atteint pas sa carte, le canal garde son impulsion
+> latchée, donc `/OE` reste HIGH, une faute est enregistrée et l'armement (ou le
+> swap) est refusé. Les servos GPIO directs n'ont pas de latch : leur PWM est
+> détaché, et l'échec de `ledcWrite()`/`ledcDetach()` est lui aussi remonté.
+
 - **`controlledPark` — parking contrôlé** (changement de profil, arrêt normal,
   reconfiguration) : on commande les servos au repos, on **attend** `travel + settle`,
   puis on coupe les sorties. C'est un arrêt *propre*, pas un E-stop.

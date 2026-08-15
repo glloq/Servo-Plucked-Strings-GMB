@@ -51,8 +51,8 @@ Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **289 tests, 4297 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **289 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **294 tests, 4310 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **294 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2 + split slot device/instrument P1.13) | OK |
@@ -495,3 +495,129 @@ points de cet audit.
 
 Restent inchangés et hors périmètre de ce passage : DIN physique (UART non
 raccordé), USB-MIDI (squelette TinyUSB), BLE.
+
+
+---
+
+## 8. Troisième passage — FULL OFF PCA9685, neutralisation transactionnelle, LEDC, HIL
+
+| Priorité | Point | Statut |
+| -------- | ----- | ------ |
+| P1 | `FULL OFF` PCA9685 incorrect (`setPWM(ch,0,0)`) | **DONE** |
+| P1 | Neutralisation avant `/OE` non vérifiée | **DONE** (transactionnelle) |
+| P2 | Erreurs `ledcWrite()` / `ledcDetach()` ignorées | **DONE** |
+| P2 | Harnais HIL incompatible avec l'API réelle | **DONE** (+ auto-testé en CI) |
+| P2 | Véritable campagne matérielle | **toujours à effectuer** |
+
+### 8.1 — Le vrai FULL OFF du PCA9685 (P1)
+
+`writeOff()` émettait `setPWM(ch, 0, 0)`. Ce n'est pas la neutralisation définie
+par le composant : le PCA9685 possède un bit dédié `LEDn_OFF_H[4]`, atteint avec
+un compteur OFF de **4096**, et NXP déconseille explicitement de programmer les
+compteurs ON et OFF à la même valeur — ce que `(0, 0)` fait. C'est d'ailleurs ce
+`4096` qu'émet `setPin(num, 0)` d'Adafruit.
+
+Corrigé en `setPWM(ch, 0, kPcaFullOff)`. Le point comptait : `writeOff()` sert à
+`hardStop()`, à `neutralizePcaOutputs()` et à la coupure PWM au repos
+(`disableAtRest`) — soit les trois chemins par lesquels une sortie est censée
+devenir silencieuse.
+
+Le stub `servobankcheck` n'enregistre `off` que pour 4096 : **la vérification
+échoue sur l'ancien encodage** (constaté en le réintroduisant).
+
+### 8.2 — La neutralisation devient transactionnelle (P1)
+
+`neutralizePcaOutputs()` ne retournait rien et `writeOff()` jetait le statut I²C.
+Le scénario restait donc ouvert : une écriture de neutralisation échoue en
+silence → le canal garde son impulsion latchée → `/OE` passe à LOW → l'ancien
+ordre servo est relâché au moment précis où les sorties s'animent. Exactement
+l'inverse du principe documenté.
+
+Désormais :
+
+```cpp
+ActuatorResult writeOff(int index);
+ParkResult     neutralizePcaOutputs();   // première défaillance rapportée
+```
+
+et les deux appelants (`SafetySupervisor::arm()` et le swap de profil de
+`main.cpp`) refusent d'abaisser `/OE` :
+
+```cpp
+ServoBank::ParkResult neutral = g_servos.neutralizePcaOutputs();
+if (!neutral.ok) {
+    g_servos.outputEnable(false);          // /OE reste HIGH
+    g_safety.recordFault("neutralise", …);
+    return false;                          // armement / swap refusé
+}
+g_servos.outputEnable(true);
+```
+
+Tous les canaux restent tentés (un appelant qui abandonne veut avoir fait taire
+ce qu'il pouvait), mais la **première** défaillance est remontée avec son servo et
+sa raison. 5 nouveaux cas natifs + 2 dans `servobankcheck`.
+
+### 8.3 — Les servos GPIO directs rejoignent la règle (P2)
+
+La garantie « le modèle logiciel ne bouge que si le driver a accepté » valait pour
+le PCA9685 mais pas pour LEDC. Arduino-ESP32 3.x renvoie un `bool` sur
+`ledcWrite()` et `ledcDetach()` ; les deux sont maintenant contrôlés, dans
+`writeMicros()` comme dans `writeOff()`, et remontent `OutputFault`.
+
+Là encore le stub était complice : `hostcheck/stubs/Arduino.h` déclarait ces
+fonctions `void`, donc la compile-check *ne pouvait pas* voir le retour ignoré.
+Signatures corrigées — même classe de défaut que le `setPWM()` `void` du passage
+précédent, et la leçon est la même : **un stub qui ment sur une signature rend un
+défaut invisible à la CI**.
+
+### 8.4 — Le harnais HIL parle enfin l'API réelle (P2)
+
+Trois défauts, tous confirmés dans le code :
+
+1. **Mauvais en-tête d'authentification.** Le harnais envoyait `X-Admin-Token`,
+   le firmware lit `X-GMB-Token` (`WebApi::authOk`) — `--token` n'authentifiait
+   donc rien et chaque écriture revenait en 401.
+2. **Sémantique du 202 ignorée.** `/api/reset`, `/api/test/note` et
+   `PUT /api/profile` répondent **202 + `commandId`** ; la décision est prise plus
+   tard, sur la boucle. Le harnais assertait `status == 200` (jamais vrai) et,
+   pire, `status != 200` pour « prouver » qu'une note était refusée pendant
+   l'E-stop — ce qui passe sur **tout** 202, quoi que fasse ensuite l'appareil.
+   Chaque commande est maintenant suivie jusqu'à son état terminal
+   (`succeeded` / `refused` / `failed` / `cancelled`).
+3. **Timeout compté comme succès.** `outcome in ("succeeded", "timeout")` est
+   devenu `outcome == "succeeded"` : un timeout est précisément ce qu'une session
+   de banc doit faire remonter.
+
+`urlopen` lève sur 4xx/5xx : les codes 401/409/422/503 sont maintenant récupérés
+et raisonnés, au lieu de faire exploser le scénario.
+
+### 8.5 — Un harnais non exécuté n'est pas un harnais : mock REST en CI
+
+Le job CI ne vérifiait que la syntaxe Python et la table des scénarios — donc
+aucune des trois erreurs ci-dessus. Ajouté :
+
+* `firmware/test/hil/mock_device.py` — reproduit la **sémantique** de
+  `WebApi.cpp` : contrat 202 + `commandId`, `X-GMB-Token`, 200 sur `/api/panic`,
+  refus au niveau commande et non HTTP, 409 sur `/api/test/servo` non armé. Trois
+  modes `--misbehave` (`never-stops`, `slow-command`, `wrong-token`).
+* `firmware/test/hil/selfcheck.py` — exécute le **vrai** harnais contre ce mock et
+  vérifie les deux moitiés du contrat : il passe sur un appareil correct **et il
+  échoue, sur la bonne vérification, sur un appareil qui triche**.
+
+Validé en réintroduisant les défauts d'origine : avec `X-Admin-Token` la session
+authentifiée échoue sur 12 vérifications ; avec l'ancien `status != 200` le
+harnais **cesse de détecter** un appareil qui continue de jouer après un panic.
+
+Le job CI exécute maintenant `selfcheck.py` (~43 s). `--wait-scale` réduit les
+budgets d'attente pour ce seul usage ; **à laisser à 1.0 sur matériel**.
+
+### 8.6 — Ce qui reste
+
+La campagne matérielle elle-même. Les corrections 8.1–8.3 touchent du code
+`#if defined(ARDUINO)` : leur *contrat* est testé à l'hôte (hook d'injection,
+stubs corrigés, `servobankcheck`), leur *effet électrique* ne l'est pas. Les trois
+scénarios qui ferment réellement ce passage sont `oe` (le `/OE` au scope, canaux
+silencieux avant la descente), `pca_loss` et `estop`.
+
+Inchangés et hors périmètre : DIN physique (UART non raccordé), USB-MIDI
+(squelette TinyUSB), BLE.
