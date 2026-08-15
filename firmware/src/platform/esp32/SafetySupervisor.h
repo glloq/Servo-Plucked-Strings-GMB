@@ -124,7 +124,20 @@ public:
         // still high, so (2) enabling the outputs releases nothing; (3) the rest
         // commands are then issued PROGRESSIVELY through a governed park using the
         // profile's power caps, instead of firing every servo at once.
-        g_servos.neutralizePcaOutputs();
+        // (1) is now TRANSACTIONAL (audit P1): if a single full-off write did not
+        // reach its board, that channel still holds its previous pulse — pulling
+        // /OE low would release a stale servo command at the instant the outputs
+        // come alive. The outputs stay cut and arming is refused.
+        ServoBank::ParkResult neutral = g_servos.neutralizePcaOutputs();
+        if (!neutral.ok) {
+            g_servos.outputEnable(false);  // belt and braces: /OE stays HIGH
+            g_safety.recordFault("neutralise",
+                                 "servo " + std::to_string(neutral.failedServo) +
+                                 " could not be silenced [" +
+                                 actuatorResultName(neutral.reason) +
+                                 "] — /OE kept high, arming refused", nowMs);
+            return false;
+        }
         g_servos.outputEnable(true);
         uint32_t parkMs = g_servos.beginGovernedPark(
             nowMs, g_profile.power.maxConcurrentMoves,

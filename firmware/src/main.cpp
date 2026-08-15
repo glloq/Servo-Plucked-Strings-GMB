@@ -400,7 +400,19 @@ CmdOutcome doActivateProfile(const Profile& p, uint32_t nowMs, uint32_t cmdId) {
     // low (the outputs may have been cut by a stop — enabling them must release
     // nothing), then the OLD profile's servos park progressively under its power
     // caps. loop() services the remaining slots while the activation wait runs.
-    g_servos.neutralizePcaOutputs();
+    // Transactional, exactly as in arm() (audit P1): a full-off that never reached
+    // its board leaves a latched pulse, and /OE must not be released over it.
+    ServoBank::ParkResult neutral = g_servos.neutralizePcaOutputs();
+    if (!neutral.ok) {
+        g_servos.outputEnable(false);  // /OE stays HIGH
+        g_safety.recordFault("neutralise",
+                             "servo " + std::to_string(neutral.failedServo) +
+                             " could not be silenced [" +
+                             actuatorResultName(neutral.reason) +
+                             "] — /OE kept high, profile swap refused", nowMs);
+        g_phase = AppPhase::Boot;
+        return CmdOutcome::Refused;
+    }
     g_servos.outputEnable(true);
     uint32_t wait = g_servos.beginGovernedPark(nowMs, g_profile.power.maxConcurrentMoves,
                                                g_profile.power.maxConcurrentPerBoard,

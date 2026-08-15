@@ -213,3 +213,86 @@ TEST(a_refused_mute_does_not_hold_the_plectrum_against_the_string) {
     // (moveTo/mute hold deliberately skip the rest-time cut-off).
     CHECK_EQ((int)b.lastCommandedUs(0), 1000);
 }
+
+// ---------------------------------------------------------------------------
+// Audit P1 — neutralisation before /OE must be TRANSACTIONAL.
+//
+// neutralizePcaOutputs() returned void and writeOff() discarded setPWM()'s I2C
+// status, so this was reachable:
+//
+//     /OE HIGH -> pcaHealthy() OK -> neutralise -> one write fails (ignored)
+//     -> the channel still holds its old pulse -> /OE LOW -> stale command
+//        released at the instant the outputs come alive.
+//
+// The caller must now be able to see the failure and keep /OE high.
+// ---------------------------------------------------------------------------
+
+TEST(neutralising_the_outputs_reports_success) {
+    ServoBank b;
+    std::vector<ServoConfig> sv = {wfServo("finger", 0), wfServo("pluck", 0)};
+    b.begin(sv, -1, -1, -1);
+    ServoBank::ParkResult r = b.neutralizePcaOutputs();
+    CHECK(r.ok);
+    CHECK_EQ(r.failedServo, -1);
+    CHECK(r.reason == ActuatorResult::Ok);
+}
+
+TEST(neutralising_reports_the_first_channel_that_would_not_go_quiet) {
+    ServoBank b;
+    std::vector<ServoConfig> sv = {wfServo("finger", 0), wfServo("finger", 1),
+                                   wfServo("pluck", 1)};
+    b.begin(sv, -1, -1, -1);
+    // Servos 1 AND 2 refuse: the report carries the FIRST, and the caller must be
+    // able to refuse to arm on it.
+    b.hostWriteResult = [](int i) {
+        return i >= 1 ? ActuatorResult::BusFault : ActuatorResult::Ok;
+    };
+    ServoBank::ParkResult r = b.neutralizePcaOutputs();
+    CHECK(!r.ok);
+    CHECK_EQ(r.failedServo, 1);
+    CHECK(r.reason == ActuatorResult::BusFault);
+}
+
+TEST(neutralising_still_silences_every_channel_it_can) {
+    ServoBank b;
+    std::vector<ServoConfig> sv = {wfServo("finger", 0), wfServo("finger", 1),
+                                   wfServo("pluck", 1)};
+    b.begin(sv, -1, -1, -1);
+    int attempts = 0;
+    b.hostWriteResult = [&attempts](int i) {
+        ++attempts;
+        return i == 0 ? ActuatorResult::BusFault : ActuatorResult::Ok;
+    };
+    ServoBank::ParkResult r = b.neutralizePcaOutputs();
+    CHECK(!r.ok);
+    CHECK_EQ(r.failedServo, 0);
+    // A caller that aborts still wants as much of the rig silent as possible, so
+    // the sweep does not stop at the first failure.
+    CHECK_EQ(attempts, 3);
+}
+
+TEST(a_disabled_servo_is_never_neutralised_and_never_a_failure) {
+    ServoBank b;
+    std::vector<ServoConfig> sv = {wfServo("finger", 0), wfServo("pluck", 0)};
+    sv[1].enabled = false;
+    b.begin(sv, -1, -1, -1);
+    int attempts = 0;
+    b.hostWriteResult = [&attempts](int) { ++attempts; return ActuatorResult::Ok; };
+    ServoBank::ParkResult r = b.neutralizePcaOutputs();
+    CHECK(r.ok);
+    CHECK_EQ(attempts, 1);  // only the enabled one
+}
+
+TEST(a_direct_gpio_servo_is_not_part_of_the_pca_neutralisation) {
+    ServoBank b;
+    std::vector<ServoConfig> sv = {wfServo("finger", 0), wfServo("pluck", 0)};
+    sv[1].source = ServoSource::DirectGpio;
+    sv[1].gpio = 18;
+    b.begin(sv, -1, -1, -1);
+    int attempts = 0;
+    b.hostWriteResult = [&attempts](int) { ++attempts; return ActuatorResult::Ok; };
+    ServoBank::ParkResult r = b.neutralizePcaOutputs();
+    CHECK(r.ok);
+    // Direct servos latch nothing — hardStop() detaches their PWM instead.
+    CHECK_EQ(attempts, 1);
+}

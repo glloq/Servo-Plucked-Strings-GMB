@@ -19,6 +19,11 @@ against the firmware's API contract, not against a device. Budget the first benc
 session for bringing the harness up as well as the firmware, and when an
 expectation fails, first ask whether the harness is wrong about the real device.
 
+Its *logic*, however, is tested on every CI run — see **Self-check** below. The
+first version of this harness shipped with three defects that a syntax check
+could not see (wrong auth header, an assertion that passed on every `202`, and a
+command timeout counted as a pass), which is exactly why that self-check exists.
+
 ## Bench
 
 ```text
@@ -63,6 +68,53 @@ asserted by the script, and everything that needs a hand on a connector or an ey
 on a scope is prompted — after which its *effect* is asserted automatically. A
 prompt can always be skipped with `s`; skipped checks are reported as skipped,
 never as passed.
+
+## The REST contract it speaks
+
+Getting this wrong is how a harness silently proves nothing, so it is worth
+stating:
+
+| Route | Answer | How the outcome is known |
+| ----- | ------ | ------------------------ |
+| `POST /api/reset` | **202** + `commandId` | `GET /api/commands?id=N` → succeeded / refused / failed / cancelled |
+| `POST /api/test/note` | **202** + `commandId` | same — the *safety* decision is taken later, on the loop |
+| `PUT /api/profile` | **202** + `commandId` | same |
+| `POST /api/test/servo` | **409** when not armed, else 202 | refused at HTTP, or by command outcome |
+| `POST /api/panic` | **200**, no command | it sets a flag; observe `/api/status` |
+| any write, token set | **401** without `X-GMB-Token` | — |
+
+Two consequences the harness now respects, and did not before:
+
+* **an HTTP code alone proves nothing about a mechanical command.** Asserting
+  `status != 200` to show a note was refused during an E-stop passes on every
+  single `202`, whatever the device then does. The outcome has to be followed to
+  `refused`.
+* **a command timeout is a FAILURE.** It means the command never reached a
+  terminal state, which is precisely the condition a bench run exists to surface.
+
+## Self-check (CI)
+
+```bash
+python3 selfcheck.py        # exit 0 = the harness is trustworthy
+```
+
+`mock_device.py` reproduces the semantics of `platform/esp32/WebApi.cpp` — the
+202-plus-`commandId` contract, `X-GMB-Token`, the 200 on `/api/panic`, refusal at
+the command layer rather than at HTTP. `selfcheck.py` runs the **real** harness
+against it and asserts both halves of what a harness must do:
+
+* against a well-behaved device, every automated check passes;
+* against a deliberately misbehaving one (`--misbehave never-stops` /
+  `slow-command` / `wrong-token`), the harness **fails, on the right check**.
+
+Verified by reintroducing the original defects: with the old `X-Admin-Token`
+header the authenticated run fails 12 checks, and with the old
+`status != 200` assertion the harness stops catching a device that keeps playing
+after a panic.
+
+`--wait-scale` shrinks the wait budgets for the self-check (the mock answers
+instantly). **Leave it at 1.0 on hardware** — the real budgets are sized on a
+double park plus arming.
 
 ## What it covers
 

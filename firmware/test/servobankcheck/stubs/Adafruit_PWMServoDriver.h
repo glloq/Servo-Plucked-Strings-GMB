@@ -43,11 +43,20 @@ class Adafruit_PWMServoDriver {
   void writeMicroseconds(uint8_t ch, uint16_t us) {
     g_pwmLog.push_back({wire_->id, addr_, ch, us, false});
   }
-  uint8_t setPWM(uint8_t ch, uint16_t, uint16_t offTicks) {
+  uint8_t setPWM(uint8_t ch, uint16_t onTicks, uint16_t offTicks) {
     if (g_pwmError) return g_pwmError;  // injected I2C failure
-    // offTicks == 0 is the deliberate "full off, no pulse latched" write.
-    if (offTicks == 0) {
+    // FULL OFF is an OFF count of 4096 (bit 12 -> LEDn_OFF_H[4]), the chip's
+    // dedicated "always off" bit. An OFF count of 0 is NOT that: it programs the
+    // ON and OFF counters to the same value, which NXP warns against — the old
+    // code emitted exactly that and this stub accepted it (audit P1).
+    if (offTicks == 4096) {
       g_pwmLog.push_back({wire_->id, addr_, ch, 0, true});
+      return 0;
+    }
+    if (offTicks == 0 && onTicks == 0) {
+      // Not a valid neutralisation: log it as a PULSE of 0 µs so a test that
+      // expects "full off" fails loudly instead of silently accepting it.
+      g_pwmLog.push_back({wire_->id, addr_, ch, 0, false});
       return 0;
     }
     // Same relation ServoBank used to build the ticks, inverted (+ half a tick so

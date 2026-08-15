@@ -140,11 +140,18 @@ public:
     // Accumulated result of the governed park in progress (or the last one).
     const ParkResult& governedParkResult() const { return parkResult_; }
 
-    // Write FULL OFF to every enabled PCA channel (no pulse latched). Called
-    // before /OE is driven low so enabling the outputs can never release stale
-    // preloaded pulses on every channel at once (audit P0). Direct-GPIO servos
-    // have no latch — hardStop() already detached their PWM.
-    void neutralizePcaOutputs();
+    // Write FULL OFF (LEDn_OFF_H[4], i.e. an OFF count of 4096) to every enabled
+    // PCA channel, so no pulse stays latched. Called before /OE is driven low, so
+    // enabling the outputs can never release stale preloaded pulses on every
+    // channel at once (audit P0). Direct-GPIO servos have no latch — hardStop()
+    // already detached their PWM.
+    //
+    // THE RESULT MUST BE CHECKED (audit P1). A channel whose full-off never landed
+    // still holds its previous pulse; pulling /OE low over it releases a stale
+    // servo command at the very moment the outputs come alive. Every channel is
+    // attempted regardless, and the FIRST failure is reported — a caller that sees
+    // !ok must leave /OE high and refuse to arm.
+    ParkResult neutralizePcaOutputs();
 
     // Longest mechanical settle across all enabled servos: max(travelMs + settleMs).
     // The wait a controlled park / arming must allow after moveAllToRest() before the
@@ -319,7 +326,9 @@ private:
          Adafruit_PWMServoDriver(0x46, Wire1), Adafruit_PWMServoDriver(0x47, Wire1)}};
 #endif
     ActuatorResult writeMicros(int index, uint16_t us);  // Ok, or why it couldn't apply
-    void writeOff(int index);
+    // Silence one output (PCA full-off, or LEDC write-0 + detach) and report
+    // whether the hardware accepted it (audit P1/P2).
+    ActuatorResult writeOff(int index);
     bool attachDirect(int index);  // (re)attach a direct servo's LEDC channel
 #if defined(ARDUINO)
     // PCA9685 write that HONOURS the I2C result (audit P1) — see the definition.

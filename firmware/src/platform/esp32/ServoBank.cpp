@@ -14,6 +14,12 @@ namespace gmb {
 namespace {
 #if defined(ARDUINO)
 constexpr uint32_t kServoFreqHz = 50;
+// PCA9685 FULL OFF. An OFF count of 4096 is bit 12, which lands in LEDn_OFF_H[4]
+// — the datasheet's dedicated "output always off" bit. It is NOT the same as an
+// OFF count of 0: NXP warns against programming the ON and OFF counters to the
+// same value, and (0, 0) does exactly that. Adafruit's setPin(num, 0) emits this
+// same 4096 (audit P1).
+constexpr uint16_t kPcaFullOff = 4096;
 // The ESP32-S3 LEDC supports 1..14 bits; 14 bits @ 50 Hz keeps ~1 µs steps.
 constexpr uint8_t kLedcResBits = 14;
 uint32_t usToDuty(uint16_t us) {
@@ -181,7 +187,10 @@ ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
         if (!attached_[index] && !attachDirect(index))
             return ActuatorResult::OutputFault;  // LEDC (re)attach failed
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-        ledcWrite(s.gpio, usToDuty(outUs));
+        // Arduino-ESP32 3.x returns bool: a refused write means the pulse never
+        // reached the pin, and the software model must not move (audit P2 — this
+        // guarantee held for the PCA path but not yet for direct GPIO).
+        if (!ledcWrite(s.gpio, usToDuty(outUs))) return ActuatorResult::OutputFault;
 #else
         if (ledcCh_[index] < 0) return ActuatorResult::OutputFault;
         ledcWrite(ledcCh_[index], usToDuty(outUs));
@@ -206,27 +215,54 @@ ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
     return ActuatorResult::Ok;
 }
 
-void ServoBank::writeOff(int index) {
-    if (index < 0 || index >= (int)servos_.size()) return;
+// Silence one output, and SAY whether it worked (audit P1).
+//
+// Two defects lived here. First the encoding: setPWM(ch, 0, 0) is NOT the
+// PCA9685's full-off. The chip has a dedicated LEDn_OFF_H[4] "full OFF" bit, and
+// NXP explicitly warns against programming the ON and OFF counters to the same
+// value — which (0, 0) does. The full-off encoding is an OFF count of 4096, i.e.
+// bit 12, which lands in LEDn_OFF_H[4]; that is what Adafruit's own setPin(num, 0)
+// emits. Second, the result was discarded, so a channel that never went quiet
+// still looked neutralised — and /OE was then released over it.
+ActuatorResult ServoBank::writeOff(int index) {
+    if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
         int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
-        if (s.pcaBoard < kMaxPca && pcaPresent_[bus][s.pcaBoard])
-            pca_[bus][s.pcaBoard].setPWM(s.channel, 0, 0);  // full off, no pulse
+        if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard])
+            return ActuatorResult::DriverUnavailable;
+        // kPcaFullOff (4096) sets LEDn_OFF_H[4]: the output is held OFF whatever
+        // the ON counter says. setPWM() returns the I2C status — checked now.
+        if (pca_[bus][s.pcaBoard].setPWM(s.channel, 0, kPcaFullOff) != 0)
+            return ActuatorResult::BusFault;
     } else if (s.gpio >= 0) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-        ledcWrite(s.gpio, 0);
-        ledcDetach(s.gpio);  // truly release the pin (no residual signal)
+        // Arduino-ESP32 3.x returns bool from both calls; a failure here means the
+        // pin may still be driving a pulse, which is exactly what must not be
+        // reported as "off" (audit P2).
+        bool cleared = ledcWrite(s.gpio, 0);
+        bool detached = ledcDetach(s.gpio);  // truly release the pin (no residual signal)
+        attached_[index] = false;            // must reattach before the next write
+        if (!cleared || !detached) return ActuatorResult::OutputFault;
 #else
         if (ledcCh_[index] >= 0) ledcWrite(ledcCh_[index], 0);
         ledcDetachPin(s.gpio);
+        attached_[index] = false;
 #endif
-        attached_[index] = false;  // must reattach before the next write
+    } else {
+        return ActuatorResult::OutputFault;  // no output pin configured
     }
     rt_[index].pwmOff = true;
+    return ActuatorResult::Ok;
 #else
     (void)s;
+    if (hostWriteResult) {
+        ActuatorResult forced = hostWriteResult(index);
+        if (forced != ActuatorResult::Ok) return forced;
+    }
+    rt_[index].pwmOff = true;
+    return ActuatorResult::Ok;
 #endif
 }
 
@@ -445,12 +481,28 @@ void ServoBank::hardStop() {
     parkNext_ = 0;
 }
 
-void ServoBank::neutralizePcaOutputs() {
+ServoBank::ParkResult ServoBank::neutralizePcaOutputs() {
     // FULL OFF on every enabled PCA channel, so driving /OE low can never release
     // stale latched pulses on all channels at once (audit P0). Cheap: one I2C
-    // write per PCA servo; boards that are absent are skipped by writeOff().
-    for (int i = 0; i < (int)servos_.size(); ++i)
-        if (servos_[i].enabled && servos_[i].source == ServoSource::Pca) writeOff(i);
+    // write per PCA servo.
+    //
+    // The result is now REPORTED (audit P1). This is the one place where ignoring
+    // an I2C error was directly dangerous: a channel whose full-off never landed
+    // keeps its previous pulse latched, and the caller was about to pull /OE low
+    // over it — releasing a stale servo command at the exact moment the outputs
+    // come alive. Every channel is still attempted (a caller that aborts wants to
+    // have silenced as much as it could), but the FIRST failure is carried out.
+    ParkResult r;
+    for (int i = 0; i < (int)servos_.size(); ++i) {
+        if (!servos_[i].enabled || servos_[i].source != ServoSource::Pca) continue;
+        ActuatorResult w = writeOff(i);
+        if (w != ActuatorResult::Ok && r.ok) {
+            r.ok = false;
+            r.failedServo = i;
+            r.reason = w;
+        }
+    }
+    return r;
 }
 
 uint32_t ServoBank::beginGovernedPark(uint32_t nowMs, uint8_t maxConcurrent,

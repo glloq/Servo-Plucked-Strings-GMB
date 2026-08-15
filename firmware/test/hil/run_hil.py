@@ -51,10 +51,15 @@ import urllib.request
 class Device:
     """Thin REST client for the instrument."""
 
-    def __init__(self, host, token=None, timeout=5.0):
+    def __init__(self, host, token=None, timeout=5.0, wait_scale=1.0):
         self.base = host if host.startswith("http") else "http://" + host
         self.token = token
         self.timeout = timeout
+        # Scales every wait_state / wait_command budget. 1.0 on a bench; the CI
+        # self-check runs at 0.05 so the deliberate "never resolves" case costs
+        # seconds instead of a minute. Never scale this on real hardware: the
+        # budgets are sized on a double park plus arming.
+        self.wait_scale = wait_scale
 
     def _request(self, method, path, body=None):
         url = self.base + path
@@ -63,13 +68,23 @@ class Device:
         if data is not None:
             req.add_header("Content-Type", "application/json")
         if self.token:
-            req.add_header("X-Admin-Token", self.token)
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            raw = r.read().decode() or "{}"
-            try:
-                return r.status, json.loads(raw)
-            except json.JSONDecodeError:
-                return r.status, {"raw": raw}
+            # The firmware reads X-GMB-Token (WebApi::authOk). The harness used to
+            # send X-Admin-Token, so --token silently authorised nothing and every
+            # protected call came back 401.
+            req.add_header("X-GMB-Token", self.token)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                raw = r.read().decode() or "{}"
+                status = r.status
+        except urllib.error.HTTPError as e:
+            # 401 / 409 / 422 / 503 are real answers the checks reason about, not
+            # transport failures — urlopen raises on them, so unwrap it here.
+            raw = (e.read().decode() or "{}")
+            status = e.code
+        try:
+            return status, json.loads(raw)
+        except json.JSONDecodeError:
+            return status, {"raw": raw}
 
     def get(self, path):
         return self._request("GET", path)
@@ -94,7 +109,7 @@ class Device:
     def wait_state(self, wanted, timeout=30.0, poll=0.25):
         """Wait until /api/status state is one of `wanted`. Returns the last state."""
         wanted = {w.lower() for w in wanted}
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout * self.wait_scale
         last = None
         while time.time() < deadline:
             try:
@@ -106,17 +121,44 @@ class Device:
             time.sleep(poll)
         return last
 
+    TERMINAL = ("succeeded", "refused", "failed", "cancelled")
+
     def wait_command(self, command_id, timeout=40.0, poll=0.25):
-        """Poll a 202-accepted command to its terminal state."""
+        """Poll a 202-accepted command to its terminal state.
+
+        Returns one of succeeded / refused / failed / cancelled, or "timeout" —
+        which is NEVER a success. A missing id means the device did not queue
+        anything, which is a result in itself ("not-queued"), not an implicit OK.
+        """
         if not command_id:
-            return "succeeded"  # legacy/immediate path
-        deadline = time.time() + timeout
+            return "not-queued"
+        deadline = time.time() + timeout * self.wait_scale
         while time.time() < deadline:
             st = str(self.get("/api/commands?id=%d" % command_id)[1].get("state", ""))
-            if st in ("succeeded", "refused", "failed", "cancelled"):
+            if st in self.TERMINAL:
                 return st
             time.sleep(poll)
         return "timeout"
+
+    def command(self, method, path, body=None, timeout=40.0):
+        """Issue a QUEUED command and follow it to its real outcome.
+
+        Every mechanical route (/api/reset, /api/test/note, /api/test/servo,
+        PUT /api/profile) answers **202 Accepted** with a commandId and decides
+        later, on the loop. Checking the HTTP code alone proves only that the
+        request was parsed — the harness used to assert `status != 200` to show a
+        note was "refused during the E-stop", which passes on every 202 whatever
+        the device then does with it.
+
+        Returns (status, body, outcome).
+        """
+        status, body_out = (self.put(path, body) if method == "PUT"
+                            else self.post(path, body))
+        if status != 202:
+            # 401 unauthorised, 409 not armed, 503 queue full, 422 invalid… all
+            # terminal refusals in their own right.
+            return status, body_out, "http-%d" % status
+        return status, body_out, self.wait_command(body_out.get("commandId"), timeout)
 
 
 # --------------------------------------------------------------------------- #
@@ -236,12 +278,13 @@ def sc_boot_safe(h):
 def sc_arming(h):
     """Arming parks the servos under the governor and only then reports Ready."""
     h.begin("arming", "Arming and governed parking")
-    status, body = h.dev.post("/api/reset")
-    h.check(status in (200, 202), "POST /api/reset accepted", "HTTP %d" % status)
     before = h.dev.diagnostics()
-    outcome = h.dev.wait_command(body.get("commandId"), timeout=60)
-    h.check(outcome in ("succeeded", "timeout"), "arming command completed",
-            "state=%s" % outcome)
+    status, _, outcome = h.dev.command("POST", "/api/reset", timeout=60)
+    h.check(status == 202, "POST /api/reset is queued (202)", "HTTP %d" % status)
+    # A timeout is NOT a pass: it means the arming never reached a terminal state,
+    # which is exactly the case a bench run has to surface.
+    h.check(outcome == "succeeded", "the arming command SUCCEEDED",
+            "outcome=%s" % outcome)
     state = h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     h.check(state in ("ready", "readydegraded"), "the device reaches Ready",
             "state=%s" % state)
@@ -265,7 +308,7 @@ def sc_oe(h):
     if not h.manual("Put a scope / logic analyser on the PCA9685 /OE line and on "
                     "one servo channel"):
         return
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     seen = h.observe("On arming: did /OE go LOW only AFTER the channels were "
                      "already silent (no burst of pulses at the moment /OE fell)?")
@@ -276,7 +319,7 @@ def sc_oe(h):
     seen = h.observe("On panic: did /OE go HIGH immediately (< ~10 ms)?")
     if seen is not None:
         h.check(seen, "/OE cuts the outputs immediately on panic")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
 
 
@@ -288,15 +331,18 @@ def sc_play(h):
     if not strings:
         h.skip("play", "no strings in the profile")
         return
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
 
     before = h.dev.diagnostics()
     for s in strings:
-        st, _ = h.dev.post("/api/test/note",
-                           {"channel": 0, "note": s.get("openNote", 60),
-                            "velocity": 100, "durationMs": 300})
-        h.check(st == 200, "open string %d accepted" % s.get("openNote"), "HTTP %d" % st)
+        st, _, outcome = h.dev.command(
+            "POST", "/api/test/note",
+            {"channel": 0, "note": s.get("openNote", 60),
+             "velocity": 100, "durationMs": 300})
+        h.check(st == 202 and outcome == "succeeded",
+                "open string %d plays" % s.get("openNote"),
+                "HTTP %d, outcome=%s" % (st, outcome))
         time.sleep(0.45)
     after = h.dev.diagnostics()
     h.check(after.get("servoMoves", 0) > before.get("servoMoves", 0),
@@ -351,7 +397,7 @@ def sc_loop_latency_vs_network(h):
     reconfigured.
     """
     h.begin("loop_latency", "loop() latency while the network churns (audit P1)")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     base = h.dev.diagnostics().get("scheduler", {}).get("maxLatencyUs", 0)
     print("   baseline max loop latency: %s us" % base)
@@ -390,7 +436,7 @@ def sc_estop(h):
     if not has_estop:
         h.skip("estop", "no ESTOP pin declared in the profile")
         return
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
 
     if h.manual("Press the E-stop (or open the NC loop)"):
@@ -401,10 +447,16 @@ def sc_estop(h):
         seen = h.observe("Did every servo go limp immediately?")
         if seen is not None:
             h.check(seen, "the E-stop neutralises the servos")
-        # Refusing to play while stopped is the whole point.
-        st, _ = h.dev.post("/api/test/note", {"channel": 0, "note": 60,
-                                              "velocity": 100, "durationMs": 200})
-        h.check(st != 200, "notes are refused while stopped", "HTTP %d" % st)
+        # Refusing to play while stopped is the whole point — and it has to be
+        # PROVEN. /api/test/note answers 202 whatever the safety state (the
+        # decision is taken later, on the loop), so the old `status != 200` check
+        # passed on every single 202 without ever looking at the outcome.
+        st, _, outcome = h.dev.command("POST", "/api/test/note",
+                                       {"channel": 0, "note": 60, "velocity": 100,
+                                        "durationMs": 200}, timeout=15)
+        h.check(outcome in ("refused", "cancelled") or st in (409, 403),
+                "the note is actually REFUSED while stopped",
+                "HTTP %d, outcome=%s" % (st, outcome))
 
     # The audit's ordering fix: a stop must land even when the radio is busy.
     if h.manual("Release the E-stop, then press it again DURING heavy network "
@@ -416,10 +468,9 @@ def sc_estop(h):
                 "state=%s" % state)
 
     if h.manual("Release the E-stop"):
-        status, body = h.dev.post("/api/reset")
-        outcome = h.dev.wait_command(body.get("commandId"), timeout=60)
+        _, _, outcome = h.dev.command("POST", "/api/reset", timeout=60)
         state = h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
-        h.check(state in ("ready", "readydegraded"),
+        h.check(outcome == "succeeded" and state in ("ready", "readydegraded"),
                 "the device re-arms after the E-stop is released",
                 "command=%s state=%s" % (outcome, state))
 
@@ -427,7 +478,7 @@ def sc_estop(h):
 def sc_pca_loss(h):
     """A PCA9685 lost mid-play must be detected ON THE WRITE (audit P1)."""
     h.begin("pca_loss", "PCA9685 unplugged during play (audit P1)")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     prof = h.dev.profile()
     strings = prof.get("strings", [])
@@ -504,14 +555,14 @@ def sc_servo_supply(h):
     except (urllib.error.URLError, OSError) as e:
         h.check(False, "the ESP32 survives the servo-rail drop", str(e))
     h.manual("Restore the servo supply")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
 
 
 def sc_profile_swap(h):
     """Changing profile WHILE a note sounds must lift the old fingers first."""
     h.begin("profile_swap", "Profile change during a sounding note")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     prof = h.dev.profile()
     strings = prof.get("strings", [])
@@ -526,10 +577,9 @@ def sc_profile_swap(h):
     edited = json.loads(json.dumps(prof))
     edited["instrument"]["name"] = (prof.get("instrument", {}).get("name", "gmb")
                                     + " (HIL)")
-    status, body = h.dev.put("/api/profile", edited)
-    h.check(status in (200, 202), "the swap is accepted mid-note", "HTTP %d" % status)
-    outcome = h.dev.wait_command(body.get("commandId"), timeout=60)
-    h.check(outcome == "succeeded", "the swap completes", "state=%s" % outcome)
+    status, _, outcome = h.dev.command("PUT", "/api/profile", edited, timeout=60)
+    h.check(status == 202, "the swap is queued mid-note (202)", "HTTP %d" % status)
+    h.check(outcome == "succeeded", "the swap completes", "outcome=%s" % outcome)
     state = h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     h.check(state in ("ready", "readydegraded"), "the new profile is armed",
             "state=%s" % state)
@@ -540,35 +590,41 @@ def sc_profile_swap(h):
 
     # Put the name back so the bench profile is left as we found it.
     restored = json.loads(json.dumps(prof))
-    st, b2 = h.dev.put("/api/profile", restored)
-    h.dev.wait_command(b2.get("commandId"), timeout=60)
+    _, _, restore_outcome = h.dev.command("PUT", "/api/profile", restored, timeout=60)
+    h.check(restore_outcome == "succeeded", "the bench profile is restored",
+            "outcome=%s" % restore_outcome)
 
 
 def sc_panic_http(h):
     """The software panic path, and re-arming after it."""
     h.begin("panic", "Software panic over HTTP")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
+    # /api/panic is NOT a queued command: it sets a flag the loop services, and
+    # answers 200 immediately.
     status, _ = h.dev.post("/api/panic")
     h.check(status == 200, "POST /api/panic accepted", "HTTP %d" % status)
     time.sleep(0.6)
     st = h.dev.status()
     h.check(str(st.get("state", "")).lower() not in ("ready", "readydegraded"),
             "the device leaves Ready on panic", "state=%s" % st.get("state"))
-    snote, _ = h.dev.post("/api/test/note", {"channel": 0, "note": 60,
-                                             "velocity": 100, "durationMs": 200})
-    h.check(snote != 200, "notes are refused after a panic", "HTTP %d" % snote)
-    status, body = h.dev.post("/api/reset")
-    outcome = h.dev.wait_command(body.get("commandId"), timeout=60)
+    snote, _, outcome = h.dev.command("POST", "/api/test/note",
+                                      {"channel": 0, "note": 60, "velocity": 100,
+                                       "durationMs": 200}, timeout=15)
+    h.check(outcome in ("refused", "cancelled") or snote in (409, 403),
+            "the note is actually REFUSED after a panic",
+            "HTTP %d, outcome=%s" % (snote, outcome))
+    _, _, outcome = h.dev.command("POST", "/api/reset", timeout=60)
     state = h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
-    h.check(state in ("ready", "readydegraded"), "re-arming after a panic works",
+    h.check(outcome == "succeeded" and state in ("ready", "readydegraded"),
+            "re-arming after a panic works",
             "command=%s state=%s" % (outcome, state))
 
 
 def sc_wifi_loss(h):
     """Losing Wi-Fi must cancel pending work but keep the instrument armed."""
     h.begin("wifi_loss", "Wi-Fi loss and recovery")
-    h.dev.post("/api/reset")
+    h.dev.command("POST", "/api/reset", timeout=60)
     h.dev.wait_state({"ready", "readydegraded"}, timeout=60)
     before = h.dev.diagnostics()
     if not h.manual("Power the access point / router off for ~20 s, then back on"):
@@ -654,6 +710,9 @@ def main():
     ap.add_argument("--unattended", action="store_true",
                     help="skip every step needing a human (API-only subset)")
     ap.add_argument("--report", default="hil-report.json", help="JSON report path")
+    ap.add_argument("--wait-scale", type=float, default=1.0,
+                    help="scale every wait budget (CI self-check only; keep 1.0 "
+                         "on hardware)")
     ap.add_argument("--list", action="store_true", help="list the scenarios and exit")
     args = ap.parse_args()
 
@@ -668,7 +727,7 @@ def main():
     only = {s.strip() for s in args.only.split(",")} if args.only else None
     skip = {s.strip() for s in args.skip.split(",")} if args.skip else set()
 
-    dev = Device(args.host, args.token)
+    dev = Device(args.host, args.token, wait_scale=args.wait_scale)
     h = Harness(dev, unattended=args.unattended)
 
     print("%sServo-Plucked-Strings-GMB — hardware-in-the-loop%s" % (BOLD, RESET))

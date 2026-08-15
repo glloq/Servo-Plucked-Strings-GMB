@@ -34,10 +34,19 @@ jobs:
           git diff --exit-code firmware/src/platform/esp32/WebAssets.cpp
       - name: ServoBank routing + controlled-park + ActuatorResult check
         run: bash firmware/test/servobankcheck/run.sh
-      - name: HIL harness self-check (syntax + scenario table)
+      - name: HIL harness self-check (runs the harness against a REST mock)
+        # Syntax + the scenario table proved nothing about the harness's REST
+        # semantics: the first version shipped with the wrong auth header, a
+        # `status != 200` assertion that passes on every 202, and a command
+        # timeout counted as success. selfcheck.py drives the real harness against
+        # a mock of WebApi and asserts it passes on a correct device AND fails on
+        # a misbehaving one.
         run: |
-          python3 -m py_compile firmware/test/hil/run_hil.py
+          python3 -m py_compile firmware/test/hil/run_hil.py \
+                                firmware/test/hil/mock_device.py \
+                                firmware/test/hil/selfcheck.py
           python3 firmware/test/hil/run_hil.py --list
+          python3 firmware/test/hil/selfcheck.py
 
   profiles:
     name: Profile validation (JSON + C++ validator)
