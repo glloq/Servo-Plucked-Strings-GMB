@@ -73,8 +73,13 @@ int main() {
   bank.moveAllToRest();
   CHECK(g_pwmLog.size() == 2, "moveAllToRest commands both servos");
   bool allRest = !g_pwmLog.empty();
+  // Within one PCA9685 tick of restUs (1000 µs for both). A tick is ~4.9 µs at
+  // 50 Hz, and the pulse now travels as ticks (ServoBank converts µs -> ticks
+  // itself so it can check setPWM()'s I2C result — Adafruit's writeMicroseconds()
+  // discarded it, firmware audit P1), so the stub can only report the quantised
+  // value the chip would actually emit.
   for (const auto& w : g_pwmLog)
-    if (w.off || w.us != 1000) allRest = false;  // restUs == 1000 for both
+    if (w.off || w.us < 995 || w.us > 1005) allRest = false;
   CHECK(allRest, "moveAllToRest writes the rest pulse to every servo");
 
   // parkDurationMs() is the mechanical wait an arming/controlled park must allow:
@@ -124,6 +129,25 @@ int main() {
   CHECK(ServoBank::boardName(0xFF) == "direct-GPIO", "boardName(0xFF) = direct-GPIO");
   uint8_t fb = 0xEE;
   CHECK(bank.pcaHealthy(fb), "healthy stubs report all boards OK");
+
+  // --- Firmware audit P1: a failed I2C write must be REPORTED -----------------
+  // This is the defect in its native habitat: the real Adafruit driver's
+  // writeMicroseconds() calls setPWM() and discards its return value, so once a
+  // board had ACKed at boot every later write looked successful — including with
+  // the board unplugged. ServoBank now converts µs -> ticks itself and checks
+  // setPWM()'s I2C status, so a dead bus surfaces on the WRITE, not 500 ms later
+  // on the next pcaHealthy() probe.
+  {
+    g_pwmLog.clear();
+    g_pwmError = 2;  // Wire.endTransmission() != 0, i.e. NACK / bus error
+    CHECK(bank.press(0) == ActuatorResult::BusFault,
+          "a failed I2C write reports BusFault instead of Ok");
+    CHECK(bank.toRest(0) == ActuatorResult::BusFault, "toRest reports it too");
+    CHECK(bank.strike(1) == ActuatorResult::BusFault, "so does a strike");
+    g_pwmError = 0;
+    // And with the bus back, the very same calls succeed again.
+    CHECK(bank.press(0) == ActuatorResult::Ok, "recovered bus -> Ok");
+  }
 
   std::printf(g_fail ? "\nSERVOBANKCHECK FAILED (%d)\n" : "\nservobankcheck OK\n", g_fail);
   return g_fail ? 1 : 0;

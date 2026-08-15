@@ -321,6 +321,17 @@ private:
     ActuatorResult writeMicros(int index, uint16_t us);  // Ok, or why it couldn't apply
     void writeOff(int index);
     bool attachDirect(int index);  // (re)attach a direct servo's LEDC channel
+#if defined(ARDUINO)
+    // PCA9685 write that HONOURS the I2C result (audit P1) — see the definition.
+    // Adafruit's writeMicroseconds() discards setPWM()'s error code, so a write to
+    // an unplugged board looked successful and the note played on regardless.
+    ActuatorResult writePcaMicros(int bus, uint8_t board, uint8_t channel, uint16_t us);
+    // PWM prescale + oscillator actually programmed on each board, cached at
+    // begin(). Converting µs -> ticks here also avoids the readPrescale() I2C READ
+    // Adafruit performs on every single writeMicroseconds() call.
+    uint8_t pcaPrescale_[2][kMaxPca] = {{0}};
+    uint32_t pcaOscHz_[2][kMaxPca] = {{0}};
+#endif
 };
 
 }  // namespace gmb

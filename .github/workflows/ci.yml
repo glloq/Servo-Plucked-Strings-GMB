@@ -34,6 +34,10 @@ jobs:
           git diff --exit-code firmware/src/platform/esp32/WebAssets.cpp
       - name: ServoBank routing + controlled-park + ActuatorResult check
         run: bash firmware/test/servobankcheck/run.sh
+      - name: HIL harness self-check (syntax + scenario table)
+        run: |
+          python3 -m py_compile firmware/test/hil/run_hil.py
+          python3 firmware/test/hil/run_hil.py --list
 
   profiles:
     name: Profile validation (JSON + C++ validator)

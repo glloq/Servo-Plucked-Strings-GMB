@@ -9,6 +9,7 @@ CORE := $(ROOT)/src/core
 
 CORE_SRC := \
   $(ROOT)/src/platform/esp32/ServoBank.cpp \
+  $(ROOT)/src/platform/esp32/Net.cpp \
   $(CORE)/Types.cpp \
   $(CORE)/board/BoardProfile.cpp \
   $(CORE)/board/PinManager.cpp \
@@ -52,6 +53,8 @@ TEST_SRC := \
   test_holdbutton.cpp \
   test_profile_activation.cpp \
   test_servobank_park.cpp \
+  test_servobank_writefail.cpp \
+  test_net_ap.cpp \
   test_app_phase.cpp \
   test_readiness.cpp \
   test_udp_source_gate.cpp

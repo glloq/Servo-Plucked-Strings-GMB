@@ -68,6 +68,11 @@ void ServoBank::begin(const std::vector<ServoConfig>& servos, int8_t sda, int8_t
             // begin() returns false if the board does not ACK on its I2C bus.
             if (!pca_[b][i].begin()) pcaAttachFault_ = true;
             pca_[b][i].setPWMFreq(kServoFreqHz);
+            // Cache what the driver actually programmed so every later write can
+            // convert µs -> ticks locally (no readPrescale() round-trip per write)
+            // and check setPWM()'s I2C result — see writePcaMicros().
+            pcaPrescale_[b][i] = pca_[b][i].readPrescale();
+            pcaOscHz_[b][i] = pca_[b][i].getOscillatorFrequency();
         }
     }
     // Attach direct-GPIO servos to LEDC channels (max 8 on the ESP32-S3).
@@ -115,42 +120,88 @@ bool ServoBank::attachDirect(int index) {
 #endif
 }
 
+#if defined(ARDUINO)
+// Write one pulse to a PCA9685 channel and REPORT WHETHER THE I2C TRANSACTION
+// SUCCEEDED (audit P1).
+//
+// Adafruit_PWMServoDriver::writeMicroseconds() calls setPWM() and throws its
+// return value away, so every write looked successful even with the board
+// unplugged: the firmware believed a finger had been pressed and went on to
+// pluck, producing a wrong note, an open string or silence. Only the periodic
+// pcaHealthy() probe noticed — up to 500 ms later.
+//
+// setPWM() returns 0 on success (Wire.endTransmission() == 0) and non-zero on an
+// I2C error, so this does the µs -> ticks conversion itself and checks it. Doing
+// our own conversion also drops writeMicroseconds()' readPrescale() — an extra
+// I2C READ on EVERY servo write, on a bus that carries the whole instrument.
+ActuatorResult ServoBank::writePcaMicros(int bus, uint8_t board, uint8_t channel,
+                                         uint16_t us) {
+    // ticks = us / (1e6 * (prescale+1) / oscillator), i.e. the datasheet's §7.3.5
+    // relation, with the prescale we programmed in begin() (cached, not re-read).
+    uint32_t usPerTickNum = static_cast<uint32_t>(pcaPrescale_[bus][board]) + 1;
+    if (usPerTickNum == 0 || pcaOscHz_[bus][board] == 0)
+        return ActuatorResult::DriverUnavailable;  // never initialised
+    // ticks = us * osc / (1e6 * (prescale+1)), 64-bit and rounded to NEAREST.
+    // Adafruit truncates, which loses up to a full tick (~4.9 µs at 50 Hz, about
+    // 0.45° of servo travel) always in the same direction; rounding halves the
+    // worst case and centres it. A PCA9685 tick is the hard floor either way.
+    const uint64_t den = 1000000ull * usPerTickNum;
+    uint64_t ticks = (static_cast<uint64_t>(us) * pcaOscHz_[bus][board] + den / 2) / den;
+    if (ticks > 4095) ticks = 4095;
+    uint8_t err = pca_[bus][board].setPWM(channel, 0, static_cast<uint16_t>(ticks));
+    if (err != 0) {
+        // The board ACKed at boot but this transaction failed: treat it exactly
+        // like a lost board so the caller faults the string instead of assuming
+        // the actuator moved. The periodic probe confirms and isolates it.
+        return ActuatorResult::BusFault;
+    }
+    return ActuatorResult::Ok;
+}
+#endif
+
 ActuatorResult ServoBank::writeMicros(int index, uint16_t us) {
     if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     const ServoConfig& s = servos_[index];
     if (!s.enabled) return ActuatorResult::Disabled;  // never drive a disabled servo
-    us = clampPulse(s, us);
-    rt_[index].lastUs = us;  // logical pulse (pre-inversion), for sweep-time scaling
+    const uint16_t logicalUs = clampPulse(s, us);  // pre-inversion, for sweep scaling
     // Apply inversion by mirroring within the calibrated pulse window.
-    if (s.inverted) us = static_cast<uint16_t>(s.pulseMinUs + s.pulseMaxUs - us);
+    uint16_t outUs = s.inverted
+        ? static_cast<uint16_t>(s.pulseMinUs + s.pulseMaxUs - logicalUs)
+        : logicalUs;
 #if defined(ARDUINO)
     if (s.source == ServoSource::Pca) {
         int bus = s.i2cBus > 1 ? 1 : s.i2cBus;
         // Board never initialised (absent at boot) — distinct from a mid-run I2C loss,
-        // which pcaHealthy() surfaces separately.
+        // which the write result and pcaHealthy() surface separately.
         if (s.pcaBoard >= kMaxPca || !pcaPresent_[bus][s.pcaBoard])
             return ActuatorResult::DriverUnavailable;
-        pca_[bus][s.pcaBoard].writeMicroseconds(s.channel, us);
+        ActuatorResult r = writePcaMicros(bus, s.pcaBoard, s.channel, outUs);
+        if (r != ActuatorResult::Ok) return r;  // nothing reached the servo
     } else if (s.gpio >= 0) {
         if (!attached_[index] && !attachDirect(index))
             return ActuatorResult::OutputFault;  // LEDC (re)attach failed
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-        ledcWrite(s.gpio, usToDuty(us));
+        ledcWrite(s.gpio, usToDuty(outUs));
 #else
         if (ledcCh_[index] < 0) return ActuatorResult::OutputFault;
-        ledcWrite(ledcCh_[index], usToDuty(us));
+        ledcWrite(ledcCh_[index], usToDuty(outUs));
 #endif
     } else {
         return ActuatorResult::OutputFault;  // no output pin configured
     }
     rt_[index].pwmOff = false;
 #else
-    (void)us;
+    (void)outUs;
     if (hostWriteResult) {
         ActuatorResult forced = hostWriteResult(index);
         if (forced != ActuatorResult::Ok) return forced;
     }
 #endif
+    // ONLY NOW is the software model allowed to move (audit P2): lastUs feeds
+    // sweepMsToFret(), so recording a pulse the servo never received made the
+    // next move's travel estimate wrong — the scheduler would wait for a sweep
+    // that starts somewhere else entirely.
+    rt_[index].lastUs = logicalUs;
     ++moveCount_;  // a servo pulse actually reached an output (diagnostics, P2.19)
     return ActuatorResult::Ok;
 }
@@ -191,11 +242,25 @@ ActuatorResult ServoBank::toActive(int index) {
 
 ActuatorResult ServoBank::toMicros(int index, uint16_t us) { return writeMicros(index, us); }
 
+// ---------------------------------------------------------------------------
+// The motion API. Every one of these follows the same rule (audit P2):
+//
+//     THE SOFTWARE MODEL ONLY MOVES ONCE THE DRIVER HAS ACCEPTED THE COMMAND.
+//
+// mode / strokeParity / returnAtMs used to be updated whatever writeMicros()
+// returned, so a refused write left the bank believing the finger was down (or
+// the plectrum mid-strike): update() would then schedule a return for a stroke
+// that never happened, and sweepMsToFret() would time the next move from a
+// position the servo never reached. On failure the state is left exactly as it
+// was and the caller faults the axis.
+// ---------------------------------------------------------------------------
+
 ActuatorResult ServoBank::press(int index) {
     if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     ActuatorResult r = writeMicros(index, servos_[index].activeUs);
+    if (r != ActuatorResult::Ok) return r;  // caller faults the axis; state untouched
     rt_[index].mode = Mode::Active;
-    return r;  // non-Ok => the servo could not be driven; caller faults the axis
+    return r;
 }
 
 ActuatorResult ServoBank::pressFret(int index, int fret) {
@@ -203,6 +268,7 @@ ActuatorResult ServoBank::pressFret(int index, int fret) {
     // A geared finger presses side B (activeBUs) for its second fret, side A
     // (activeUs) otherwise — identical to press() for a plain single finger.
     ActuatorResult r = writeMicros(index, fingerActiveUsForFret(servos_[index], fret));
+    if (r != ActuatorResult::Ok) return r;
     rt_[index].mode = Mode::Active;
     return r;
 }
@@ -210,6 +276,7 @@ ActuatorResult ServoBank::pressFret(int index, int fret) {
 ActuatorResult ServoBank::moveTo(int index, uint16_t us) {
     if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     ActuatorResult r = writeMicros(index, us);  // clamped to the servo's pulse window
+    if (r != ActuatorResult::Ok) return r;
     rt_[index].mode = Mode::Active;             // hold: no rest-time PWM cut during a test
     return r;
 }
@@ -219,6 +286,7 @@ ActuatorResult ServoBank::mute(int index) {
     uint16_t m = servos_[index].muteUs;
     if (m == 0) return ActuatorResult::Disabled;  // no mute position calibrated
     ActuatorResult r = writeMicros(index, m);     // clamped to the pulse window
+    if (r != ActuatorResult::Ok) return r;
     rt_[index].mode = Mode::Active;   // hold against the string; caller releases later
     return r;
 }
@@ -226,6 +294,10 @@ ActuatorResult ServoBank::mute(int index) {
 ActuatorResult ServoBank::release(int index) {
     if (index < 0 || index >= (int)servos_.size()) return ActuatorResult::InvalidIndex;
     ActuatorResult r = writeMicros(index, servos_[index].restUs);
+    // A REFUSED release is the dangerous one: the finger is still pressing. Saying
+    // Rest here would have update() cut its PWM at settle time and the caller
+    // believe the string was free.
+    if (r != ActuatorResult::Ok) return r;
     rt_[index].mode = Mode::Rest;
     rt_[index].restAtMs = 0;
     return r;
@@ -238,6 +310,10 @@ ActuatorResult ServoBank::strike(int index, double intensity) {
     // endpoint is used. The maths lives in servoStrikeTargetUs (unit-tested).
     bool upStroke = s.alternateDirection && rt_[index].strokeParity;
     ActuatorResult r = writeMicros(index, servoStrikeTargetUs(s, intensity, upStroke));
+    // No stroke happened: do NOT enter Striking (update() would schedule a return
+    // for it) and do NOT consume the alternation parity — the next real stroke
+    // must still go in the direction this one was meant to.
+    if (r != ActuatorResult::Ok) return r;
     rt_[index].mode = Mode::Striking;
     rt_[index].returnAtMs = 0;
     // Flip the stroke direction for the next strike on this servo.
@@ -258,6 +334,13 @@ void ServoBank::update(uint32_t nowMs) {
                     r.returnAtMs = nowMs + strikeDurationMs(static_cast<int>(i));
                 if ((int32_t)(nowMs - r.returnAtMs) >= 0) {
                     ActuatorResult res = toRest(static_cast<int>(i));
+                    // Leaving Striking is DELIBERATE even on failure: this is a
+                    // scheduling state, and staying in it would re-issue toRest()
+                    // on every single tick against an already-broken bus. The
+                    // claim about where the servo physically is lives in lastUs,
+                    // which writeMicros() leaves untouched when the write fails
+                    // (audit P2), so the next sweep is still timed from the last
+                    // pulse the servo really received.
                     r.mode = Mode::Rest;
                     r.restAtMs = nowMs + s.settleMs;
                     // The automatic return is a SCHEDULED write with no caller to
