@@ -15,11 +15,17 @@ variant, a gated non-inverting enable stage.
                  │  (power)      │  (status)         │  (enable gate)  │
                  │               │                   │
    +V control ───┤               │                   │
-                 │               │                   │
-            K1 coil ─[D_fw]─ GND │                   └── in series with Q2's
-            (drops +V_SERVO,     │                       ground return (§2 below)
-             sheet 01)           │
-                                 │
+                 │  A1           │                   │
+              ┌──●──────┐        │                   └── in series with Q2's
+              │ K1 coil │        │                       ground return (§2 below)
+              │         ▲ D_fw   │   D_fw is IN PARALLEL with the coil,
+              │         │ (par-  │   REVERSE-biased in normal operation:
+              └──●──────┘ allel) │     cathode (barre) → A1, the +V side
+                 │  A2           │     anode           → A2, the GND side
+                GND              │   It only conducts the coil's inductive
+                                 │   kick when NC #1 opens — never in series
+                                 │   with the coil (a series diode would just
+                                 │   drop 0.7 V and protect nothing).
    ESP32 ESTOP GPIO ─────────────┤   NC loop: closed = pin LOW = run allowed
    (INPUT_PULLUP)                │   open (press / cut wire / unplugged)
                                  │        = pin HIGH = STOP (fail-safe)
@@ -27,7 +33,9 @@ variant, a gated non-inverting enable stage.
 ```
 
 * **NC #1** switches only K1's **coil** — never the servo current itself. K1 is
-  rated for the rail's **DC** current; `D_fw` is the coil's freewheel diode.
+  rated for the rail's **DC** current. `D_fw` (1N4007 class) sits **across the
+  coil terminals A1/A2, cathode on the +V side**, so it clamps the inductive
+  spike when the chain opens; K1's contact side (sheet 01) is untouched.
 * **NC #2** is the firmware **status loop** on the `ESTOP` input (profile:
   *Emergency stop input*, contact = *Normally closed*). The firmware latches
   `EmergencyStop`; recovery needs the button released *and* `POST /api/reset`.
@@ -77,6 +85,12 @@ stages' ground returns.
 | ---------------- | :----------: | :---------: | :-----------: |
 | Button pressed | ✔ rail dead | ✔ outputs off | ✔ firmware latches |
 | Chain wire cut / unplugged | ✔ (NC) | ✔ (NC #3) | ✔ (NC loop) |
-| ESP32 absent / resetting | — | ✔ (pull-up) | n/a |
-| Firmware crash mid-note | — | ✔ (pull-up once pin floats) / ✔ via button | via button |
+| ESP32 absent / resetting / power loss | — | ✔ (pin high-Z → pull-up) | n/a |
+| Firmware **hard** hang (internal WDT fires → reset) | — | ✔ (reset → pin high-Z) | n/a |
+| Firmware **soft** hang (CPU alive, logic stuck, pin still driven LOW) | ✘ **not guaranteed** | ✘ **not guaranteed** — the pull-up cannot beat a driven pin | ✘ |
+| → the guaranteed stop for a soft hang | ✔ **the button** (NC #1) | ✔ the button (NC #3) | via button |
 | Direct-GPIO servo runaway | ✔ **only this stops it** | ✘ no effect | status only |
+
+A **hardware watchdog** (ESP32 heartbeat → external monostable → gates K1 and
+the enable stage) would turn the soft-hang rows into ✔ — recommended for any
+unattended or public installation, out of scope for the bench prototype.

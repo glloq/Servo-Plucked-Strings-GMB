@@ -119,10 +119,20 @@ public:
                 g_instrument.string(i).disable();  // a disabled string never plays
         }
         g_scheduler.clearCurrentFingers();
+        // Audit P0 — the electrical worst case of arming must be the same as normal
+        // play. Order matters: (1) every PCA channel is forced FULL OFF while /OE is
+        // still high, so (2) enabling the outputs releases nothing; (3) the rest
+        // commands are then issued PROGRESSIVELY through a governed park using the
+        // profile's power caps, instead of firing every servo at once.
+        g_servos.neutralizePcaOutputs();
         g_servos.outputEnable(true);
+        uint32_t parkMs = g_servos.beginGovernedPark(
+            nowMs, g_profile.power.maxConcurrentMoves,
+            g_profile.power.maxConcurrentPerBoard, g_profile.power.staggerMs);
         // A park is only as good as its commands: a refused rest write means a
         // finger may still be down, so arming must NOT proceed on hope (audit 7 P1).
-        ServoBank::ParkResult park = g_servos.moveAllToRest();
+        // Later slots are issued by serviceParking(); a failure there aborts too.
+        ServoBank::ParkResult park = g_servos.serviceGovernedPark(nowMs);
         if (!park.ok) {
             g_safety.recordFault("park", "rest command refused by servo " +
                                  std::to_string(park.failedServo) + " [" +
@@ -131,7 +141,6 @@ public:
             g_servos.hardStop();  // outputs back to the safe cut
             return false;
         }
-        uint32_t parkMs = g_servos.parkDurationMs();
         if (!g_safety.beginParking(true, true, parkMs, nowMs)) return false;
         g_phase = AppPhase::Parking;
         return true;
@@ -146,6 +155,23 @@ public:
         AppPhase& g_phase = *d_.phase;
         SafetyManager& g_safety = *d_.safety;
         if (g_phase != AppPhase::Parking) return;
+        // Issue the governed park's remaining rest commands as their stagger slots
+        // open (audit P0). A refused write mid-park means the park cannot be
+        // trusted — fail safe exactly like a board lost during parking.
+        ServoBank::ParkResult park = d_.servos->serviceGovernedPark(nowMs);
+        if (!park.ok) {
+            g_safety.recordFault("park", "rest command refused by servo " +
+                                 std::to_string(park.failedServo) + " [" +
+                                 actuatorResultName(park.reason) +
+                                 "] — park unconfirmed", nowMs);
+            hardStop();
+            g_safety.panic("parking could not be completed", nowMs);
+            return;
+        }
+        // The parking timeout is the governed schedule's upper bound, so the park
+        // is normally done before it elapses; the extra guard keeps Ready from
+        // arriving over servos still travelling if a tick was ever delayed.
+        if (!d_.servos->governedParkDone(nowMs)) return;
         if (!g_safety.tickParking(nowMs)) return;  // mechanical settle still running
         uint8_t failedBoard = 0xFF;
         if (!d_.servos->pcaHealthy(failedBoard)) {

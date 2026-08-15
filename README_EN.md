@@ -148,18 +148,23 @@ rest and press — with a test, the note, and *Next fret →*. The wiring is one
 (`PCA #2 · CH7 ✓  Change…`).
 <p align="center"><img src="img/screenshots/calibration.png" alt="Configure — Frets calibration" width="90%"/></p>
 
+
 **Wiring** — the harness is **generated**, not configured: the current instrument's
 ESP32 + PCA9685 diagram (one or two I²C buses, addresses, per-pin string·role, live
 conflict checks, SVG export) with the **power-wiring** advice (star wiring, one bulk
 cap per board, 100 nF ceramic, fail-safe `/OE`), then the staged **commissioning**
-checklist where each stage gates the next.
+checklist where each stage is a real gate — the next stage's boxes stay disabled
+until the previous one is complete, with an explicit override.
 <p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
 
 **⚙ Advanced hardware** — everything the generator normally decides stays one click
 away: the ESP32 board, PCA9685 capacity and I²C buses, responsiveness (fast /
 balanced / limited power supply, with every exact value), the GPIO grid and the
 hardware E-stop, I²C addressing and the pull-up budget, and the power & safety
-dossier with its current estimator.
+dossier whose estimator gives the per-branch **governed** peak (under the power caps)
+*and* the **absolute** peak (all servos at stall) — wiring and PSU are sized on the
+absolute figure, since the governor is software. The I²C pull-up budget assumes
+nothing: a board stays *unknown* until you declare what is fitted.
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Power &amp; safety — power tree and current estimator" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="GPIO pins + board pinout" width="90%"/></p>
 

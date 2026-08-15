@@ -124,8 +124,10 @@ TEST(s3_devkitc1_revisions_swap_rgb_led_pin) {
 }
 
 // ---- hardware E-stop input (`ESTOP` -> SignalKind::SafetyInput) -------------
-// A safety input needs a readable, interrupt-capable pin and must never sit on a
-// strapping pin (the recommended NC loop idles the pin LOW through boot/reset).
+// A safety input needs a readable, interrupt-capable pin WITH a usable internal
+// pull-up (the firmware samples ESTOP as INPUT_PULLUP — a pin without one would
+// float), and must never sit on a strapping pin (the recommended NC loop idles
+// the pin LOW through boot/reset).
 TEST(safety_input_candidates_and_validation) {
     BoardProfile b = makeEsp32S3DevKitC1();
     // A plain recommended IO carries it.
@@ -135,6 +137,7 @@ TEST(safety_input_candidates_and_validation) {
     for (const PinCapability* c : b.candidatesFor(SignalKind::SafetyInput)) {
         CHECK(c->input);
         CHECK(c->interrupt);
+        CHECK(c->internalPullUp);
         CHECK(!c->strapping);
         CHECK(!c->reserved);
     }
@@ -146,12 +149,16 @@ TEST(safety_input_candidates_and_validation) {
     pm.assign("ESTOP", SignalKind::SafetyInput, 48);  // v1.0 RGB LED pin
     CHECK(!pm.validate(true).empty());
 
-    // On the classic ESP32, the input-only pins (34/35/36/39) CAN carry the E-stop
-    // input — it is the one signal that never needs to drive the pin. Strapping
-    // pins (e.g. MTDI GPIO12) cannot.
+    // On the classic ESP32, the input-only pins (34/35/36/39) have NO internal
+    // pull-up, so INPUT_PULLUP cannot bias them and the E-stop input would float:
+    // they are refused even though they can read (audit P1 — the firmware
+    // validator is the authority, whatever the UI shows). Strapping pins (e.g.
+    // MTDI GPIO12) are refused too.
     BoardProfile w = makeEsp32Wroom32();
-    for (int8_t g : {34, 35, 36, 39}) CHECK(w.supports(g, SignalKind::SafetyInput));
+    for (int8_t g : {34, 35, 36, 39}) CHECK(!w.supports(g, SignalKind::SafetyInput));
     CHECK(!w.supports(12, SignalKind::SafetyInput));
+    // A regular classic-ESP32 IO still qualifies.
+    CHECK(w.supports(26, SignalKind::SafetyInput));
 }
 
 // ---- classic ESP32 boards (WROOM-32 / DevKit v1) --------------------------

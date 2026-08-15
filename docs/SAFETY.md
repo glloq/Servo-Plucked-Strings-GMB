@@ -40,10 +40,18 @@ L'armement n'est **pas** instantané : après validation, on passe par une vraie
 **Parking** avant `Ready` :
 
 ```
-PowerOnSafe → Parking (sorties activées, tous les servos commandés au repos)
-            → attente mécanique = max(travelMs + settleMs) sur les servos concernés
+PowerOnSafe → Parking :
+              1. tous les canaux PCA forcés OFF (aucune impulsion mémorisée)
+              2. /OE activé sur des sorties muettes (rien ne démarre)
+              3. mise au repos PROGRESSIVE sous le governor de courant
+                 (maxConcurrentMoves / maxConcurrentPerBoard / staggerMs)
+            → attente mécanique (planning étalé + max(travelMs + settleMs))
             → Armed → Ready
 ```
+
+Le pire cas électrique de l'armement est ainsi le même que celui du jeu normal :
+activer `/OE` ne relâche jamais une consigne préchargée sur tous les canaux à la
+fois, et les départs vers le repos sont étalés comme des appuis de doigts.
 
 Pendant **Parking**, aucune note MIDI ne peut être jouée et aucun test mécanique ne
 peut démarrer (l'état est visible dans le statut web/API : `parking`). Un profil

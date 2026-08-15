@@ -151,18 +151,24 @@ repos et appui — avec un test, la note, et *Frette suivante →*. Le câblage 
 une ligne (`PCA #2 · CH7 ✓  Modifier…`).
 <p align="center"><img src="img/screenshots/calibration.png" alt="Configurer — calibration des frettes" width="90%"/></p>
 
+
 **Câblage** — le faisceau est **généré**, pas configuré : le schéma ESP32 + PCA9685
 de l'instrument courant (un ou deux bus I²C, adresses, corde·rôle par broche,
 contrôles de conflit en direct, export SVG) avec les conseils de **câblage de
 puissance** (étoile, condensateur de réservoir par carte, 100 nF, `/OE` fail-safe),
-puis la **check-list de mise en service** par étapes barrières.
+puis la **check-list de mise en service** dont chaque étape est une vraie barrière
+(les cases de l'étape suivante restent désactivées tant que la précédente n'est pas
+complète, avec déverrouillage explicite).
 <p align="center"><img src="img/screenshots/wiring.png" alt="Carte de câblage ESP32 + PCA9685" width="90%"/></p>
 
 **⚙ Matériel avancé** — tout ce que le générateur décide normalement reste accessible
 en un clic : carte ESP32, capacité et bus des PCA9685, réactivité (rapide /
 équilibrée / alimentation limitée, avec chaque valeur exacte), grille GPIO et arrêt
-d'urgence matériel, adressage I²C et budget de pull-ups, dossier puissance & sécurité
-avec l'estimateur de courant.
+d'urgence matériel, adressage I²C et budget de pull-ups, dossier puissance & sécurité dont l'estimateur
+donne le pic **gouverné** (sous les limites de courant) *et* le pic **absolu** (tous
+les servos calés) par branche — le câblage et l'alimentation se dimensionnent sur
+l'absolu, le governor étant logiciel. Le budget de pull-ups I²C ne suppose rien :
+une carte reste *inconnue* tant que vous n'avez pas déclaré ce qui est monté.
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Puissance & sécurité — arbre de puissance et estimateur" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="Broches GPIO + brochage de la carte" width="90%"/></p>
 

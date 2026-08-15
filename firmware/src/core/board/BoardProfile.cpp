@@ -21,11 +21,13 @@ static bool pinSupports(const PinCapability& p, SignalKind kind) {
             // I2C is open-drain: needs a pin usable both ways.
             return p.output && p.input;
         case SignalKind::SafetyInput:
-            // Hardware E-stop (`ESTOP`): a readable, interrupt-capable pin. Never a
-            // strapping pin — the recommended NC loop holds the pin LOW whenever the
-            // machine is allowed to run, including through a reset, which would
-            // corrupt the boot strap.
-            return p.input && p.interrupt && !p.strapping;
+            // Hardware E-stop (`ESTOP`): a readable, interrupt-capable pin WITH a
+            // usable internal pull-up — the firmware samples it as INPUT_PULLUP, so
+            // a pin without one (classic-ESP32 input-only 34/35/36/39) would float
+            // and the E-stop input could read anything. Never a strapping pin: the
+            // recommended NC loop holds the pin LOW whenever the machine is allowed
+            // to run, including through a reset, which would corrupt the boot strap.
+            return p.input && p.interrupt && p.internalPullUp && !p.strapping;
     }
     return false;
 }
