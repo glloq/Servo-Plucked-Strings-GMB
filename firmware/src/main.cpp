@@ -505,6 +505,26 @@ bool doTestServo(int index, bool active, uint16_t us) {
 
 void purgeCommands() { g_commands.purge(); }
 
+// Hardware E-stop poll. Stop level depends on the contact wiring: NO button = stop
+// on LOW (legacy active-low); NC loop = stop on HIGH (press, cut wire or unplugged
+// connector all release the loop). Both the RAW and the debounced reading trip it,
+// so a genuine press is never delayed by the debouncer.
+//
+// This is the FIRST thing loop() runs — see the SAFETY FIRST comment there. Keep it
+// free of anything that can block: no network, no I2C, no file system.
+void serviceEstop(uint32_t nowMs) {
+    if (g_estopPin < 0) return;
+    bool rawHigh = digitalRead(g_estopPin) == HIGH;
+    bool stableHigh = g_estopDeb.update(nowMs, rawHigh);
+    bool rawPressed = g_estopNc ? rawHigh : !rawHigh;
+    bool debouncedPressed = g_estopNc ? stableHigh : !stableHigh;
+    if ((rawPressed || debouncedPressed) &&
+        g_safety.state() != SafetyState::EmergencyStop) {
+        doEmergencyStop();
+        purgeCommands();
+    }
+}
+
 bool servicePanic(uint32_t nowMs) {
     (void)nowMs;
     if (!g_panicRequested.exchange(false)) return false;
@@ -520,7 +540,7 @@ void serviceHotspotRequests(uint32_t nowMs) {
     bool down = digitalRead(kBootButtonPin) == LOW;  // active-low BOOT button
     if (g_bootHold.update(down, nowMs)) g_hotspotRequested.store(true);  // long-press
     if (g_hotspotRequested.exchange(false)) {
-        g_net.forceAccessPoint();
+        g_net.forceAccessPoint(nowMs);
         Serial.println(F("BOOT/web: forced Wi-Fi hotspot (AP + captive portal)"));
     }
 }
@@ -933,23 +953,17 @@ void loop() {
     if (lastLoopUs != 0) g_diag.observeSchedulerPeriodUs(nowUs - lastLoopUs);
     lastLoopUs = nowUs;
 
-    g_net.tick(nowMs);
-
-    // SAFETY FIRST: hardware E-stop, then the web/CC STOP flag. Stop level depends
-    // on the contact wiring: NO button = stop on LOW (legacy active-low); NC loop =
-    // stop on HIGH (press, cut wire or unplugged connector all release the loop).
-    if (g_estopPin >= 0) {
-        bool rawHigh = digitalRead(g_estopPin) == HIGH;
-        bool stableHigh = g_estopDeb.update(nowMs, rawHigh);
-        bool rawPressed = g_estopNc ? rawHigh : !rawHigh;
-        bool debouncedPressed = g_estopNc ? stableHigh : !stableHigh;
-        if ((rawPressed || debouncedPressed) &&
-            g_safety.state() != SafetyState::EmergencyStop) {
-            doEmergencyStop();
-            purgeCommands();
-        }
-    }
+    // SAFETY FIRST — and it now really is first (audit P1): the hardware E-stop and
+    // the web/CC STOP flag are serviced BEFORE anything touches the radio. The old
+    // order put g_net.tick() ahead of this block, so any code path it reached could
+    // delay the stop; Net's access-point bring-up in particular used to sit on a
+    // delay(100), pushing the E-stop poll a tenth of a second into the future on
+    // exactly the frames where the network was misbehaving. Nothing between the top
+    // of loop() and here may block or call into the network stack.
+    serviceEstop(nowMs);
     bool panicked = servicePanic(nowMs);
+
+    g_net.tick(nowMs);              // non-blocking; AP bring-up is a timestamped FSM
     serviceHotspotRequests(nowMs);  // BOOT-button / web hotspot (independent of phase)
     serviceWifiRequests(nowMs);     // scan + deferred network-settings apply (audit)
 

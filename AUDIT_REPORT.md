@@ -51,8 +51,8 @@ Tous verts, en local **et** en CI (tous les runs `success` ; cf. la note flake P
 
 | Vérification | Résultat |
 | ------------ | -------- |
-| Tests natifs cœur (`-Wall -Wextra -Werror`) | **239 tests, 3760 checks, 0 failures** |
-| Idem sous **AddressSanitizer + UBSan** | **239 tests, 0 failures** |
+| Tests natifs cœur (`-Wall -Wextra -Werror`) | **289 tests, 4297 checks, 0 failures** |
+| Idem sous **AddressSanitizer + UBSan** | **289 tests, 0 failures** |
 | `hostcheck` (compile `main.cpp` + adaptateurs ESP32) | 6/6 unités OK |
 | `servobankcheck` (routage 2 bus + park + ActuatorResult + P1.5) | OK |
 | `profilecheck` (8 profils + migration v1→v2 + split slot device/instrument P1.13) | OK |
@@ -381,3 +381,117 @@ non-régression à chaque étape) :
   d'appel inchangés, sans déplacer d'état** — donc compile-vérifiée (Arduino-gated),
   **à revalider au banc**. Reste `ApplicationRuntime` / `ProfileManager` (pour aller
   vers `app.begin()/app.tick()`), moins critique.
+
+
+---
+
+## 7. Reprise audit firmware — ordre E-stop, erreurs PCA, état ServoBank, HIL
+
+Second passage d'audit (branche `claude/audit-ux-ui-servo-rtmfq6`). Les trois
+défauts P1/P2 signalés sont corrigés, chacun avec un test qui **échoue sur l'ancien
+code**, et la campagne HIL manquante est livrée sous forme de harnais exécutable.
+
+| Priorité | Point | Statut |
+| -------- | ----- | ------ |
+| P1 | E-stop exécuté après `g_net.tick()` | **DONE** |
+| P1 | `delay(100)` dans le démarrage de l'AP | **DONE** (FSM horodatée) |
+| P1 | Échec d'écriture PCA non détecté immédiatement | **DONE** (`setPWM()` vérifié) |
+| P2 | État interne servo modifié avant confirmation d'écriture | **DONE** |
+| P2 | Validation physique / HIL | **HARNAIS LIVRÉ, jamais exécuté sur matériel** |
+
+### 7.1 — SAFETY FIRST devient vrai (P1)
+
+`loop()` appelait `g_net.tick()` avant le sondage de l'E-stop, malgré le
+commentaire. Le bloc E-stop est extrait en `serviceEstop(nowMs)` et exécuté en
+**première** instruction utile de `loop()`, avec `servicePanic()` juste derrière ;
+le réseau vient après. Rien entre le début de `loop()` et cette ligne ne doit
+bloquer ni toucher la pile réseau.
+
+### 7.2 — Plus aucun `delay()` sur un chemin appelé depuis `loop()` (P1)
+
+`Net::startAccessPoint()` faisait `WiFi.mode(WIFI_AP); delay(100); WiFi.softAP(...)`,
+et ce chemin est atteignable depuis `tick()` — donc depuis `loop()` : un fallback
+réseau ou un hotspot forcé décalait le sondage de sécurité de 100 ms, précisément
+sur les trames où le réseau allait déjà mal. Remplacé par une FSM à deux temps :
+
+```text
+startAccessPoint(now)   → WiFi.mode(WIFI_AP), apPending, horodatage
+tick(now < +100 ms)     → rend la main immédiatement
+tick(now >= +100 ms)    → finishAccessPoint() : softAP() + portail captif
+```
+
+`accessPointActive()` reste **faux** pendant la fenêtre : personne ne voit un AP
+« connecté » qui n'existe pas encore. Un `begin()` annule un démarrage en cours.
+`Net.cpp` entre dans le build natif ; `test_net_ap.cpp` (5 cas) vérifie la machine
+à états **et chronomètre les appels** — un `delay(100)` ferait échouer le test.
+
+### 7.3 — Les écritures PCA9685 remontent enfin leurs erreurs (P1)
+
+`Adafruit_PWMServoDriver::writeMicroseconds()` appelle `setPWM()` et **jette son
+code retour**. Une fois la carte détectée au boot, toute écriture ultérieure était
+donc déclarée `Ok`, carte débranchée comprise : le firmware croyait le doigt
+pressé et enchaînait le grattage — mauvaise note, corde à vide ou silence — et
+seule la sonde `pcaHealthy()` périodique s'en apercevait, jusqu'à 500 ms plus tard.
+
+`ServoBank::writePcaMicros()` convertit µs → ticks lui-même (relation §7.3.5 du
+datasheet, prescale et oscillateur mis en cache au `begin()`) et **vérifie le
+retour de `setPWM()`** : 0 = transaction I²C acceptée, sinon `BusFault`. Effets de
+bord bienvenus : plus de `readPrescale()` — une **lecture I²C à chaque écriture de
+servo** que faisait `writeMicroseconds()` — et un arrondi au tick le plus proche
+au lieu d'une troncature (±2,4 µs au lieu de −4,9..0, soit ~0,2° de mieux).
+
+Les stubs de `hostcheck` et `servobankcheck` déclaraient `setPWM()` `void` : ils ne
+*pouvaient pas* révéler le défaut. Ils reproduisent maintenant les signatures
+réelles, et `servobankcheck` sait injecter une erreur I²C (`g_pwmError`).
+
+### 7.4 — Le modèle logiciel ne bouge qu'après acceptation (P2)
+
+`rt_[index].lastUs` était écrit **avant** de savoir si l'écriture passerait, et
+`press/pressFret/release/strike/mute/moveTo` changeaient `mode` (et la parité
+d'alternance) quel que soit le résultat. Conséquences réelles : `sweepMsToFret()`
+calculait le déplacement suivant depuis une position jamais atteinte, un `release()`
+refusé annonçait « doigt levé » alors qu'il pressait toujours, et un `strike()`
+refusé consommait la parité — le coup suivant partait dans le mauvais sens.
+
+Règle appliquée partout : **l'état ne change qu'une fois la commande acceptée par
+le driver**. Une exception documentée : la sortie automatique de `Striking` dans
+`update()` a lieu même en échec, sinon `toRest()` serait réémis à chaque tick sur
+un bus déjà mort ; la position physique, elle, vit dans `lastUs`, qui n'avance pas.
+
+`test_servobank_writefail.cpp` (8 cas) verrouille tout ça — dont la parité
+d'alternance et la non-régression de `sweepMsToFret()`. **Vérifié en réintroduisant
+les deux défauts : 6 des 8 tests échouent**, plus un dans `servobankcheck`.
+
+### 7.5 — Campagne HIL (P2)
+
+`firmware/test/hil/` : un pilote Python (bibliothèque standard seule) qui conduit
+un **vrai** appareil par son API REST, plus la procédure de banc.
+
+14 scénarios, dont exactement ceux demandés : boot sans profil, armement, `/OE` au
+scope, accord et Note On/Off rapides, latence de `loop()` pendant que la radio
+travaille, E-stop (y compris **pendant du trafic réseau**), PCA débranché en cours
+de jeu, SDA/SCL bloqué, chute d'alimentation servo, changement de profil pendant
+une note, panic HTTP, perte Wi-Fi, reset ESP32.
+
+Semi-automatisé : tout ce qui est observable par l'API est asserté par le script ;
+tout ce qui demande une main sur un connecteur est demandé à l'opérateur, puis son
+**effet** est asserté automatiquement. Un pas sauté est compté « skipped », jamais
+« passed ». Rapport JSON à joindre au dossier de mise en service.
+
+> ⚠️ Le harnais **n'a jamais tourné sur du matériel** — il n'y en avait pas. Il est
+> écrit contre le contrat d'API, pas contre un appareil. Il a en revanche été
+> exercé de bout en bout contre un appareil simulé (22 checks automatiques
+> exécutés, échecs correctement détectés quand le faux appareil refuse de
+> s'arrêter sur panic).
+
+### 7.6 — Ce que ce passage ne prouve toujours pas
+
+Rien de mécanique ni d'électrique. Les corrections 7.1 à 7.4 sont validées par
+tests natifs + sanitizers + compilation ESP32 ; la 7.3 en particulier touche du
+code `#if defined(ARDUINO)` dont seule la **contrat** est testable à l'hôte. Le
+premier passage au banc doit donc valider le harnais autant que le firmware, et
+`pca_loss` / `estop` / `oe` sont les trois scénarios qui ferment réellement les
+points de cet audit.
+
+Restent inchangés et hors périmètre de ce passage : DIN physique (UART non
+raccordé), USB-MIDI (squelette TinyUSB), BLE.

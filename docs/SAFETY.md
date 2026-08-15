@@ -66,9 +66,15 @@ On distingue **strictement** deux opérations (jamais l'une déguisée en l'autr
   verrouillé, **sans aucune attente mécanique**. Un vrai E-stop ne dépend jamais de
   l'achèvement d'un mouvement.
   - **E-stop matériel** (broche `ESTOP`, entrée `SafetyInput` déclarée dans
-    l'interface, *Wiring & GPIO → Emergency stop input*) : `hardStop` + état
-    `EmergencyStop`, testé en tête de boucle sur le niveau brut, avant toute
-    commande. Deux câblages du contact (`board.estopNormallyClosed`) :
+    l'interface, *⚙ → Matériel avancé → GPIO pins → Emergency stop input*) : `hardStop` + état
+    `EmergencyStop`, testé sur le niveau brut **en toute première instruction utile
+    de `loop()`** (`serviceEstop()`), avant `servicePanic()` et **avant tout appel
+    réseau** — l'ordre inverse laissait `g_net.tick()` s'exécuter d'abord, et son
+    démarrage d'AP tenait un `delay(100)` capable de décaler le sondage d'un
+    dixième de seconde. Plus aucun `delay()` n'existe sur un chemin appelé depuis
+    `loop()` : le démarrage du point d'accès est une machine à états horodatée
+    (`Net::startAccessPoint` / `finishAccessPoint`, testée par `test_net_ap.cpp`).
+    Deux câblages du contact (`board.estopNormallyClosed`) :
     - **NC recommandé** : boucle *normalement fermée* vers GND — la boucle fermée
       autorise la marche ; un appui, un fil coupé ou un connecteur débranché
       lisent STOP (fail-safe) ;

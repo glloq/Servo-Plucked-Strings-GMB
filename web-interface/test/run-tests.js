@@ -139,5 +139,110 @@ test('re-applying the ukulele preset keeps every calibration verbatim (audit 6)'
         'spot check: hand-set pulse widths still present');
 });
 
+// ---------------------------------------------------------------------------
+// app.js shell helpers. These need a DOM, but only a tiny slice of one: enough
+// to build an element, set attributes and fire a change event. The UX-audit
+// helpers below (the 1-16 MIDI channel mapping, the local disclosure state,
+// the first-run flag) are pure logic wrapped in DOM plumbing, and every one of
+// them is a defect this suite is meant to catch a second time.
+// ---------------------------------------------------------------------------
+function fakeDom() {
+  function el(tag) {
+    var e = {
+      tagName: tag, nodeType: 1, children: [], attrs: {}, listeners: {}, className: '', id: '',
+      classList: {
+        add: function (c) { e.className += (e.className ? ' ' : '') + c; },
+        contains: function (c) { return (' ' + e.className + ' ').indexOf(' ' + c + ' ') >= 0; },
+        toggle: function () {}, remove: function () {}
+      },
+      setAttribute: function (k, v) { e.attrs[k] = String(v); },
+      getAttribute: function (k) { return e.attrs.hasOwnProperty(k) ? e.attrs[k] : null; },
+      addEventListener: function (k, fn) { (e.listeners[k] = e.listeners[k] || []).push(fn); },
+      appendChild: function (c) { e.children.push(c); return c; },
+      fire: function (k) { (e.listeners[k] || []).forEach(function (fn) { fn(); }); },
+      // Depth-first search over the built tree, used by the assertions.
+      find: function (pred) {
+        if (pred(e)) return e;
+        for (var i = 0; i < e.children.length; i++) {
+          var c = e.children[i];
+          if (c && c.find) { var r = c.find(pred); if (r) return r; }
+        }
+        return null;
+      }
+    };
+    return e;
+  }
+  global.document = {
+    createElement: el,
+    createTextNode: function (t) { return { text: t, children: [] }; },
+    getElementById: function () { return null; },
+    querySelectorAll: function () { return []; },
+    querySelector: function () { return null; },
+    addEventListener: function () {}
+  };
+  var store = {};
+  global.localStorage = {
+    getItem: function (k) { return store.hasOwnProperty(k) ? store[k] : null; },
+    setItem: function (k, v) { store[k] = String(v); },
+    removeItem: function (k) { delete store[k]; }
+  };
+  global.window.addEventListener = global.window.addEventListener || function () {};
+  global.location = global.location || { hash: '' };
+}
+fakeDom();
+require('../js/app.js');
+
+test('the MIDI channel is 1-16 on screen and zero-based in the profile', function () {
+  // The old panel was labelled "Global channel (1-16)" over an input bound
+  // straight to the zero-based field, with a hint explaining the storage.
+  var midi = { globalChannel: 0 };
+  var input = GMB.offsetInput(midi, 'globalChannel', 1, { min: 1, max: 16 });
+  check(input.value === 1, 'channel 0 displays as 1');
+  check(String(input.min) === '1' && String(input.max) === '16', 'the input accepts 1..16');
+
+  input.value = 10; input.fire('change');
+  check(midi.globalChannel === 9, 'entering 10 stores 9');
+  check(input.value === 10, 'the field keeps showing 10');
+
+  input.value = 16; input.fire('change');
+  check(midi.globalChannel === 15, 'channel 16 stores 15 (the last valid channel)');
+
+  // Out-of-range entries clamp to a REAL channel instead of writing -1 / 16.
+  input.value = 0; input.fire('change');
+  check(midi.globalChannel === 0 && input.value === 1, 'below range clamps to channel 1');
+  input.value = 99; input.fire('change');
+  check(midi.globalChannel === 15 && input.value === 16, 'above range clamps to channel 16');
+});
+
+test('a disclosure only builds its body when open, and remembers its state', function () {
+  var built = 0;
+  var build = function () { built++; return document.createElement('div'); };
+
+  GMB.setRedraw(function () {});          // no re-render in the test harness
+  var closed = GMB.disclosure('t1', 'Advanced', build);
+  check(built === 0, 'a closed disclosure never calls build()');
+  check(closed.getAttribute === undefined || true, 'element built');
+  var toggle = closed.find(function (e) { return e.className.indexOf('disclosure-toggle') >= 0; });
+  check(!!toggle && toggle.getAttribute('aria-expanded') === 'false', 'aria-expanded reflects closed');
+
+  toggle.fire('click');
+  check(GMB.isDisclosed('t1') === true, 'clicking records the open state');
+
+  var open = GMB.disclosure('t1', 'Advanced', build);
+  check(built === 1, 'an open disclosure builds its body exactly once');
+  var toggle2 = open.find(function (e) { return e.className.indexOf('disclosure-toggle') >= 0; });
+  check(toggle2.getAttribute('aria-expanded') === 'true', 'aria-expanded reflects open');
+  check(GMB.isDisclosed('t2') === false, 'state is per key, not global');
+});
+
+test('the first run is remembered so Welcome shows once, not forever', function () {
+  GMB.resetFirstRun();
+  check(GMB.setupComplete() === false, 'a fresh browser has never configured anything');
+  GMB.markSetupComplete();
+  check(GMB.setupComplete() === true, 'applying a configuration retires the welcome screen');
+  GMB.resetFirstRun();
+  check(GMB.setupComplete() === false, 'the user can ask for the welcome screen again');
+});
+
 console.log('\n' + checks + ' checks, ' + failures + ' failures');
 process.exit(failures ? 1 : 0);

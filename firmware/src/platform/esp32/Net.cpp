@@ -11,6 +11,12 @@ namespace gmb {
 
 namespace {
 constexpr uint16_t kDnsPort = 53;
+// Settle window between WiFi.mode(WIFI_AP) and softAP(). The classic ESP32 needs
+// the AP netif up before softAP() or the call flakes; this used to be a
+// delay(100) INSIDE the code path reachable from tick() — and tick() runs in
+// loop(), so a network fallback could block the E-stop poll for 100 ms (audit
+// P1). Nothing blocks any more: the wait is a timestamp.
+constexpr uint32_t kApSettleMs = 100;
 }  // namespace
 
 bool Net::begin(const NetworkConfig& cfg, const std::string& stationPassword,
@@ -23,28 +29,48 @@ bool Net::begin(const NetworkConfig& cfg, const std::string& stationPassword,
     failures_ = 0;
     apIsFallback_ = false;
     apForced_ = false;
-    if (cfg_.mode == NetworkMode::Station && !cfg_.ssid.empty()) {
+    apPending_ = false;
 #if defined(ARDUINO)
-        beginStationAttempt(millis());
+    uint32_t nowMs = millis();
 #else
-        beginStationAttempt(0);
+    uint32_t nowMs = 0;
 #endif
+    if (cfg_.mode == NetworkMode::Station && !cfg_.ssid.empty()) {
+        beginStationAttempt(nowMs);
         return true;  // connection proceeds asynchronously in tick()
     }
-    startAccessPoint();
-    return true;
+    startAccessPoint(nowMs);
+    return true;  // the AP finishes coming up in tick(), without blocking
 }
 
-void Net::startAccessPoint(bool fallback) {
+// Step 1: arm the bring-up. Sets the radio mode and starts the settle window;
+// softAP() itself happens in finishAccessPoint(), from a later tick().
+void Net::startAccessPoint(uint32_t nowMs, bool fallback) {
     apIsFallback_ = fallback;
+    connecting_ = false;
+    apPending_ = true;
+    apPendingFallback_ = fallback;
+    apPendingSinceMs_ = nowMs;
+    // The AP is NOT usable until softAP() has succeeded — a caller must never see
+    // "connected" during the settle window.
+    apActive_ = false;
+    connected_ = false;
+    ip_ = "";
+#if defined(ARDUINO)
+    WiFi.mode(WIFI_AP);
+#endif
+}
+
+// Step 2: the settle window has elapsed — actually raise the access point.
+bool Net::finishAccessPoint() {
+    apPending_ = false;
+    apIsFallback_ = apPendingFallback_;
 #if defined(ARDUINO)
     // Never bring the AP up with an empty SSID (a hand-edited/imported profile could
     // carry one — softAP("") just fails): fall back to the project default so the
     // hotspot always exists.
     const char* ssid =
         cfg_.apSsid.empty() ? "Servo-Plucked-Strings-GMB" : cfg_.apSsid.c_str();
-    WiFi.mode(WIFI_AP);
-    delay(100);  // let the AP netif start before softAP() (classic-ESP32 flakiness)
     // WPA2 when a password (>= 8 chars) is set, otherwise an open AP. Honour the
     // softAP() return: a failed AP must NOT be reported as connected.
     bool ok = (apPassword_.size() >= 8) ? WiFi.softAP(ssid, apPassword_.c_str())
@@ -62,12 +88,22 @@ void Net::startAccessPoint(bool fallback) {
         connected_ = false;  // AP creation failed — not usable
         Serial.printf("[net] softAP(\"%s\") FAILED — retrying shortly\n", ssid);
     }
+    return apActive_;
 #else
     ip_ = "192.168.4.1";
     apActive_ = true;
     connected_ = true;
+    return true;
 #endif
-    connecting_ = false;
+}
+
+// Drive the pending bring-up forward. Returns true while one is in flight, so
+// tick() can hand the rest of the frame back to loop() instead of waiting.
+bool Net::serviceAccessPointStart(uint32_t nowMs) {
+    if (!apPending_) return false;
+    if (nowMs - apPendingSinceMs_ < kApSettleMs) return true;  // still settling
+    finishAccessPoint();
+    return false;
 }
 
 void Net::startCaptivePortal() {
@@ -87,12 +123,12 @@ void Net::stopCaptivePortal() {
     dnsActive_ = false;
 }
 
-void Net::forceAccessPoint() {
+void Net::forceAccessPoint(uint32_t nowMs) {
 #if defined(ARDUINO)
     if (connecting_ || (!apActive_ && WiFi.status() == WL_CONNECTED)) WiFi.disconnect();
 #endif
-    apForced_ = true;          // stay in AP; tick() must not retry the station
-    startAccessPoint(false);   // brings up softAP + captive portal
+    apForced_ = true;                 // stay in AP; tick() must not retry the station
+    startAccessPoint(nowMs, false);   // softAP + captive portal follow in tick()
 }
 
 void Net::beginStationAttempt(uint32_t nowMs) {
@@ -147,7 +183,7 @@ bool Net::pollStation(uint32_t nowMs) {
         if (++failures_ >= 3) {
             // Fall back to AP (spec §8.1). If the rescue AP was kept up during
             // this retry it is already serving — just restart the retry clock.
-            if (!apActive_) startAccessPoint(true);
+            if (!apActive_) startAccessPoint(nowMs, true);
             lastStationRetryMs_ = nowMs;
         } else if (apActive_ && apIsFallback_) {
             // Recovery from the rescue AP: run the "3 attempts" BACK-TO-BACK
@@ -212,6 +248,9 @@ void Net::pollScan() {
 
 void Net::tick(uint32_t nowMs) {
     pollScan();  // harvest a finished background scan in any mode
+    // An access point in the middle of coming up owns this tick: nothing else may
+    // touch the radio until softAP() has been issued.
+    if (serviceAccessPointStart(nowMs)) return;
 #if defined(ARDUINO)
     if (apActive_) {
         if (dnsActive_) dns_.processNextRequest();  // captive portal
@@ -248,7 +287,7 @@ void Net::tick(uint32_t nowMs) {
     if (apForced_) {
         if (nowMs - lastStationRetryMs_ >= 2000) {
             lastStationRetryMs_ = nowMs;
-            startAccessPoint(false);
+            startAccessPoint(nowMs, false);
         }
         return;
     }
@@ -262,7 +301,7 @@ void Net::tick(uint32_t nowMs) {
     if (cfg_.mode != NetworkMode::Station || cfg_.ssid.empty()) {
         if (nowMs - lastStationRetryMs_ >= 2000) {
             lastStationRetryMs_ = nowMs;
-            startAccessPoint(false);
+            startAccessPoint(nowMs, false);
         }
         return;
     }

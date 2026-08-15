@@ -1,50 +1,61 @@
 /*
- * hardware.js — combined "Wiring & GPIO" page (UI redesign).
+ * hardware.js — the "Wiring" page.
  *
- * One of the three main pages a builder needs. It hosts, behind sub-tabs, the
- * hardware views:
- *   • Harness        — the adaptive ESP32 + PCA9685 harness diagram (wiring.js)
- *   • Power & safety — power tree, E-stop / /OE chain status, current estimator
- *                      (wiringpower.js — hardware/POWER_AND_SAFETY.md live)
- *   • I²C & PCA      — buses, addresses/jumpers, pull-up equivalents (wiringi2c.js)
- *   • GPIO pins      — the GPIO pin-assignment grid + validation (pins.js)
- *   • Commissioning  — the staged power-up checklist (commissioning.js)
- * It simply delegates to GMB.views.*, so all the logic stays in those modules;
- * this file only owns the sub-tab switch.
+ * The harness is GENERATED, not configured (UX audit 8): the software already
+ * knows every servo, board, bus and channel, so this page's job is to SHOW the
+ * result and to walk the first power-up — not to ask questions.
+ *
+ *   • Harness       — the adaptive ESP32 + PCA9685 harness diagram (wiring.js)
+ *   • Commissioning — the staged power-up checklist (commissioning.js)
+ *
+ * The specialised integration tools — power & safety dossier, I²C addressing and
+ * pull-up sizing, the GPIO grid — are still there in full, but under
+ * ⚙ → Advanced hardware: they are diagnostic and integration work, not a step in
+ * building an instrument (UX audit 9, 10).
  */
 (function (global) {
   'use strict';
   var GMB = global.GMB, h = GMB.h;
 
-  var sub = 'wiring';   // 'wiring' | 'power' | 'i2c' | 'gpio' | 'commissioning'
+  var sub = 'wiring';   // 'wiring' | 'commissioning'
+  var SUBS = [
+    { id: 'wiring', label: 'Diagram' },
+    { id: 'commissioning', label: 'Commissioning' }
+  ];
 
-  function subBtn(id, label) {
-    return h('button.subtab' + (sub === id ? '.active' : ''),
-      { type: 'button', onclick: function () { sub = id; GMB.render(); } }, label);
+  function subBtn(t) {
+    var on = sub === t.id;
+    return h('button.subtab' + (on ? '.active' : ''),
+      { type: 'button', role: 'tab', 'aria-selected': on ? 'true' : 'false',
+        onclick: function () { sub = t.id; GMB.render(); } }, t.label);
   }
 
   function render(host) {
     host.appendChild(h('div.card.hw-head', [
-      h('div.card-head', [h('h2', 'Wiring & GPIO'),
-        h('span.muted', 'harness, power & safety, I²C, pins, commissioning')]),
-      h('div.subtabs', [
-        subBtn('wiring', 'Harness'),
-        subBtn('power', 'Power & safety'),
-        subBtn('i2c', 'I²C & PCA'),
-        subBtn('gpio', 'GPIO pins'),
-        subBtn('commissioning', 'Commissioning')
+      h('div.card-head', [h('h2', 'Wiring'),
+        h('span.muted', 'generated from your instrument')]),
+      h('div.subtabs', { role: 'tablist', 'aria-label': 'Wiring sections' }, SUBS.map(subBtn)),
+      h('div.row', [
+        h('span.muted', 'Addressing, pull-ups, GPIO assignment and the power dossier ' +
+          'live in the advanced hardware settings.'),
+        GMB.button('Advanced hardware…', function () {
+          if (GMB.openSettings) GMB.openSettings('hardware');
+        }, 'ghost')
       ])
     ]));
 
     // Each sub-view renders into its own section (a fresh element every switch).
     var section = h('div.hw-section');
     host.appendChild(section);
-    if (sub === 'gpio') GMB.views.pins.render(section);
-    else if (sub === 'power') GMB.views.wiringPower.render(section);
-    else if (sub === 'i2c') GMB.views.wiringI2c.render(section);
-    else if (sub === 'commissioning') GMB.views.commissioning.render(section);
+    if (sub === 'commissioning') GMB.views.commissioning.render(section);
     else GMB.views.wiring.render(section);
   }
+
+  // Let other views land on a specific sub-tab (the Finish step points at the
+  // commissioning checklist once the instrument has been applied).
+  GMB.openHardwareSub = function (id) {
+    if (SUBS.some(function (t) { return t.id === id; })) { sub = id; GMB.render(); }
+  };
 
   GMB.views.hardware = { render: render };
 })(window);

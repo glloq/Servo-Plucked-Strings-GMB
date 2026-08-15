@@ -483,6 +483,9 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .settings-section .muted { margin: 0 0 10px; }
 .settings-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 
+/* Scanned Wi-Fi networks: one full-width row per network. */
+.wifi-row { display: block; width: 100%; text-align: left; margin-bottom: 6px; min-height: 44px; }
+
 /* Compact mode toggle mirrored in the modal footer (the sidebar one is covered). */
 .mode-toggle.mini { flex: 0 0 auto; }
 .mode-toggle.mini button { flex: 0 0 auto; padding: 5px 12px; font-size: 12px; }
@@ -865,3 +868,202 @@ th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spa
 .ps-missing { stroke-dasharray: 5 4; opacity: .8; }
 .ps-warn { fill: var(--warn); font-weight: 700; }
 .commissioning-blocked { opacity: .55; }
+
+/* ==========================================================================
+   Progressive disclosure & the plain-language layer (UX audit)
+   ========================================================================== */
+
+/* ---- disclosure ("Advanced…", "Group tests…") ---------------------------- */
+.disclosure { margin-top: 10px; }
+.disclosure-toggle {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 0; background: transparent; color: var(--accent); cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; padding: 8px 4px; min-height: 40px;
+}
+.disclosure-toggle:hover { text-decoration: underline; }
+.disclosure-caret { font-size: 11px; }
+.disclosure-body {
+  margin-top: 6px; padding: 12px 14px;
+  border: 1px dashed var(--border); border-radius: 8px; background: var(--surface-2);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.disclosure-body > h3, .disclosure-body > h4 { margin: 4px 0 0; }
+
+/* ---- "Label: value ✓  [Change…]" ----------------------------------------- */
+.summary-line {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 12px; margin-top: 8px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+}
+.sl-label { font-size: 12px; color: var(--muted); font-weight: 600; min-width: 92px; }
+.sl-value { font-size: 14px; }
+.sl-flag { font-size: 13px; font-weight: 700; }
+.sl-flag.ok { color: var(--ok); }
+.sl-flag.bad { color: var(--error); }
+.btn.small { padding: 5px 10px; font-size: 12.5px; }
+.wiring-block { margin-top: 10px; }
+.invert-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ---- persistent alert (errors that must not vanish like a toast) --------- */
+.alert-host:empty { display: none; }
+.alert-host { padding: 12px 20px 0; max-width: 1100px; width: 100%; margin: 0 auto; }
+.alertbox {
+  border: 1px solid var(--error); border-left-width: 4px; border-radius: 8px;
+  background: var(--error-bg); color: var(--text); padding: 10px 14px;
+}
+.alertbox.warn { border-color: var(--warn); background: var(--warn-bg); }
+.alertbox-head { display: flex; align-items: center; gap: 10px; }
+.alertbox-close {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 20px; line-height: 1; padding: 0 4px; min-width: 32px; min-height: 32px;
+}
+.alertbox-list { margin: 6px 0 0; padding-left: 20px; font-size: 13px; }
+.alertbox-list li { margin: 3px 0; word-break: break-word; }
+
+/* ---- configuration health bar (visible on every step) -------------------- */
+.healthbar {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer;
+  padding: 10px 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.healthbar.good { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
+.healthbar.warn { border-color: var(--warn); background: var(--warn-bg); color: var(--warn); }
+.healthbar.bad { border-color: var(--error); background: var(--error-bg); color: var(--error); }
+.healthbar .muted { color: inherit; opacity: .8; font-weight: 500; }
+
+/* ---- designer: "what you are building" summary --------------------------- */
+.mech-summary { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+.ms-item {
+  display: flex; flex-direction: column; gap: 1px; min-width: 108px;
+  background: var(--surface-2); border-radius: 8px; padding: 9px 12px;
+}
+.ms-item strong { font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.ms-item span { font-size: 12px; color: var(--muted); }
+
+/* ---- danger zone (destructive actions, out of the normal path) ----------- */
+.danger-zone {
+  border: 1px solid var(--error); border-radius: 8px; padding: 12px 14px; margin-top: 12px;
+  background: color-mix(in srgb, var(--error) 6%, transparent);
+}
+.danger-zone h4 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--error); }
+
+/* ---- chip radio group (movement type) ------------------------------------ */
+.chip-radios { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-radio {
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 10px 14px; min-height: 44px; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+}
+.chip-radio:hover { border-color: var(--accent); }
+.chip-radio.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* ---- optional actuators (Strings step) ----------------------------------- */
+.opt-actuator {
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-top: 10px;
+  background: var(--surface-2);
+}
+.opt-actuator h4 { margin: 0; font-size: 14px; }
+
+/* ---- Test step ----------------------------------------------------------- */
+.check-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.check-item { font-size: 13px; font-weight: 600; }
+.check-item.good { color: var(--ok); }
+.check-item.bad { color: var(--error); }
+.testbench.testbench-primary .tb-actions .btn { font-size: 16px; padding: 14px 22px; }
+.test-plan { margin: 10px 0 0; padding-left: 22px; color: var(--muted); font-size: 13px; }
+.test-plan li { margin: 2px 0; }
+
+/* ---- Finish step: issues in plain language ------------------------------- */
+.issue { border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
+.issue.error { border-left-color: var(--error); background: var(--error-bg); }
+.issue.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.issue-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.issue-mark { font-weight: 800; }
+.issue.error .issue-mark { color: var(--error); }
+.issue.warn .issue-mark { color: var(--warn); }
+.issue-text { margin: 4px 0 0; font-size: 13px; }
+.issue-tech { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.issue-tech summary { cursor: pointer; }
+.issue-tech code { font-family: var(--mono); word-break: break-all; }
+
+.recap { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.recap-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.recap-node {
+  font-weight: 700; font-family: var(--mono); font-size: 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px;
+}
+.recap-arrow { color: var(--muted); }
+.commissioning-cta {
+  margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.commissioning-cta h4 { margin: 0 0 4px; font-size: 14px; }
+
+/* ---- Welcome (first run) -------------------------------------------------- */
+.welcome-card { text-align: center; padding: 34px 24px; }
+.welcome-title { margin: 0 0 8px; font-size: 28px; }
+.welcome-lead { max-width: 620px; margin: 0 auto 20px; color: var(--muted); font-size: 15px; }
+.welcome-card .preset-row { justify-content: center; }
+.welcome-card .row { justify-content: center; }
+.welcome-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.welcome-actions .btn { font-size: 15px; padding: 13px 24px; }
+.welcome-skip { margin: 22px 0 0; font-size: 13px; color: var(--muted); }
+.linkbtn {
+  border: 0; background: transparent; color: var(--accent); cursor: pointer;
+  font: inherit; font-size: 13px; text-decoration: underline; padding: 4px;
+}
+
+/* ==========================================================================
+   Accessibility: visible keyboard focus, touch targets, reduced motion
+   ========================================================================== */
+
+/* One focus ring for every interactive control, not only the fretboard cells. */
+.btn:focus-visible,
+.nav-item:focus-visible,
+.hamburger:focus-visible,
+.icon-btn:focus-visible,
+.step:focus-visible,
+.subtab:focus-visible,
+.settings-tab:focus-visible,
+.settings-close:focus-visible,
+.strtab:focus-visible,
+.fret-chip:focus-visible,
+.preset-card:focus-visible,
+.radio-card:focus-visible,
+.chip-radio:focus-visible,
+.fb-mode:focus-visible,
+.fb-root:focus-visible,
+.fb-chord:focus-visible,
+.mode-toggle button:focus-visible,
+.disclosure-toggle:focus-visible,
+.linkbtn:focus-visible,
+.alertbox-close:focus-visible,
+.healthbar:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Touch targets: the fret chips were 30 px, below any reasonable minimum. */
+.fret-chip { min-width: 44px; height: 44px; font-size: 13px; }
+.fret-chip.mini { min-width: 14px; width: 14px; height: 14px; padding: 0; }
+.fb-root { min-width: 42px; min-height: 42px; }
+.strtab { min-height: 42px; }
+.subtab, .settings-tab { min-height: 42px; }
+.angle-stepper .btn { min-width: 44px; min-height: 44px; }
+
+/* Respect the OS "reduce motion" setting: no pulsing badge, no sliding
+   toasts/panels, no vibrating strings. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .toast { opacity: 1; transform: none; }
+  .badge.mock { animation: none; }
+  .fb-string.vibrate { animation: none; }
+}

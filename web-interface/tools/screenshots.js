@@ -68,11 +68,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const step = async (id) => { await page.evaluate((s) => GMB.gotoSetupStep(s), id); await sleep(600); };
   const sub = async (label) => { await page.click('.subtab:text-is("' + label + '")'); await sleep(600); };
 
+  // The welcome screen only shows on a first run; stamp the flag first so the
+  // documented pages are the ones a configured instrument shows, then shoot the
+  // welcome screen on its own at the end.
+  await page.evaluate(() => GMB.markSetupComplete());
+
   console.log('Instrument');
   await view('fretboard');
   await shot('fretboard');
 
-  console.log('Setup');
+  console.log('Configure');
   await step('builder');
   await shot('wizard');
 
@@ -82,53 +87,69 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   if (await chip.count()) { await chip.click(); await sleep(500); }
   await shot('calibration');
 
-  await step('plucking');
+  await step('strings');
   await shot('calibration-plucking');
-  await step('midi');
-  await shot('midi');
-  await step('power');
-  await shot('power');
   await step('test');
   await shot('calibration-test');
-  await step('validation');
+  await step('finish');
   await shot('validation');
 
-  console.log('Wiring & GPIO');
+  console.log('Wiring');
   await view('hardware');
-  await sub('Harness');
+  await sub('Diagram');
   await shot('wiring');
-  await sub('Power & safety');
-  await shot('wiring-power');
-  await sub('I²C & PCA');
-  await shot('wiring-i2c');
-  await sub('GPIO pins');
-  await shot('pins');
   await sub('Commissioning');
   await shot('commissioning');
 
   console.log('Settings modal');
   await view('fretboard');                       // calm backdrop behind the overlay
-  await page.evaluate(() => GMB.openSettings('network'));
+  await page.evaluate(() => GMB.openSettings('device'));
   await sleep(800);
   await shot('network', { fit: false });
-  await page.click('.settings-tab:text-is("Advanced")');
-  await sleep(1200);
-  await shot('settings-advanced', { fit: false });
 
-  // The Advanced tab scrolls; bring each card into view for its own capture.
-  async function scrollTo(heading) {
-    await page.evaluate((t) => {
-      const body = document.getElementById('settings-body');
-      const target = Array.from(body.querySelectorAll('h2,h3'))
-        .find((el) => el.textContent.includes(t));
-      if (target) body.scrollTop = target.offsetTop - body.offsetTop - 12;
-    }, heading);
-    await sleep(500);
+  // Each settings tab, with its folded sections opened where the documentation
+  // needs to show what is inside them.
+  async function tab(label) {
+    await page.click('.settings-tab:text-is("' + label + '")');
+    await sleep(900);
   }
-  await scrollTo('GMB identity');
-  await shot('sysex', { fit: false });
-  await scrollTo('MIDI monitor');
+  async function unfold(label) {
+    const t = page.locator('.disclosure-toggle', { hasText: label }).first();
+    if (await t.count() && (await t.getAttribute('aria-expanded')) === 'false') {
+      await t.click();
+      await sleep(900);
+    }
+  }
+  await tab('MIDI');
+  await unfold('MIDI parameters');
+  await shot('midi', { fit: false });
+
+  await tab('Advanced hardware');
+  await shot('settings-hardware', { fit: false });
+  await unfold('GPIO pins');
+  await shot('pins', { fit: false });
+  await unfold('I\u00b2C addressing');
+  await shot('wiring-i2c', { fit: false });
+  await unfold('Power & safety');
+  await shot('wiring-power', { fit: false });
+
+  await tab('Security');
+  await shot('settings-security', { fit: false });
+  await tab('Diagnostics');
   await shot('midi-monitor', { fit: false });
+  await tab('Developer');
+  await shot('sysex', { fit: false });
+
+  // Close, then show the first-run welcome screen on its own.
+  await page.keyboard.press('Escape');
+  await sleep(400);
+  // The hash still points at the last page visited; a genuine first run has none.
+  await page.evaluate(() => { GMB.resetFirstRun(); location.hash = ''; });
+  await page.goto(URL);
+  await page.waitForSelector('.welcome-card');
+  await sleep(600);
+  await shot('welcome');
+  await page.evaluate(() => GMB.markSetupComplete());
 
   await browser.close();
 

@@ -115,35 +115,56 @@ fit within 16 channels), up to **8 PCA boards per I²C bus** (addresses
 ## 🖥️ Web interface
 
 All configuration happens in the browser (served by the ESP32, or by opening
-`web-interface/index.html` in **demo mode**). The interface is just **three main
-pages** — Instrument, Setup, Wiring & GPIO. The **whole instrument creation is one
-ordered flow on the Setup page**; only device Wi-Fi and the diagnostic tools live in
-the gear modal. Detailed overview of every part:
-[`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md#30-the-interface-at-a-glance).
+`web-interface/index.html` in **demo mode**). The interface follows one rule:
+**a creation screen only shows the decisions the software cannot take itself**. You
+describe the mechanics of your machine; the software derives the servos, the PCA9685
+boards, the channels, the GPIO map, the timing and the MIDI mapping. All of it stays
+changeable — behind a *Change…* or an *Advanced* disclosure.
+
+Three main pages — **Instrument**, **Configure**, **Wiring** — plus the gear menu
+(device & Wi-Fi, MIDI, advanced hardware, security, diagnostics, developer). Detailed
+overview: [`docs/WEB_INTERFACE.md`](docs/WEB_INTERFACE.md).
+
+**First run** — until something has been configured, the interface opens on a welcome
+screen that leads straight into creation (a template, or a custom instrument). Once a
+configuration has been applied, **Instrument** becomes the home page again.
 
 **Instrument** — a GMB-style playable neck: a note-name circle on each equipped
 fret and open string, a big emergency STOP + Re-arm, a play-mode selector, and a
 chord bar that strums a chord across several strings.
 <p align="center"><img src="img/screenshots/fretboard.png" alt="Instrument page" width="90%"/></p>
 
-**Setup** — the complete instrument creation in one flow: **Instrument → Frets →
-Plucking → MIDI → Timing → Test → Validation**. Define the instrument (identity,
-mechanics, ESP32 board, wiring), calibrate what you defined by hand (contact / stroke
-angles + rotation direction), set its MIDI behaviour and timing, then test and save.
-<p align="center"><img src="img/screenshots/wizard.png" alt="Setup page — Instrument step" width="90%"/></p>
-<p align="center"><img src="img/screenshots/calibration.png" alt="Setup page — Frets calibration" width="90%"/></p>
+**Configure** — five steps: **Instrument → Frets → Strings → Test → Finish**. Step 1
+is a real *instrument designer*: the tuning, then three mechanical questions —
+*how are the frets actuated?* (one servo per fret · one servo for two frets · open
+strings only · custom), *how is the string played?* (single pick · back-and-forth
+pick · strum), *how is the string stopped?* (let it ring · the plectrum · a damper ·
+a descent servo). Each card shows the servo count it implies, and the software
+answers with a summary of what it just generated.
+<p align="center"><img src="img/screenshots/wizard.png" alt="Configure — Instrument step" width="90%"/></p>
 
-**Wiring & GPIO** — the electrical installation assistant, in **five sub-tabs**:
+The calibration steps show only the positions you have to find with your own eyes —
+rest and press — with a test, the note, and *Next fret →*. The wiring is one line
+(`PCA #2 · CH7 ✓  Change…`).
+<p align="center"><img src="img/screenshots/calibration.png" alt="Configure — Frets calibration" width="90%"/></p>
 
-| Sub-tab | Content |
-|---------|---------|
-| **Harness** | the current instrument's ESP32 + PCA9685 harness (one or two I²C buses, addresses, per-pin string·role, live conflict checks, SVG export) plus the **power-wiring** advice (star wiring, one bulk cap per board, 100 nF ceramic, fail-safe `/OE`) |
-| **Power & safety** | the declared safety chain (`/OE` pull-up, gated enable stage, E-stop contactor, master switch, fuses), the **power tree** as SVG (undeclared parts drawn dashed) and the **current estimator**: per-branch **governed** peak (under the power caps) *and* **absolute** peak (all servos at stall), fuse guide, bulk cap, PSU requirement, wire voltage drop — wiring and PSU sized on the absolute figure, since the governor is software |
-| **I²C & PCA** | each board's address and **A0–A2 jumpers**, and the bus **pull-up budget**: nothing is assumed — a board stays *unknown* until you declare what is fitted, then the **equivalent per line** is graded (target 2.2–4.7 kΩ) |
-| **GPIO pins** | pin assignment and the **graphical pinout** of the chosen ESP32 board (S3-DevKitC-1 v1.0 / v1.1, WROOM-32, DevKit v1) with the used pins highlighted, plus the **hardware E-stop** declaration (NC wiring recommended + its `ESTOP` pin) |
-| **Commissioning** | the staged **power-up checklist** (each stage is a real gate — the next stage's boxes stay disabled until the previous one is complete, with an explicit override), progress kept per instrument in the browser |
 
+**Wiring** — the harness is **generated**, not configured: the current instrument's
+ESP32 + PCA9685 diagram (one or two I²C buses, addresses, per-pin string·role, live
+conflict checks, SVG export) with the **power-wiring** advice (star wiring, one bulk
+cap per board, 100 nF ceramic, fail-safe `/OE`), then the staged **commissioning**
+checklist where each stage is a real gate — the next stage's boxes stay disabled
+until the previous one is complete, with an explicit override.
 <p align="center"><img src="img/screenshots/wiring.png" alt="ESP32 + PCA9685 wiring map" width="90%"/></p>
+
+**⚙ Advanced hardware** — everything the generator normally decides stays one click
+away: the ESP32 board, PCA9685 capacity and I²C buses, responsiveness (fast /
+balanced / limited power supply, with every exact value), the GPIO grid and the
+hardware E-stop, I²C addressing and the pull-up budget, and the power & safety
+dossier whose estimator gives the per-branch **governed** peak (under the power caps)
+*and* the **absolute** peak (all servos at stall) — wiring and PSU are sized on the
+absolute figure, since the governor is software. The I²C pull-up budget assumes
+nothing: a board stays *unknown* until you declare what is fitted.
 <p align="center"><img src="img/screenshots/wiring-power.png" alt="Power &amp; safety — power tree and current estimator" width="90%"/></p>
 <p align="center"><img src="img/screenshots/pins.png" alt="GPIO pins + board pinout" width="90%"/></p>
 
@@ -223,8 +244,9 @@ Servo-Plucked-Strings-GMB/
 │   ├── src/platform/esp32/ ESP32 adapters (Wi-Fi, web server, ServoBank, storage)
 │   ├── src/main.cpp        Hardware integration + servo-per-fret scheduler
 │   └── test/               Native tests (g++) + hostcheck + profilecheck
-├── web-interface/          Web interface (3 pages: Instrument, Setup,
-│                           Wiring & GPIO + gear modal for device/diagnostics)
+├── web-interface/          Web interface (3 pages: Instrument, Configure,
+│                           Wiring + gear modal: device, MIDI, advanced
+│                           hardware, security, diagnostics, developer)
 ├── instrument-profiles/    Ready-made profiles (ukulele + geared variant, guitar,
 │                           bass, mandolin, banjo)
 ├── board-profiles/         ESP32 board profiles (S3, WROOM-32, DevKit v1)

@@ -1,0 +1,4 @@
+
+# Python bytecode from the HIL harness
+__pycache__/
+*.pyc

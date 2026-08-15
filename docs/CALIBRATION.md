@@ -4,7 +4,7 @@
 > frette possède son propre servo-doigt. La calibration consiste donc à régler,
 > pour chaque doigt, sa **position de contact** et son **sens de rotation**, puis
 > le geste de **grattage**. Tout se fait depuis l'interface web, sur la page
-> **Setup** — étapes **Frets** (doigts) puis **Grattage / Plucking**.
+> **Configurer** — étapes **Frettes** (doigts) puis **Cordes** (grattage).
 >
 > Documents liés : [`PIN_CONFIGURATION.md`](PIN_CONFIGURATION.md) ·
 > [`SAFETY.md`](SAFETY.md) · [`WEB_INTERFACE.md`](WEB_INTERFACE.md) ·
@@ -68,7 +68,7 @@ de servo. Pour chaque frette équipée :
    (`inverted`).
 4. **Vérifier la note** : bouton **▶ Play** — joue la note (`openNote + fret`) et on
    écoute la justesse.
-5. **Sauvegarder** (*Save & publish*).
+5. **Sauvegarder** (*Save and apply*).
 
 Chaque appui sur **−** / **+** envoie le servo à l'angle exact affiché : le réglage
 est visible en direct sur la mécanique (instrument **armé**).
@@ -93,7 +93,7 @@ gardent le doigt simple ; les deux mécanismes se mélangent.
 
 ## 4. Calibration guidée (étape Frets)
 
-L'étape *Setup → Frets* intègre la calibration guidée, **frette par frette**, pour
+L'étape *Configurer → Frettes* intègre la calibration guidée, **frette par frette**, pour
 une corde choisie (bandeau **String 1 … String N**) : cliquer une frette sur la bande
 de couverture ouvre son éditeur inline. Chaque frette enchaîne :
 
